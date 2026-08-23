@@ -43,7 +43,8 @@ class SystemReliabilityMixin:
         self.backup_table.pack(side='left',fill='both',expand=True,padx=(12,0),pady=(0,12))
         sy.pack(side='right',fill='y',padx=(0,12),pady=(0,12))
 
-        self.health_table=ttk.Treeview(right,columns=('check','status','detail','action'),show='headings',style='Dark.Treeview',selectmode='browse')
+        health_shell=tk.Frame(right,bg=self._c('surface'));health_shell.pack(fill='both',expand=True,padx=12,pady=(0,12))
+        self.health_table=ttk.Treeview(health_shell,columns=('check','status','detail','action'),show='headings',style='Dark.Treeview',selectmode='browse')
         for c,title,w in [('check','Check',145),('status','Status',70),('detail','Details',255),('action','Action',80)]:
             self.health_table.heading(c,text=title);self.health_table.column(c,width=w,anchor='w',stretch=(c=='detail'))
         self.health_table.bind('<Double-1>',self._system_open_health_item)
@@ -51,7 +52,6 @@ class SystemReliabilityMixin:
         self.health_table.tag_configure('pass',foreground=self._c('green'),background=self._c('surface'))
         self.health_table.tag_configure('warn',foreground=self._c('orange'),background=self._c('surface'))
         self.health_table.tag_configure('fail',foreground=self._c('red'),background=self._c('surface'))
-        health_shell=tk.Frame(right,bg=self._c('surface'));health_shell.pack(fill='both',expand=True,padx=12,pady=(0,12))
         health_v=ttk.Scrollbar(health_shell,orient='vertical',command=self.health_table.yview)
         health_h=ttk.Scrollbar(health_shell,orient='horizontal',command=self.health_table.xview)
         self.health_table.configure(yscrollcommand=health_v.set,xscrollcommand=health_h.set)
