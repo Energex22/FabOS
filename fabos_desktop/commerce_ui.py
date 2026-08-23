@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 from datetime import date, timedelta
 
 # Uses COLORS and helper methods from the main desktop class.
@@ -446,6 +446,31 @@ class CommerceMixin:
         for label,var,vals in [('Method',method,['pickup','shipping']),('Status',status,['pending','ready_for_pickup','picked_up','packed','shipped','delivered'])]:
             tk.Label(body,text=label,bg=self._c('surface'),fg=self._c('muted')).pack(anchor='w',padx=16,pady=(8,2))
             ttk.Combobox(body,textvariable=var,values=vals,state='readonly').pack(fill='x',padx=16)
+        def use_packaging_supply():
+            items=self.core.supplies.list()
+            if not items:return messagebox.showinfo('Packaging','No packaging/supply items exist yet. Add them under Filament → Packaging & Supplies.',parent=win)
+            options={('%s — %g %s available'%(r['name'],r['quantity'],r['unit'])):r for r in items}
+            pick=tk.Toplevel(win);pick.title('Use Packaging Supply');pick.geometry('480x280');pick.configure(bg=self._c('bg'));pick.transient(win);pick.grab_set()
+            box=self._card(pick,'Packaging Usage');box.pack(fill='both',expand=True,padx=14,pady=14)
+            choice=tk.StringVar(value=next(iter(options)));qty=tk.StringVar(value='1')
+            tk.Label(box,text='Supply',bg=self._c('surface'),fg=self._c('muted')).pack(anchor='w',padx=14,pady=(10,3))
+            ttk.Combobox(box,textvariable=choice,values=list(options),state='readonly').pack(fill='x',padx=14)
+            tk.Label(box,text='Quantity Used',bg=self._c('surface'),fg=self._c('muted')).pack(anchor='w',padx=14,pady=(10,3))
+            self._entry(box,qty,20).pack(anchor='w',padx=14,ipady=5)
+            def save_usage():
+                try:
+                    row=options[choice.get()];amount=float(qty.get() or 0)
+                    if amount<=0:raise ValueError('Quantity must be greater than zero.')
+                    if amount>float(row['quantity'] or 0):raise ValueError('Not enough supply inventory remains.')
+                    self.core.supplies.adjust(row['id'],-amount,'order',oid,'Packaging used for order')
+                    self.core.operations.log('supply.used','Packaging used',
+                        '%s × %g'%(row['name'],amount),'Orders',oid)
+                    pick.destroy()
+                except Exception as exc:messagebox.showerror('Packaging',str(exc),parent=pick)
+            self._button(box,'Use Supply',save_usage,True).pack(side='right',padx=14,pady=14)
+            self._button(box,'Cancel',pick.destroy).pack(side='right',pady=14)
+
+        self._button(body,'Use Packaging Supply',use_packaging_supply).pack(anchor='e',padx=14,pady=(4,2))
         for label,var in [('Carrier',carrier),('Tracking Number',tracking),('Destination',destination),
                           ('Package Weight (oz)',weight),('Length (in)',length),('Width (in)',width),('Height (in)',height),
                           ('Shipping Cost ($)',cost)]:

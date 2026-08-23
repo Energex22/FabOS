@@ -9,11 +9,14 @@ class SystemReliabilityMixin:
         self._button(bar,'Restore Selected',self._system_restore_backup).pack(side='left',padx=7)
         self._button(bar,'Open Backup Folder',self._system_open_backup_folder).pack(side='left')
         self._button(bar,'Run Health Check',self._system_refresh_health).pack(side='left',padx=7)
+        self._button(bar,'Test Latest Backup',self._system_test_backup).pack(side='left')
+        self._button(bar,'Run Beta Self-Test',self._system_beta_self_test,True).pack(side='left',padx=7)
+        self._button(bar,'Export Diagnostics',self._system_export_diagnostics).pack(side='left')
         self._button(bar,'Setup Wizard',self._run_setup_wizard).pack(side='left')
 
         metrics=tk.Frame(self.content,bg=self._c('bg'));metrics.pack(fill='x',pady=(0,10))
         backups=self.core.backups.list()
-        checks=self.core.operations.system_ready()
+        checks=self.core.reliability.health_safe()
         pass_count=sum(1 for x in checks if x['status']=='pass')
         warn_count=sum(1 for x in checks if x['status']=='warn')
         fail_count=sum(1 for x in checks if x['status']=='fail')
@@ -40,9 +43,11 @@ class SystemReliabilityMixin:
         self.backup_table.pack(side='left',fill='both',expand=True,padx=(12,0),pady=(0,12))
         sy.pack(side='right',fill='y',padx=(0,12),pady=(0,12))
 
-        self.health_table=ttk.Treeview(right,columns=('check','status','detail'),show='headings',style='Dark.Treeview')
-        for c,title,w in [('check','Check',150),('status','Status',75),('detail','Details',280)]:
+        self.health_table=ttk.Treeview(right,columns=('check','status','detail','action'),show='headings',style='Dark.Treeview',selectmode='browse')
+        for c,title,w in [('check','Check',145),('status','Status',70),('detail','Details',255),('action','Action',80)]:
             self.health_table.heading(c,text=title);self.health_table.column(c,width=w,anchor='w',stretch=(c=='detail'))
+        self.health_table.bind('<Double-1>',self._system_open_health_item)
+        self.health_table.bind('<Return>',self._system_open_health_item)
         self.health_table.tag_configure('pass',foreground=self._c('green'),background=self._c('surface'))
         self.health_table.tag_configure('warn',foreground=self._c('orange'),background=self._c('surface'))
         self.health_table.tag_configure('fail',foreground=self._c('red'),background=self._c('surface'))
@@ -78,16 +83,112 @@ class SystemReliabilityMixin:
     def _system_refresh_health(self):
         if not getattr(self,'health_table',None):return
         self.health_table.delete(*self.health_table.get_children())
-        for i,row in enumerate(self.core.reliability.health()):
-            self.health_table.insert('','end',iid='health_%d'%i,values=(
-                row['name'],row['status'].upper(),row['detail']),tags=(row['status'],))
+        self.health_table.insert('','end',iid='health_loading',
+                                 values=('System Health','CHECKING','Running diagnostics…',''),tags=('warn',))
+        token=getattr(self,'_health_refresh_token',0)+1
+        self._health_refresh_token=token
+
+        def worker():
+            try:
+                checks=self.core.reliability.health_safe()
+            except Exception as exc:
+                try:self.core.error_log.error("Health refresh failed",exc)
+                except Exception:pass
+                checks=[{'name':'System Health','status':'fail','detail':'Health engine failed: %s'%exc}]
+            def apply():
+                if token!=getattr(self,'_health_refresh_token',None):return
+                if not getattr(self,'health_table',None):return
+                try:self.health_table.delete(*self.health_table.get_children())
+                except Exception:return
+                if not checks:
+                    checks=[{'name':'System Health','status':'warn',
+                             'detail':'No checks were returned. Open Logs & Version and export diagnostics.'}]
+                self._health_rows={}
+                for i,row in enumerate(checks):
+                    status=row.get('status','warn')
+                    target=self._system_health_target(row.get('name',''))
+                    iid='health_%d'%i
+                    self._health_rows[iid]={'row':row,'target':target}
+                    self.health_table.insert('','end',iid=iid,
+                        values=(row.get('name','Unknown'),status.upper(),row.get('detail',''),
+                                'Open →' if target else ''),tags=(status,))
+            self.after(0,apply)
+
+        import threading
+        threading.Thread(target=worker,name='FabOS-HealthCheck',daemon=True).start()
+
+
+    def _system_health_target(self,name):
+        key=str(name or '').lower()
+        if 'printer:' in key or 'octoprint' in key:return 'Printers'
+        if 'cura' in key:return 'Settings'
+        if 'backup' in key or 'database integrity' in key or 'migration' in key:return 'Backup & Health'
+        if 'design vault' in key or 'catalog' in key or 'g-code' in key:return 'Products'
+        if 'filament' in key or 'packaging' in key or 'supply' in key:return 'Filament'
+        if 'error log' in key or 'logging' in key or 'crash recovery' in key:return 'Logs & Version'
+        if 'workflow' in key or 'action center' in key:return 'Dashboard'
+        if 'disk' in key or 'data directory' in key:return 'Settings'
+        return None
+
+    def _system_open_health_item(self,_event=None):
+        sel=self.health_table.selection() if getattr(self,'health_table',None) else ()
+        if not sel:return
+        data=getattr(self,'_health_rows',{}).get(sel[0],{})
+        target=data.get('target')
+        if not target:return
+        self.show_page(target)
+
+    def _system_beta_self_test(self):
+        win=tk.Toplevel(self);win.title('FabOS Beta Self-Test');win.geometry('760x520')
+        win.configure(bg=self._c('bg'));win.transient(self)
+        card=self._card(win,'Beta Readiness Self-Test');card.pack(fill='both',expand=True,padx=16,pady=16)
+        table=ttk.Treeview(card,columns=('test','status','detail'),show='headings',style='Dark.Treeview')
+        for c,label,w in [('test','Test',190),('status','Status',80),('detail','Details',420)]:
+            table.heading(c,text=label);table.column(c,width=w,anchor='w',stretch=(c=='detail'))
+        table.pack(fill='both',expand=True,padx=12,pady=(0,12))
+        table.insert('','end',iid='running',values=('Beta Readiness','RUNNING','Testing database, backup, G-code and application health…'))
+        def worker():
+            try:results=self.core.beta_self_test.run()
+            except Exception as exc:
+                try:self.core.error_log.error('Beta self-test failed',exc)
+                except Exception:pass
+                results=[{'name':'Beta self-test','status':'fail','detail':str(exc)}]
+            def apply():
+                if not win.winfo_exists():return
+                table.delete(*table.get_children())
+                for i,row in enumerate(results):
+                    table.insert('','end',iid='test_%d'%i,values=(row['name'],row['status'].upper(),row['detail']),tags=(row['status'],))
+                table.tag_configure('pass',foreground=self._c('green'));table.tag_configure('fail',foreground=self._c('red'))
+            self.after(0,apply)
+        import threading
+        threading.Thread(target=worker,name='FabOS-BetaSelfTest',daemon=True).start()
+
+    def _system_test_backup(self):
+        try:
+            result=self.core.backups.test_latest()
+            if result.get('valid'):messagebox.showinfo('Backup Test','✓ Latest backup is restorable.\n\n%s'%result.get('detail',''))
+            else:messagebox.showerror('Backup Test','Latest backup failed validation:\n\n%s'%result.get('detail',''))
+        except Exception as exc:
+            self.core.error_log.error('Backup validation failed',exc);messagebox.showerror('Backup Test',str(exc))
+
+    def _system_export_diagnostics(self):
+        try:
+            path=self.core.diagnostics.export()
+            messagebox.showinfo('Diagnostics Exported','Diagnostics saved to:\n\n%s\n\nSecrets are redacted.'%path)
+        except Exception as exc:
+            self.core.error_log.error('Diagnostics export failed',exc);messagebox.showerror('Diagnostics',str(exc))
 
     def _system_create_backup(self):
         try:
             path=self.core.backups.create('manual')
+            validation=self.core.backups.validate_backup(path)
             self.core.backups.prune(int(float(self.core.shop_settings.get('backup_retention','30'))))
             self._system_refresh_backups();self._system_refresh_health()
-            messagebox.showinfo('Backup Created','FabOS backup created:\n\n%s'%path)
+            if validation.get('valid'):
+                messagebox.showinfo('Backup Created','FabOS backup created and validated:\n\n%s'%path)
+            else:
+                self.core.error_log.warning('Manual backup validation failed',validation.get('detail',''))
+                messagebox.showwarning('Backup Created','Backup was created but validation reported:\n\n%s'%validation.get('detail',''))
         except Exception as exc:messagebox.showerror('Backup',str(exc))
 
     def _system_restore_backup(self):

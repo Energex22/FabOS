@@ -18,14 +18,26 @@ class ProductionMixin:
             ("Assign", self._production_assign), ("Start", lambda: self._production_status("printing")),
             ("Complete", lambda: self._production_status("completed")),
             ("Failed", self._production_fail),
+            ("Retry Failed", self._production_retry_failed),
             ("Reprint", self._production_reprint),
             ("G-code", self._production_gcode), ("Details", self._production_details),
         ]:
             self._button(toolbar, label, command).pack(side="left", padx=(7, 0))
 
+        self.production_view=tk.StringVar(value="active")
+        tabs=tk.Frame(self.content,bg=self._c("bg"));tabs.pack(fill="x",pady=(0,8))
+        self.production_tab_buttons={}
+        for label,value in [("Active Production","active"),("Production History","history")]:
+            button=tk.Button(
+                tabs,text=label,bd=0,padx=18,pady=9,font=("Segoe UI",9,"bold"),
+                command=lambda v=value:self._switch_production_view(v))
+            button.pack(side="left",padx=(0,6))
+            self.production_tab_buttons[value]=button
+        self._style_production_tabs()
+
         summary = tk.Frame(self.content, bg=self._c("bg"))
         summary.pack(fill="x", pady=(0, 10))
-        jobs = self.core.production.list_jobs()
+        jobs = self.core.production.list_jobs(group='active')
         counts = {}
         for row in jobs:
             counts[row["status"]] = counts.get(row["status"], 0) + 1
@@ -44,18 +56,28 @@ class ProductionMixin:
         row.pack(fill="x", padx=14, pady=10)
         self.production_query = tk.StringVar()
         self.production_status_filter = tk.StringVar(value="All")
+        self.production_quick_filter = tk.StringVar(value="All Active")
         tk.Label(row, text="Search", bg=self._c("surface"), fg=self._c("muted")).pack(side="left")
-        entry = self._entry(row, self.production_query, 28)
-        entry.pack(side="left", padx=(7, 16), ipady=6)
+        entry = self._entry(row, self.production_query, 24)
+        entry.pack(side="left", padx=(7, 12), ipady=6)
         entry.bind("<KeyRelease>", lambda _e: self._refresh_production())
-        tk.Label(row, text="Status", bg=self._c("surface"), fg=self._c("muted")).pack(side="left")
-        status = ttk.Combobox(
+        tk.Label(row, text="View", bg=self._c("surface"), fg=self._c("muted")).pack(side="left")
+        self.production_quick_combo=ttk.Combobox(
+            row,textvariable=self.production_quick_filter,
+            values=["All Active","Ready","Printing","Needs Attention","Failed"],
+            state="readonly",width=16)
+        self.production_quick_combo.pack(side="left",padx=7)
+        self.production_quick_combo.bind("<<ComboboxSelected>>",lambda _e:self._refresh_production())
+        tk.Label(row, text="Status", bg=self._c("surface"), fg=self._c("muted")).pack(side="left",padx=(10,0))
+        self.production_status_combo = ttk.Combobox(
             row, textvariable=self.production_status_filter,
-            values=["All", "queued", "scheduled", "printing", "paused", "completed", "failed", "cancelled"],
-            state="readonly", width=15
+            values=["All", "queued", "scheduled", "printing", "paused", "failed"],
+            state="readonly", width=13
         )
-        status.pack(side="left", padx=7)
-        status.bind("<<ComboboxSelected>>", lambda _e: self._refresh_production())
+        self.production_status_combo.pack(side="left", padx=7)
+        self.production_status_combo.bind("<<ComboboxSelected>>", lambda _e: self._refresh_production())
+        self.production_count=tk.Label(row,text="",bg=self._c("surface"),fg=self._c("muted"))
+        self.production_count.pack(side="right")
 
         split = tk.PanedWindow(
             self.content, orient="horizontal", bg=self._c("bg"),
@@ -65,8 +87,8 @@ class ProductionMixin:
 
         left = self._card(split, "Production Queue")
         right = self._card(split, "Selected Job")
-        split.add(left, minsize=670, stretch="always")
-        split.add(right, minsize=300, stretch="always")
+        split.add(left, minsize=610, stretch="always")
+        split.add(right, minsize=350, stretch="always")
 
         columns = ("job", "order", "product", "printfile", "printer", "status", "estimate", "material")
         self.production_table = ttk.Treeview(
@@ -74,19 +96,19 @@ class ProductionMixin:
         )
         labels = {"job": "Job", "order": "Order", "product": "Product", "printfile":"Print File",
                   "printer": "Printer", "status": "Status", "estimate": "Estimate", "material": "Material"}
-        widths = {"job": 70, "order": 95, "product": 190, "printfile":120, "printer": 125,
-                  "status": 82, "estimate": 80, "material": 110}
+        widths = {"job": 58, "order": 84, "product": 155, "printfile":100, "printer": 105,
+                  "status": 70, "estimate": 72, "material": 90}
         for col in columns:
             self.production_table.heading(col, text=labels[col])
-            self.production_table.column(col, width=widths[col], anchor="w")
+            self.production_table.column(
+                col,width=widths[col],anchor="w",
+                stretch=(col=="product"))
         for key, color in self.STATUS_COLORS.items():
             self.production_table.tag_configure(key, foreground=color, background=self._c("surface"))
         sy = ttk.Scrollbar(left, orient="vertical", command=self.production_table.yview)
-        sx = ttk.Scrollbar(left, orient="horizontal", command=self.production_table.xview)
-        self.production_table.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
+        self.production_table.configure(yscrollcommand=sy.set)
         self.production_table.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=(0, 12))
         sy.pack(side="right", fill="y", padx=(0, 12), pady=(0, 12))
-        sx.pack(side="bottom", fill="x", padx=12, pady=(0, 12))
         self.production_table.bind("<<TreeviewSelect>>", lambda _e: self._production_selected_panel())
         self.production_table.bind("<Double-1>", lambda _e: self._production_details())
         self.production_table.bind("<Button-3>", self._production_context_menu)
@@ -138,6 +160,7 @@ class ProductionMixin:
         menu.add_separator()
         menu.add_command(label='Mark Completed',command=lambda:self._production_status('completed'))
         menu.add_command(label='Record Failed Print',command=self._production_fail)
+        menu.add_command(label='Retry Failed Print',command=self._production_retry_failed)
         try:menu.tk_popup(event.x_root,event.y_root)
         finally:
             try:menu.grab_release()
@@ -159,19 +182,60 @@ class ProductionMixin:
             return None
         return selected[0]
 
+    def _switch_production_view(self,view):
+        self.production_view.set(view)
+        self.production_status_filter.set("All")
+        self.production_quick_filter.set("All Active" if view=="active" else "All History")
+        if view=="active":
+            self.production_quick_combo.configure(values=["All Active","Ready","Printing","Needs Attention","Failed"])
+            self.production_status_combo.configure(values=["All","queued","scheduled","printing","paused","failed"])
+        else:
+            self.production_quick_combo.configure(values=["All History","Completed","Cancelled"])
+            self.production_status_combo.configure(values=["All","completed","cancelled"])
+        self._style_production_tabs()
+        self._refresh_production()
+
+    def _style_production_tabs(self):
+        active=self.production_view.get()
+        for value,button in self.production_tab_buttons.items():
+            selected=value==active
+            button.configure(
+                bg=self._c("purple") if selected else self._c("surface_alt"),
+                fg="white" if selected else self._c("text"),
+                activebackground=self._c("purple_dark") if selected else self._c("border"),
+                activeforeground="white")
+
     def _refresh_production(self):
         if not getattr(self, "production_table", None):
             return
         self.production_table.delete(*self.production_table.get_children())
-        rows = self.core.production.list_jobs(
+        group=self.production_view.get() if getattr(self,"production_view",None) else "active"
+        rows = list(self.core.production.list_jobs(
             self.production_query.get().strip(),
             self.production_status_filter.get(),
-        )
+            group=group
+        ))
+        quick=self.production_quick_filter.get() if getattr(self,"production_quick_filter",None) else ""
+        display=[]
         for row in rows:
+            try:readiness=self.core.production.job_print_readiness(row["id"],self.core.design_vault)
+            except Exception:readiness={"ready":False,"state":"attention","reason":"Check print file"}
+            status=str(row["status"] or "").lower()
+            include=True
+            if group=="active":
+                if quick=="Printing":include=status in ("printing","paused")
+                elif quick=="Failed":include=status=="failed"
+                elif quick=="Ready":include=status in ("queued","scheduled") and readiness.get("ready")
+                elif quick=="Needs Attention":
+                    include=(status in ("queued","scheduled") and not readiness.get("ready")) or status=="failed"
+            else:
+                if quick=="Completed":include=status=="completed"
+                elif quick=="Cancelled":include=status=="cancelled"
+            if include:display.append((row,readiness))
+
+        for row,readiness in display:
             minutes = int(row["estimated_minutes"] or 0)
             estimate = "%dh %02dm" % (minutes // 60, minutes % 60) if minutes else "—"
-            try:readiness=self.core.production.job_print_readiness(row["id"],self.core.design_vault)
-            except Exception:readiness={"state":"attention","reason":"Check print file"}
             file_text={"gcode":"G-code Ready","stl":"STL Ready","attention":"Needs Attention"}.get(
                 readiness.get("state"),"Check File")
             self.production_table.insert(
@@ -180,6 +244,9 @@ class ProductionMixin:
                         row["printer_name"], row["status"].title(), estimate, row["spool_name"]),
                 tags=(row["status"],),
             )
+        if getattr(self,"production_count",None):
+            label="active job" if group=="active" else "history job"
+            self.production_count.configure(text="%d %s%s"%(len(display),label,"" if len(display)==1 else "s"))
         self._production_selected_panel()
 
     def _production_selected_panel(self):
@@ -338,6 +405,24 @@ class ProductionMixin:
             except Exception:pass
             win.destroy();self._refresh_production()
         self._button(body,"Record Failed Print",save,True).pack(anchor="e",padx=16,pady=12)
+
+    def _production_retry_failed(self):
+        job_id=self._selected_production_id()
+        if not job_id:return
+        job=self.core.production.get(job_id)
+        if str(job["status"]).lower()!="failed":
+            return messagebox.showinfo("Retry Print","Select a failed Production job first.")
+        if not job["product_id"]:
+            return messagebox.showwarning("Retry Print","The failed job has no Catalog product attached.")
+        try:
+            readiness=self.core.production.job_print_readiness(job_id,self.core.design_vault)
+            if not readiness.get("ready"):
+                return messagebox.showwarning("Retry Print",readiness.get("reason","The product needs a printable file."))
+            self._print_selected_product(
+                product_id=job["product_id"],printer_id=job["printer_id"],spool_id=job["spool_id"],
+                existing_job_id=job_id,preferred_gcode=readiness.get("gcode"))
+        except Exception as exc:
+            messagebox.showerror("Retry Print",str(exc))
 
     def _production_reprint(self):
         job_id=self._selected_production_id()

@@ -60,6 +60,20 @@ class ProductPrintMixin:
             bounds=validation.get("bounds") or {}
             gmeta=self.core.cura.gcode_metadata(gcode,spool["material"])
             targets=self.core.cura.gcode_heater_targets(gcode)
+            try:
+                self.core.gcode_verification.verify(
+                    gcode,product_id=product_id,material_hint=spool["material"],
+                    printer_name=printer["name"])
+            except Exception as _verify_exc:
+                try:self.core.error_log.warning("G-code verification registry update failed",str(_verify_exc))
+                except Exception:pass
+            try:
+                self.core.gcode_verification.verify(
+                    gcode,product_id=product_id,material_hint=spool["material"],
+                    printer_name=printer["name"])
+            except Exception as _verify_exc:
+                try:self.core.error_log.warning("G-code verification registry update failed",str(_verify_exc))
+                except Exception:pass
             if not self._filament_check_for_print(spool,gmeta.get("filament_g"),parent):
                 return
 
@@ -521,6 +535,20 @@ class ProductPrintMixin:
 
                     validation=self.core.cura.validate_print_gcode(output)
                     bounds=validation.get('bounds') or {}
+                    if validation.get('valid'):
+                        try:self.core.gcode_verification.verify(
+                            output,product_id=product_id,material_hint=spool['material'],
+                            printer_name=printer['name'])
+                        except Exception as _verify_exc:
+                            try:self.core.error_log.warning('Automatic G-code verification registry update failed',str(_verify_exc))
+                            except Exception:pass
+                    if validation.get('valid'):
+                        try:self.core.gcode_verification.verify(
+                            output,product_id=product_id,material_hint=spool['material'],
+                            printer_name=printer['name'])
+                        except Exception as _verify_exc:
+                            try:self.core.error_log.warning('Automatic G-code verification registry update failed',str(_verify_exc))
+                            except Exception:pass
                     if validation['valid'] and bounds:
                         warnings=bounds.get('warnings') or []
                         if warnings:

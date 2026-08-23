@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk,messagebox
+from tkinter import ttk,messagebox,simpledialog
 
 class InventoryProfitMixin:
  def _build_filament_page(self):
@@ -7,6 +7,7 @@ class InventoryProfitMixin:
   self._button(bar,'+ Add Spool',self._filament_add,True).pack(side='left')
   self._button(bar,'Adjust Remaining',self._filament_adjust).pack(side='left',padx=7)
   self._button(bar,'Cost Settings',self._cost_settings).pack(side='left')
+  self._button(bar,'Packaging & Supplies',self._supplies_manager).pack(side='left',padx=7)
   filters=self._card(self.content);filters.pack(fill='x',pady=(0,10))
   row=tk.Frame(filters,bg=self._c('surface'));row.pack(fill='x',padx=14,pady=10)
   tk.Label(row,text='Search',bg=self._c('surface'),fg=self._c('muted')).pack(side='left')
@@ -120,26 +121,100 @@ class InventoryProfitMixin:
    win.destroy();self._filament_refresh()
   self._button(body,'Save Settings',save,True).pack(anchor='e',padx=16,pady=16)
 
+ def _supplies_manager(self):
+  win=tk.Toplevel(self);win.title('Packaging & Supplies');win.geometry('900x590')
+  win.minsize(720,480);win.configure(bg=self._c('bg'));win.transient(self);win.grab_set()
+  bar=tk.Frame(win,bg=self._c('bg'));bar.pack(fill='x',padx=14,pady=(14,8))
+
+  card=self._card(win,'Supply Inventory');card.pack(fill='both',expand=True,padx=14,pady=(0,14))
+  cols=('name','category','quantity','unit','cost','value','threshold')
+  table=ttk.Treeview(card,columns=cols,show='headings',style='Dark.Treeview',selectmode='browse')
+  specs=[('name','Item',210),('category','Category',120),('quantity','Qty',75),('unit','Unit',65),
+         ('cost','Unit Cost',90),('value','Value',90),('threshold','Low At',75)]
+  for c,label,w in specs:table.heading(c,text=label);table.column(c,width=w,anchor='w',stretch=(c=='name'))
+  sy=ttk.Scrollbar(card,orient='vertical',command=table.yview);table.configure(yscrollcommand=sy.set)
+  table.pack(side='left',fill='both',expand=True,padx=(12,0),pady=(0,12));sy.pack(side='right',fill='y',padx=(0,12),pady=(0,12))
+  table.tag_configure('low',foreground=self._c('orange'));table.tag_configure('ok',foreground=self._c('text'))
+
+  def refresh():
+   table.delete(*table.get_children())
+   for row in self.core.supplies.list(False):
+    value=float(row['quantity'] or 0)*int(row['unit_cost_cents'] or 0)
+    tag='low' if row['active'] and float(row['low_threshold'] or 0)>0 and float(row['quantity'] or 0)<=float(row['low_threshold'] or 0) else 'ok'
+    table.insert('','end',iid=row['id'],values=(
+     row['name'],row['category'],'%g'%row['quantity'],row['unit'],
+     '$%.2f'%(row['unit_cost_cents']/100.0),'$%.2f'%(value/100.0),'%g'%row['low_threshold']),tags=(tag,))
+
+  def add():
+   d=tk.Toplevel(win);d.title('Add Supply');d.geometry('430x470');d.configure(bg=self._c('bg'));d.transient(win);d.grab_set()
+   vars={k:tk.StringVar(value=v) for k,v in {
+    'name':'','category':'Packaging','unit':'ea','quantity':'0','cost':'0.00','threshold':'0','notes':''}.items()}
+   box=self._card(d,'Supply Item');box.pack(fill='both',expand=True,padx=14,pady=14)
+   for label,key in [('Name','name'),('Category','category'),('Unit','unit'),('Starting Quantity','quantity'),
+                     ('Unit Cost ($)','cost'),('Low Threshold','threshold'),('Notes','notes')]:
+    tk.Label(box,text=label,bg=self._c('surface'),fg=self._c('muted')).pack(anchor='w',padx=14,pady=(7,2))
+    self._entry(box,vars[key],38).pack(fill='x',padx=14,ipady=5)
+   def save():
+    try:
+     if not vars['name'].get().strip():raise ValueError('Name is required.')
+     self.core.supplies.create(vars['name'].get().strip(),vars['category'].get().strip() or 'Packaging',
+      vars['unit'].get().strip() or 'ea',float(vars['quantity'].get() or 0),
+      int(round(float(vars['cost'].get() or 0)*100)),float(vars['threshold'].get() or 0),vars['notes'].get())
+     d.destroy();refresh()
+    except Exception as exc:messagebox.showerror('Supply',str(exc),parent=d)
+   self._button(box,'Save Supply',save,True).pack(side='right',padx=14,pady=14)
+   self._button(box,'Cancel',d.destroy).pack(side='right',pady=14)
+
+  def adjust():
+   sel=table.selection()
+   if not sel:return messagebox.showinfo('Supplies','Select an item first.',parent=win)
+   amount=simpledialog.askfloat('Adjust Supply','Enter quantity to add (negative removes):',parent=win)
+   if amount is None:return
+   self.core.supplies.adjust(sel[0],amount,'manual','','Manual inventory adjustment');refresh()
+
+  self._button(bar,'+ Add Supply',add,True).pack(side='left')
+  self._button(bar,'Adjust Quantity',adjust).pack(side='left',padx=7)
+  tk.Label(bar,text='Tracked value: $%.2f'%(self.core.supplies.total_value_cents()/100.0),
+           bg=self._c('bg'),fg=self._c('muted')).pack(side='right')
+  refresh()
+
  def _build_analytics_page(self):
+  period=getattr(self,'_analytics_range','All Time')
+  days={'Today':1,'7 Days':7,'30 Days':30,'1 Year':365}.get(period)
   rows=list(self.core.inventory_profit.profitability())
-  finance=self.core.invoices.finance_summary()
-  business=self.core.inventory_profit.business_profit_summary()
-  payments=list(self.core.invoices.payment_history(100))
+  finance=self.core.invoices.finance_summary(days)
+  business=self.core.inventory_profit.business_profit_summary(days)
+  payments=list(self.core.invoices.payment_history(100,days))
+  filterbar=tk.Frame(self.content,bg=self._c('bg'));filterbar.pack(fill='x',pady=(4,8))
+  tk.Label(filterbar,text='Analytics Period',bg=self._c('bg'),fg=self._c('muted')).pack(side='left')
+  period_var=tk.StringVar(value=period)
+  combo=ttk.Combobox(filterbar,textvariable=period_var,values=['Today','7 Days','30 Days','1 Year','All Time'],state='readonly',width=14)
+  combo.pack(side='left',padx=8)
+  def change_period(_event=None):
+   self._analytics_range=period_var.get();self.show_page('Analytics')
+  combo.bind('<<ComboboxSelected>>',change_period)
   totals={'jobs':sum(int(r['completed'] or 0) for r in rows),
           'cost':sum(int(r['costs_cents'] or 0) for r in rows),
           'profit':sum(int(r['profit_cents'] or 0) for r in rows)}
 
   metrics=tk.Frame(self.content,bg=self._c('bg'));metrics.pack(fill='x',pady=(0,10))
+  supply_value=self.core.supplies.total_value_cents()
+  low_supplies=len(self.core.supplies.low())
   cards=[
-   ('Paid Revenue','$%.2f'%(finance['paid_revenue_cents']/100.0),self._c('green'),'Cash actually recorded'),
-   ('Net Tracked Profit','$%.2f'%(business['net_profit_cents']/100.0),self._c('purple'),'Revenue minus manufacturing + shipping'),
+   ('Paid Revenue','$%.2f'%(finance['paid_revenue_cents']/100.0),self._c('green'),'Cash recorded in selected period'),
+   ('Net Tracked Profit','$%.2f'%(business['net_profit_cents']/100.0),self._c('purple'),'Revenue minus manufacturing, shipping + used supplies'),
    ('Margin','%.1f%%'%business['margin_percent'],self._c('blue'),'Tracked net margin'),
-   ('Outstanding','$%.2f'%(finance['outstanding_cents']/100.0),self._c('orange'),'Open + partial invoice balance'),
-   ('Shipping Cost','$%.2f'%(business['shipping_cost_cents']/100.0),self._c('red'),'Recorded fulfillment spend'),
+   ('Outstanding','$%.2f'%(finance['outstanding_cents']/100.0),self._c('orange'),'Current open + partial balance'),
+   ('Failure Rate','%.1f%%'%business['failure_rate_percent'],self._c('red'),'%d failed / %d jobs'%(business['failed_jobs'],business['jobs'])),
+   ('Print Hours','%.1f h'%business['print_hours'],self._c('purple'),'Tracked print time'),
+   ('Packaging Used','$%.2f'%(business['supply_cost_cents']/100.0),self._c('orange'),'Recorded supply consumption'),
+   ('Supply Inventory','$%.2f'%(supply_value/100.0),self._c('blue'),'%d low item%s'%(low_supplies,'' if low_supplies==1 else 's')),
   ]
   for i,(title,value,color,detail) in enumerate(cards):
+   row=i//4;col=i%4
    card=self._metric_card(metrics,title,value,color,detail)
-   card.grid(row=0,column=i,sticky='nsew',padx=(0 if i==0 else 7,0));metrics.columnconfigure(i,weight=1)
+   card.grid(row=row,column=col,sticky='nsew',padx=(0 if col==0 else 7,0),pady=(0 if row==0 else 7,0))
+   metrics.columnconfigure(col,weight=1)
 
   nb=ttk.Notebook(self.content);nb.pack(fill='both',expand=True)
 

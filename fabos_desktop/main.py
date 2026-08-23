@@ -51,6 +51,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         self.configure(bg=COLORS["bg"])
         self.core = FabOSApplication()
         self.active_page = "Dashboard"
+        self.report_callback_exception=self._report_callback_exception
         self.product_sort_column = "name"
         self.product_sort_descending = False
         self.product_table = None
@@ -256,11 +257,12 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         "Printers": ("Production", ["Production", "Printers", "QC"]),
         "QC": ("Production", ["Production", "Printers", "QC"]),
         "Filament": ("Inventory", ["Filament"]),
-        "Backup & Health": ("System", ["Backup & Health", "Activity", "Settings", "Automation", "Plugins"]),
-        "Activity": ("System", ["Backup & Health", "Activity", "Settings", "Automation", "Plugins"]),
-        "Automation": ("System", ["Backup & Health", "Activity", "Settings", "Automation", "Plugins"]),
-        "Plugins": ("System", ["Backup & Health", "Activity", "Settings", "Automation", "Plugins"]),
-        "Settings": ("System", ["Backup & Health", "Activity", "Settings", "Automation", "Plugins"]),
+        "Backup & Health": ("System", ["Backup & Health", "Activity", "Logs & Version", "Settings", "Automation", "Plugins"]),
+        "Activity": ("System", ["Backup & Health", "Activity", "Logs & Version", "Settings", "Automation", "Plugins"]),
+        "Logs & Version": ("System", ["Backup & Health", "Activity", "Logs & Version", "Settings", "Automation", "Plugins"]),
+        "Automation": ("System", ["Backup & Health", "Activity", "Logs & Version", "Settings", "Automation", "Plugins"]),
+        "Plugins": ("System", ["Backup & Health", "Activity", "Logs & Version", "Settings", "Automation", "Plugins"]),
+        "Settings": ("System", ["Backup & Health", "Activity", "Logs & Version", "Settings", "Automation", "Plugins"]),
     }
 
     def _workspace_name(self, page_name):
@@ -286,6 +288,76 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             )
             button.pack(side="left", padx=(0, 6))
 
+    def _report_callback_exception(self,exc_type,exc_value,exc_tb):
+        import traceback
+        try:self.core.error_log.error("Tkinter callback exception",exc_value,{"page":self.active_page})
+        except Exception:pass
+        messagebox.showerror(
+            "FabOS Error",
+            "FabOS hit an unexpected error on %s.\n\n%s\n\n"
+            "The details were saved to the FabOS log. Open System → Logs & Version to review or export diagnostics."%
+            (self.active_page,str(exc_value)))
+
+    def _empty_state(self,parent,title,detail="",action_text=None,action=None):
+        box=tk.Frame(parent,bg=COLORS["surface"]);box.pack(fill="both",expand=True,padx=16,pady=16)
+        tk.Label(box,text=title,bg=COLORS["surface"],fg=COLORS["text"],font=("Segoe UI",12,"bold")).pack(pady=(40,6))
+        if detail:tk.Label(box,text=detail,bg=COLORS["surface"],fg=COLORS["muted"],wraplength=620,justify="center").pack()
+        if action_text and action:self._button(box,action_text,action,True).pack(pady=14)
+
+    def _build_logs_version_page(self):
+        info=self.core.diagnostics.version_info()
+        metrics=tk.Frame(self.content,bg=COLORS["bg"]);metrics.pack(fill="x",pady=(4,10))
+        cards=[
+            ("FabOS",info["fabos_version"],COLORS["purple"],"Application version"),
+            ("Schema",info["schema_version"],COLORS["blue"],"Database migration version"),
+            ("Python",info["python"],COLORS["green"],"Runtime"),
+            ("Log Entries",len(self.core.error_log.recent(500)),COLORS["orange"],"Recent application log"),
+        ]
+        for i,(title,value,color,detail) in enumerate(cards):
+            c=self._metric_card(metrics,title,value,color,detail);c.grid(row=0,column=i,sticky="nsew",padx=(0 if i==0 else 7,0));metrics.columnconfigure(i,weight=1)
+
+        bar=tk.Frame(self.content,bg=COLORS["bg"]);bar.pack(fill="x",pady=(0,10))
+        self._button(bar,"Export Diagnostics",self._export_diagnostics,True).pack(side="left")
+        self._button(bar,"Open Log Folder",lambda:self._open_path(self.core.settings.log_dir)).pack(side="left",padx=7)
+        self._button(bar,"Test Latest Backup",self._test_latest_backup).pack(side="left")
+        self._button(bar,"Refresh",lambda:self.show_page("Logs & Version")).pack(side="left",padx=7)
+
+        card=self._card(self.content,"Application Log");card.pack(fill="both",expand=True)
+        cols=("time","level","message","detail")
+        table=ttk.Treeview(card,columns=cols,show="headings",style="Dark.Treeview")
+        for col,label,width in [("time","Time",145),("level","Level",75),("message","Message",250),("detail","Details",520)]:
+            table.heading(col,text=label);table.column(col,width=width,anchor="w",stretch=(col=="detail"))
+        for i,row in enumerate(self.core.error_log.recent(500)):
+            detail=(row.get("detail") or "").replace("\n"," ")[:1000]
+            table.insert("","end",iid="log_%d"%i,values=(row.get("time",""),row.get("level",""),row.get("message",""),detail),
+                         tags=(str(row.get("level","")).lower(),))
+        table.tag_configure("error",foreground=COLORS["red"]);table.tag_configure("warning",foreground=COLORS["orange"])
+        shell=tk.Frame(card,bg=COLORS["surface"]);shell.pack(fill="both",expand=True,padx=12,pady=(0,12))
+        sy=ttk.Scrollbar(shell,orient="vertical",command=table.yview);sx=ttk.Scrollbar(shell,orient="horizontal",command=table.xview)
+        table.configure(yscrollcommand=sy.set,xscrollcommand=sx.set)
+        table.grid(row=0,column=0,sticky="nsew");sy.grid(row=0,column=1,sticky="ns");sx.grid(row=1,column=0,sticky="ew")
+        shell.rowconfigure(0,weight=1);shell.columnconfigure(0,weight=1)
+
+    def _export_diagnostics(self):
+        try:
+            path=self.core.diagnostics.export()
+            messagebox.showinfo("Diagnostics Exported","FabOS diagnostics were saved to:\n\n%s\n\nAPI keys and secrets are redacted."%path)
+        except Exception as exc:
+            try:self.core.error_log.error("Diagnostics export failed",exc)
+            except Exception:pass
+            messagebox.showerror("Diagnostics",str(exc))
+
+    def _test_latest_backup(self):
+        result=self.core.backups.test_latest()
+        if result.get("valid"):messagebox.showinfo("Backup Test","✓ Latest backup passed validation.\n\n"+result.get("detail",""))
+        else:messagebox.showerror("Backup Test","Latest backup failed validation:\n\n"+result.get("detail",""))
+
+    def _open_path(self,path):
+        try:
+            import os
+            if hasattr(os,"startfile"):os.startfile(str(path))
+        except Exception as exc:messagebox.showerror("Open Folder",str(exc))
+
     def show_page(self, page_name: str) -> None:
         self.active_page = page_name
         workspace = self._workspace_name(page_name)
@@ -307,6 +379,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             "Plugins": "Optional integrations and FabOS modules",
             "Backup & Health": "Backups, restore points and FabOS diagnostics",
             "Activity": "Business and production activity history with safe undo hooks",
+            "Logs & Version": "FabOS version, errors, diagnostics and upgrade information",
             "Settings": "Application and integration preferences",
         }
         self.page_subtitle.configure(text=subtitles.get(page_name, "FabOS workspace"))
@@ -317,40 +390,51 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                 button.configure(bg=COLORS["sidebar"], fg=COLORS["muted"], font=("Segoe UI", 10))
 
         self._clear_content()
-        self._build_workspace_tabs(page_name)
+        try:
+            self._build_workspace_tabs(page_name)
+            builders = {
+                "Dashboard": self._build_dashboard,
+                "Products": self._build_products_page,
+                "Customers": self._build_customers_page,
+                "Quotes": self._build_quotes_page,
+                "Orders": self._build_orders_page,
+                "Production": self._build_production_page,
+                "Design Vault": self._build_design_vault_page,
+                "QC": self._build_qc_page,
+                "Printers": self._build_printers_page,
+                "Filament": self._build_filament_page,
+                "Analytics": self._build_analytics_page,
+                "Invoices": self._build_invoices_page,
+                "Backup & Health": self._build_backup_health_page,
+                "Activity": self._build_activity_page,
+                "Logs & Version": self._build_logs_version_page,
+                "Settings": self._build_settings_page,
+            }
+            builder=builders.get(page_name)
+            if builder:
+                builder()
+            else:
+                self._build_module_page(page_name)
+        except Exception as exc:
+            try:self.core.error_log.error("Workspace build failed",exc,{"page":page_name})
+            except Exception:pass
+            self._render_workspace_error(page_name,exc)
 
-        if page_name == "Dashboard":
-            self._build_dashboard()
-        elif page_name == "Products":
-            self._build_products_page()
-        elif page_name == "Customers":
-            self._build_customers_page()
-        elif page_name == "Quotes":
-            self._build_quotes_page()
-        elif page_name == "Orders":
-            self._build_orders_page()
-        elif page_name == "Production":
-            self._build_production_page()
-        elif page_name == "Design Vault":
-            self._build_design_vault_page()
-        elif page_name == "QC":
-            self._build_qc_page()
-        elif page_name == "Printers":
-            self._build_printers_page()
-        elif page_name == "Filament":
-            self._build_filament_page()
-        elif page_name == "Analytics":
-            self._build_analytics_page()
-        elif page_name == "Invoices":
-            self._build_invoices_page()
-        elif page_name == "Backup & Health":
-            self._build_backup_health_page()
-        elif page_name == "Activity":
-            self._build_activity_page()
-        elif page_name == "Settings":
-            self._build_settings_page()
-        else:
-            self._build_module_page(page_name)
+    def _render_workspace_error(self,page_name,exc):
+        self._clear_content()
+        card=self._card(self.content,"Workspace Error")
+        card.pack(fill="both",expand=True,padx=4,pady=4)
+        tk.Label(card,text="This workspace could not be opened.",
+                 bg=COLORS["surface"],fg=COLORS["red"],
+                 font=("Segoe UI",14,"bold")).pack(anchor="w",padx=18,pady=(18,6))
+        tk.Label(card,text=str(exc),bg=COLORS["surface"],fg=COLORS["text"],
+                 wraplength=850,justify="left").pack(anchor="w",padx=18,pady=(0,5))
+        tk.Label(card,text="FabOS logged the full error. You can retry this page, open the log, or export diagnostics without closing FabOS.",
+                 bg=COLORS["surface"],fg=COLORS["muted"],wraplength=850,justify="left").pack(anchor="w",padx=18,pady=(0,16))
+        buttons=tk.Frame(card,bg=COLORS["surface"]);buttons.pack(anchor="w",padx=18,pady=(0,18))
+        self._button(buttons,"Retry",lambda:self.show_page(page_name),True).pack(side="left")
+        self._button(buttons,"Open Logs",lambda:self.show_page("Logs & Version")).pack(side="left",padx=7)
+        self._button(buttons,"Export Diagnostics",self._export_diagnostics).pack(side="left")
 
     def _card(self, parent, title="", bg=None):
         frame = tk.Frame(parent, bg=bg or COLORS["surface"], highlightbackground=COLORS["border"],
@@ -442,6 +526,17 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         summary=self.core.summary()
         try:items=self.core.operations.refresh_notifications()
         except Exception:items=[]
+
+        recovered=list(getattr(self.core,'recovered_jobs',[]) or [])
+        if recovered:
+            recovery=self._card(self.content,"Startup Recovery")
+            recovery.pack(fill="x",pady=(4,10))
+            row=tk.Frame(recovery,bg=COLORS["surface"]);row.pack(fill="x",padx=16,pady=(0,12))
+            tk.Label(row,text="✓ FabOS reconciled %d active print job%s after the previous unclean shutdown."%
+                     (len(recovered),"" if len(recovered)==1 else "s"),
+                     bg=COLORS["surface"],fg=COLORS["orange"],font=("Segoe UI",9,"bold"),
+                     anchor="w").pack(side="left",fill="x",expand=True)
+            self._button(row,"Review Production",lambda:self.show_page("Production")).pack(side="right")
 
         metrics=tk.Frame(self.content,bg=COLORS["bg"])
         metrics.pack(fill="x",pady=(4,12))
@@ -1188,10 +1283,15 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         headings={"name":"Product","category":"Category","print_ready":"Print File",
                   "price":"Price","time":"Print Time","status":"License"}
         for col,label in headings.items():
-            sortable=col!="print_ready"
-            self.product_table.heading(
-                col,text=label+(arrow if col==self.product_sort_column else ""),
-                command=(lambda c=col:self._sort_products(c)) if sortable else None)
+            heading_text=label+(arrow if col==self.product_sort_column else "")
+            if col!="print_ready":
+                self.product_table.heading(
+                    col,text=heading_text,
+                    command=lambda c=col:self._sort_products(c))
+            else:
+                # Do not pass command=None here. Older Tk/Tkinter builds
+                # can raise: TclError: value for "-command" missing.
+                self.product_table.heading(col,text=heading_text)
 
         label="ready product" if group=="ready" else "needs attention"
         self.product_count.configure(text="%d %s%s"%(len(rows),label,"" if len(rows)==1 else "s"))
@@ -1365,11 +1465,11 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         card=self._card(win,"Saved G-code Library")
         card.pack(fill="both",expand=True,padx=16,pady=16)
 
-        cols=("file","material","temps","layer","time","created")
+        cols=("file","verified","material","temps","layer","time","created")
         table=ttk.Treeview(card,columns=cols,show="headings",style="Dark.Treeview",selectmode="browse")
         specs=[
-            ("file","File",250),("material","Material",90),("temps","Nozzle / Bed",115),
-            ("layer","Layer",70),("time","Time",90),("created","Saved",120)
+            ("file","File",220),("verified","Verified",80),("material","Material",85),("temps","Nozzle / Bed",110),
+            ("layer","Layer",70),("time","Time",85),("created","Saved",110)
         ]
         for col,label,width in specs:
             table.heading(col,text=label);table.column(col,width=width,anchor="w",stretch=(col=="file"))
@@ -1392,8 +1492,10 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                     "—" if h.get("hotend") is None else "%g"%h["hotend"],
                     "—" if h.get("bed") is None else "%g"%h["bed"])
                 layer="—" if h.get("layer_height") is None else "%.2f mm"%h["layer_height"]
+                verification=self.core.gcode_verification.current(path)
+                verified="✓ Yes" if verification and verification["valid"] else "Not verified"
                 table.insert("","end",iid=row["id"],values=(
-                    row["original_name"],h.get("material") or "Unknown",temps,layer,time_text,
+                    row["original_name"],verified,h.get("material") or "Unknown",temps,layer,time_text,
                     str(row["created_at"] or "")[:16]),tags=("body",))
             info.configure(text=("%d saved G-code file%s. FabOS can reuse these directly from the Catalog print screen."%
                                  (len(rows),"" if len(rows)==1 else "s")))
@@ -1407,8 +1509,9 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             def worker():
                 try:
                     path=Path(row["stored_path"])
-                    hints=self.core.cura.gcode_profile_hints(path)
-                    check=self.core.cura.validate_print_gcode(path)
+                    result=self.core.gcode_verification.verify(path,product_id=product_id,asset_id=row["id"])
+                    hints=result["hints"]
+                    check=result["validation"]
                     bounds=check.get("bounds") or {}
                     lines=[
                         ("✓ Safe for Vyper XY bounds" if check.get("valid") else "✗ Safety check failed"),
@@ -1424,7 +1527,10 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                     if not check.get("valid"):lines.extend("Problem: "+x for x in check.get("problems",[]))
                     text="  •  ".join(lines)
                 except Exception as exc:text="Verification failed: "+str(exc)
-                self.after(0,lambda:info.configure(text=text) if win.winfo_exists() else None)
+                def apply():
+                    if win.winfo_exists():
+                        info.configure(text=text);refresh()
+                self.after(0,apply)
             threading.Thread(target=worker,name="FabOS-GCodeVerify",daemon=True).start()
 
         def delete_selected():
@@ -2318,11 +2424,18 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
 
     def close_app(self) -> None:
         try:
-            self.core.backups.create()
-            self.core.backups.prune()
-        except Exception:
-            pass
+            if str(self.core.shop_settings.get("auto_backup_on_shutdown","1"))=="1":
+                path=self.core.backups.create("shutdown")
+                result=self.core.backups.validate_backup(path)
+                if not result.get("valid"):
+                    self.core.error_log.warning("Shutdown backup validation failed",result.get("detail",""))
+            self.core.backups.prune(int(float(self.core.shop_settings.get("backup_retention","30") or 30)))
+        except Exception as exc:
+            try:self.core.error_log.error("Shutdown backup failed",exc)
+            except Exception:pass
         finally:
+            try:self.core.recovery.clean_shutdown()
+            except Exception:pass
             self.destroy()
 
 
