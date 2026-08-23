@@ -1,0 +1,14 @@
+# Build Status 0.14.0
+- Python compile: PASS
+- Full automated test suite: PASS (104 tests)
+- Missing private callback scan: PASS
+- Action Center / notifications: PASS
+- Print Next scheduling: PASS
+- Printer Pause/Resume/Cancel API wiring: PASS
+- Filament sufficiency + failed-print waste: PASS
+- Fulfillment lifecycle / package dimensions / invoice shipping sync: PASS
+- Activity journal + safe order-status undo: PASS
+- Catalog card gallery / file import drop target wiring: PASS
+- Setup Wizard / System Health integration: PASS
+- Global search print-file indexing / command shortcuts: PASS
+- Analytics net tracked profit / margin / shipping costs: PASS

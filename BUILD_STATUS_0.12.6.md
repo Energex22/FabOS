@@ -1,0 +1,11 @@
+# Build Status 0.12.6
+- Python compile: PASS
+- Automated tests: PASS
+- Cura heater target extraction: PASS
+- Simultaneous bed/hotend preheat queue: PASS
+- Catalog order attachment and queued-job reuse: PASS
+- Order advances to QC only after all print jobs finish: PASS
+- Import-only Cura G-code workflow: PASS
+- Production background live refresh: PASS
+- Print dialog startup avoids Cura filesystem scans: PASS
+- Missing private callback scan: PASS

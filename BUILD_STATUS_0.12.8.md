@@ -1,0 +1,11 @@
+# Build Status 0.12.8
+- Python compile: PASS
+- Full automated test suite: PASS
+- STL readiness classification: PASS
+- Saved G-code readiness classification: PASS
+- Needs Attention classification: PASS
+- Saved G-code persistence in Design Vault: PASS
+- Direct saved G-code print workflow: PASS
+- Catalog Ready to Print / Needs Attention UI: PASS
+- Batched Catalog readiness lookup: PASS
+- Missing private callback scan: PASS

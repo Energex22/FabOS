@@ -1,0 +1,3 @@
+/mnt/data/WireVault_FabOS_Engineering_Package/sample_data
+{'products': 0, 'orders': 0, 'queued_jobs': 0, 'printers': 0, 'low_spools': 0}
+

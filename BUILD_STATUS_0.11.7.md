@@ -1,0 +1,11 @@
+# Build Status 0.11.7
+- Python compile: PASS
+- Automated tests: PASS
+- Legacy Design Vault duplicate behavior: PASS
+- Multiple unique STL import: PASS
+- SHA-256 duplicate de-duplication: PASS
+- Persistent primary model: PASS
+- Catalog local-model UI wiring: PASS
+- ProductPrint local STL reuse without website access: PASS
+- Existing Production / Cura / OctoPrint / physical-print workflow tests: PASS
+- Missing private callback scan: PASS

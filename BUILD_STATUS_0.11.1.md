@@ -1,0 +1,11 @@
+# Build Status 0.11.1
+- Python compile: PASS
+- Automated tests: PASS
+- Total tests: 35
+- Settings UI wiring: PASS
+- Shop settings persistence: PASS
+- Invoice prefix / due days / default tax: PASS
+- Customer update signature: PASS
+- Backup retention integration: PASS
+- Existing Cura, OctoPrint, QC, invoices, analytics, fulfillment, customer updates and backup tests: PASS
+- Missing private callback scan: PASS

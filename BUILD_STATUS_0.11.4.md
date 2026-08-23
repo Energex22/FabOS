@@ -1,0 +1,11 @@
+# Build Status 0.11.4
+- Python compile: PASS
+- Automated tests: PASS
+- OctoPrint server preflight: PASS
+- Closed/offline printer detection: PASS
+- Fresh firmware temperature-response probe: PASS
+- Stage-specific timeout handling: PASS
+- Verified `/api/job` physical start: PASS
+- Heater-target / physical warming verification: PASS
+- Printer-page connection-state mapping: PASS
+- Missing private callback scan: PASS

@@ -1,0 +1,15 @@
+# Build Status 0.11.8
+- Python compile: PASS
+- Automated tests: PASS
+- Explicit Single Model / Part Set mode: PASS
+- Multiple STL import suggests Part Set without forcing it: PASS
+- Editable part names / quantities / include flags: PASS
+- Reuse one STL at quantity >1: PASS
+- Vyper 245 × 245 mm auto-arrangement: PASS
+- 90-degree footprint rotation support: PASS
+- Complete_Set.stl generation: PASS
+- Oversize plate rejection: PASS
+- Catalog Manage Model / Part Set UI wiring: PASS
+- Catalog and Production shared Part Set print path: PASS
+- Existing local-model, Cura, OctoPrint and verified physical-print tests: PASS
+- Missing private callback scan: PASS
