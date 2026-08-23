@@ -1,0 +1,16 @@
+openapi: 3.0.3
+info: {title: WireVault FabOS API, version: 0.1.0}
+paths:
+  /health:
+    get: {responses: {'200': {description: Healthy}}}
+  /products:
+    get: {responses: {'200': {description: Products}}}
+    post: {responses: {'201': {description: Created}}}
+  /quotes/{quote_id}/approve:
+    post:
+      parameters: [{in: path, name: quote_id, required: true, schema: {type: string}}]
+      responses: {'200': {description: Approved}}
+  /print-jobs/{job_id}/command:
+    post:
+      parameters: [{in: path, name: job_id, required: true, schema: {type: string}}]
+      responses: {'202': {description: Accepted}}

@@ -1,0 +1,33 @@
+[
+  {
+    "name": "Completed print to QC",
+    "trigger_event": "print_job.completed",
+    "conditions": {
+      "success": true
+    },
+    "actions": [
+      {
+        "type": "deduct_filament"
+      },
+      {
+        "type": "move_order",
+        "status": "qc_required"
+      },
+      {
+        "type": "record_learning"
+      }
+    ]
+  },
+  {
+    "name": "Low filament reminder",
+    "trigger_event": "filament.updated",
+    "conditions": {
+      "low": true
+    },
+    "actions": [
+      {
+        "type": "create_purchase_reminder"
+      }
+    ]
+  }
+]
