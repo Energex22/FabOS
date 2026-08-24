@@ -100,11 +100,10 @@ class SystemReliabilityMixin:
                 if not getattr(self,'health_table',None):return
                 try:self.health_table.delete(*self.health_table.get_children())
                 except Exception:return
-                if not checks:
-                    checks=[{'name':'System Health','status':'warn',
-                             'detail':'No checks were returned. Open Logs & Version and export diagnostics.'}]
+                rows=checks or [{'name':'System Health','status':'warn',
+                                 'detail':'No checks were returned. Open Logs & Version and export diagnostics.'}]
                 self._health_rows={}
-                for i,row in enumerate(checks):
+                for i,row in enumerate(rows):
                     status=row.get('status','warn')
                     target=self._system_health_target(row.get('name',''))
                     iid='health_%d'%i
