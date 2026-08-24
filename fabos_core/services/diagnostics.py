@@ -1,6 +1,6 @@
 from pathlib import Path
 from datetime import datetime
-import json,platform,sys,zipfile,sqlite3,os
+import json,platform,sys,zipfile
 
 class DiagnosticsService:
     def __init__(self,app):self.app=app

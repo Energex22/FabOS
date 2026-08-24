@@ -1,3 +1,4 @@
+import sys
 MIGRATIONS=[
 (1,"""CREATE TABLE IF NOT EXISTS app_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);"""),
 (2,"""CREATE TABLE IF NOT EXISTS designs(id TEXT PRIMARY KEY,product_id TEXT REFERENCES products(id) ON DELETE SET NULL,name TEXT NOT NULL,current_version INTEGER NOT NULL DEFAULT 1,notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -218,7 +219,8 @@ def migrate(db,backup=None):
  pending=[x for x in MIGRATIONS if x[0] not in done]
  if pending and backup:
   try: backup.create()
-  except Exception: pass
+  except Exception as exc:
+   sys.stderr.write('FabOS: pre-migration backup failed: %s\n'%exc)
  for ver,sql in pending:
   with db.connect() as c:
    try:c.executescript(sql)

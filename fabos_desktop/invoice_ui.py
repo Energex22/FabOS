@@ -1,4 +1,4 @@
-import tkinter as tk, os, webbrowser
+import tkinter as tk, webbrowser
 from tkinter import ttk, messagebox
 
 class InvoiceMixin:

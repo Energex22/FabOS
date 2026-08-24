@@ -1,4 +1,4 @@
-import uuid
+import sys,uuid
 from datetime import datetime
 
 class ProductionService:
@@ -196,7 +196,8 @@ class ProductionService:
                 from fabos_core.services.manufacturing import ManufacturingService
                 m=ManufacturingService(self.database);m.learn(job_id)
                 if status=="completed" and row["order_id"]:m.ensure_qc(row["order_id"],job_id)
-            except Exception:pass
+            except Exception as exc:
+                sys.stderr.write('FabOS: post-%s bookkeeping failed for job %s: %s\n'%(status,job_id,exc))
 
     def get(self, job_id):
         rows = self.list_jobs()

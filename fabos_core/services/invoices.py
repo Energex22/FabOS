@@ -21,7 +21,7 @@ class InvoiceService:
   n=1
   if row:
    try:n=int(row["invoice_number"].split("-")[-1])+1
-   except Exception:pass
+   except ValueError:pass
   return prefix+("%04d"%n)
 
  def create_from_order(self,order_id,due_days=None):
