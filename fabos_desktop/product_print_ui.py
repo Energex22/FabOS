@@ -662,10 +662,11 @@ class ProductPrintMixin:
                                     win.destroy();self.show_page('Printers')
                                 self.after(0,success)
                             except Exception as exc:
+                                error_text=str(exc)
                                 def failed():
                                     if not win.winfo_exists():return
-                                    status.config(text='START FAILED — '+str(exc));progress['value']=0
-                                    messagebox.showerror('Printer did not start',str(exc),parent=win)
+                                    status.config(text='START FAILED — '+error_text);progress['value']=0
+                                    messagebox.showerror('Printer did not start',error_text,parent=win)
                                     start_btn.config(state='normal')
                                 self.after(0,failed)
                         threading.Thread(target=start_worker,name='FabOS-OctoPrintStart',daemon=True).start()
