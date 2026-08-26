@@ -1144,7 +1144,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         tabs=tk.Frame(self.content,bg=COLORS["bg"])
         tabs.pack(fill="x",pady=(0,8))
         self.product_tab_buttons={}
-        for label,value in [("Ready to Print","ready"),("Needs Attention","attention")]:
+        for label,value in [("Ready to Print","ready"),("Needs Attention","attention"),("Part Sets","part_sets"),("Files","files")]:
             button=tk.Button(
                 tabs,text=label,bd=0,padx=18,pady=9,font=("Segoe UI",9,"bold"),
                 command=lambda v=value:self._switch_product_view(v)
@@ -1256,9 +1256,23 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
 
         rows=[]
         for row in all_rows:
-            ready=readiness.get(row["id"],{}).get("ready",False)
-            if group=="ready" and not ready:continue
-            if group=="attention" and ready:continue
+            info=readiness.get(row["id"],{})
+            ready=info.get("ready",False)
+            try:
+                model_status=self.core.design_vault.product_model_status(row["id"])
+            except Exception:
+                model_status={"model_mode":"single"}
+            mode=str(model_status.get("model_mode") or "single").lower()
+            has_files=bool(info.get("has_stl") or info.get("has_gcode"))
+
+            if group=="ready" and not ready:
+                continue
+            if group=="attention" and ready:
+                continue
+            if group=="part_sets" and mode!="part_set":
+                continue
+            if group=="files" and not has_files:
+                continue
             rows.append(row)
 
         for row in rows:
@@ -1293,7 +1307,15 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                 # can raise: TclError: value for "-command" missing.
                 self.product_table.heading(col,text=heading_text)
 
-        label="ready product" if group=="ready" else "needs attention"
+        # Keep the legacy ready-product label as a compatibility marker for
+        # older catalog tests and integrations.
+        label="ready product"
+        if group!="ready":
+            label={
+                "attention":"product needing attention",
+                "part_sets":"part-set product",
+                "files":"product with print files",
+            }.get(group,"product")
         self.product_count.configure(text="%d %s%s"%(len(rows),label,"" if len(rows)==1 else "s"))
         if self.product_table.selection():
             self._embedded_product_details()
