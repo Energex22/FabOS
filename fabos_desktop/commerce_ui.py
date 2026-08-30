@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox
 from datetime import date, timedelta
 
 # Uses COLORS and helper methods from the main desktop class.

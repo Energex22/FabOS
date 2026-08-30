@@ -1,5 +1,4 @@
-import json,time,socket
-from urllib.request import Request,urlopen
+import time,socket
 from urllib.error import HTTPError,URLError
 from urllib.parse import quote
 from pathlib import Path

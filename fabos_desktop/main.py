@@ -289,7 +289,6 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             button.pack(side="left", padx=(0, 6))
 
     def _report_callback_exception(self,exc_type,exc_value,exc_tb):
-        import traceback
         try:self.core.error_log.error("Tkinter callback exception",exc_value,{"page":self.active_page})
         except Exception:pass
         messagebox.showerror(

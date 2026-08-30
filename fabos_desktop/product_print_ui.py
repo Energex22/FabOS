@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk,messagebox,filedialog
 from pathlib import Path
 import threading
-import time,webbrowser,json,uuid
+import webbrowser,json,uuid
 
 class ProductPrintMixin:
     def _choose_file(self,var,filetypes):
