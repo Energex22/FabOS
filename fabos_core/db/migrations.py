@@ -211,6 +211,7 @@ INSERT OR IGNORE INTO shop_settings(key,value) VALUES('crash_recovery_enabled','
 INSERT OR IGNORE INTO shop_settings(key,value) VALUES('diagnostic_log_retention_days','30');
 INSERT OR IGNORE INTO shop_settings(key,value) VALUES('beta_channel','1');
 """),
+(31,"""ALTER TABLE print_jobs ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:

@@ -29,7 +29,7 @@ class ProductPrintMixin:
         return True
 
     def _import_cura_gcode_print(self, product_id, printer, spool, existing_job_id=None,
-                                order_id=None, parent=None, model_status=None, gcode_path=None):
+                                order_id=None, parent=None, model_status=None, gcode_path=None, quantity=1):
         """Import G-code already sliced in Cura, then verify/upload/start it."""
         parent=parent or self
         product=self.core.products.get(product_id)
@@ -60,13 +60,6 @@ class ProductPrintMixin:
             bounds=validation.get("bounds") or {}
             gmeta=self.core.cura.gcode_metadata(gcode,spool["material"])
             targets=self.core.cura.gcode_heater_targets(gcode)
-            try:
-                self.core.gcode_verification.verify(
-                    gcode,product_id=product_id,material_hint=spool["material"],
-                    printer_name=printer["name"])
-            except Exception as _verify_exc:
-                try:self.core.error_log.warning("G-code verification registry update failed",str(_verify_exc))
-                except Exception:pass
             try:
                 self.core.gcode_verification.verify(
                     gcode,product_id=product_id,material_hint=spool["material"],
@@ -138,29 +131,30 @@ class ProductPrintMixin:
                 "octoprint_verified_state":state,
                 "model_mode":model_status.get("model_mode","single"),
                 "part_set_pieces":model_status.get("piece_count",1),
-                "imported_cura_gcode":True
+                "imported_cura_gcode":True,
+                "requested_quantity":int(quantity or 1)
             })
 
             with self.core.database.connect() as c:
                 if job_id:
                     c.execute("""UPDATE print_jobs SET order_id=COALESCE(?,order_id),product_id=?,
                       printer_id=?,spool_id=?,status='printing',gcode_path=?,octoprint_file=?,
-                      estimated_minutes=?,estimated_filament_g=?,
+                      estimated_minutes=?,estimated_filament_g=?,quantity=?,
                       started_at=COALESCE(started_at,CURRENT_TIMESTAMP),slicer_metadata_json=?
                       WHERE id=?""",
                       (order_id,product_id,printer["id"],spool["id"],str(gcode),octo_path,
                        gmeta.get("estimated_minutes") or product["estimated_minutes"],
                        gmeta.get("filament_g") or product["estimated_filament_g"],
-                       metadata,job_id))
+                       int(quantity or 1),metadata,job_id))
                 else:
                     job_id=str(uuid.uuid4())
                     c.execute("""INSERT INTO print_jobs(
                       id,order_id,product_id,printer_id,spool_id,status,gcode_path,octoprint_file,
-                      estimated_minutes,estimated_filament_g,started_at,slicer_metadata_json
-                      ) VALUES(?,?,?,?,?,'printing',?,?,?,?,CURRENT_TIMESTAMP,?)""",
+                      estimated_minutes,estimated_filament_g,quantity,started_at,slicer_metadata_json
+                      ) VALUES(?,?,?,?,?,'printing',?,?,?,?,?,CURRENT_TIMESTAMP,?)""",
                       (job_id,order_id,product_id,printer["id"],spool["id"],str(gcode),octo_path,
                        gmeta.get("estimated_minutes") or product["estimated_minutes"],
-                       gmeta.get("filament_g") or product["estimated_filament_g"],metadata))
+                       gmeta.get("filament_g") or product["estimated_filament_g"],int(quantity or 1),metadata))
                 if order_id:
                     c.execute("""UPDATE orders SET status=CASE
                       WHEN status IN ('new','production') THEN 'production' ELSE status END WHERE id=?""",
@@ -171,6 +165,17 @@ class ProductPrintMixin:
             try:self.core.operations.log('print.started','Print started',
                 '%s • %s • %s'%(product['name'],printer['name'],order_text),'Production',job_id)
             except Exception:pass
+
+            requested=max(1,int(quantity or 1))
+            if requested > 1:
+                try:
+                    extra=self.core.production.queue_additional_copies(job_id,requested-1)
+                    if extra:
+                        self.core.operations.log('print.copies_queued','Additional copies queued',
+                            '%d additional copy/copies for %s'%(len(extra),product['name']),'Production',job_id)
+                except Exception as copy_exc:
+                    try:self.core.error_log.warning('Additional print copies could not be queued',str(copy_exc))
+                    except Exception:pass
 
             messagebox.showinfo(
                 "Print Started",
@@ -248,6 +253,7 @@ class ProductPrintMixin:
         order_choice=next((label for label,oid in order_map.items() if existing_order_id and oid==existing_order_id),
                           'No Order / Personal Print')
         ovar=tk.StringVar(value=order_choice)
+        quantity_var=tk.StringVar(value='1')
         slicervar=tk.StringVar(value=self.core.inventory_profit.setting('default_slicer','Cura') or 'Cura')
 
         saved_cura=(self.core.inventory_profit.setting('cura_engine_path','') or
@@ -343,6 +349,7 @@ class ProductPrintMixin:
         order_combo=field('Attach Print to Order',ovar,order_map)
         if existing_order_id:
             order_combo.configure(state='disabled')
+        field('Copies to Print',quantity_var)
         slicer_combo=field('Slicer',slicervar,['Cura','PrusaSlicer'])
 
         cura_frame=tk.Frame(body,bg=self._c('surface'))
@@ -437,6 +444,10 @@ class ProductPrintMixin:
                 return messagebox.showwarning('Printer Busy','The selected printer is currently busy.',parent=win)
             if not spool:
                 return messagebox.showerror('Print Product','Select the filament spool loaded in the printer.',parent=win)
+            try: quantity=int(quantity_var.get())
+            except Exception: quantity=0
+            if quantity < 1:
+                return messagebox.showerror('Print Product','Copies to Print must be at least 1.',parent=win)
             saved=gcode_map.get(gvar.get()) if gcode_map else print_status.get('preferred_gcode')
             if not saved:
                 return messagebox.showinfo('Saved G-code','No saved G-code is available for this product.',parent=win)
@@ -453,7 +464,7 @@ class ProductPrintMixin:
             self._import_cura_gcode_print(
                 product_id,printer,spool,existing_job_id=existing_job_id,
                 order_id=order_map.get(ovar.get()),parent=win,model_status=model_status,
-                gcode_path=saved
+                gcode_path=saved,quantity=quantity
             )
 
         def import_gcode():
@@ -464,9 +475,13 @@ class ProductPrintMixin:
                 return messagebox.showwarning('Printer Busy','The selected printer is currently busy.',parent=win)
             if not spool:
                 return messagebox.showerror('Print Product','Select the filament spool loaded in the printer.',parent=win)
+            try: quantity=int(quantity_var.get())
+            except Exception: quantity=0
+            if quantity < 1:
+                return messagebox.showerror('Print Product','Copies to Print must be at least 1.',parent=win)
             self._import_cura_gcode_print(
                 product_id,printer,spool,existing_job_id=existing_job_id,
-                order_id=order_map.get(ovar.get()),parent=win,model_status=model_status
+                order_id=order_map.get(ovar.get()),parent=win,model_status=model_status,quantity=quantity
             )
 
         def prepare():

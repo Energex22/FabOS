@@ -159,6 +159,27 @@ class ProductionService:
             )
             conn.commit()
 
+    def queue_additional_copies(self, job_id, copies):
+        """Queue additional physical copies without starting them automatically."""
+        copies = int(copies or 0)
+        if copies <= 0:
+            return []
+        source = self.get(job_id)
+        created = []
+        with self.database.connect() as conn:
+            for _ in range(copies):
+                new_id = str(uuid.uuid4())
+                conn.execute(
+                    """INSERT INTO print_jobs
+                    (id,order_id,product_id,printer_id,spool_id,status,estimated_minutes,estimated_filament_g,quantity)
+                    VALUES(?,?,?,?,?,?,?,?,1)""",
+                    (new_id, source["order_id"], source["product_id"], None, None, "queued",
+                     source["estimated_minutes"] or 0, source["estimated_filament_g"] or 0),
+                )
+                created.append(new_id)
+            conn.commit()
+        return created
+
     def set_status(self, job_id, status):
         now = datetime.now().isoformat(timespec="seconds")
         with self.database.connect() as conn:
