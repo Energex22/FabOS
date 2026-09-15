@@ -12,12 +12,12 @@ from fabos_core.services.permissions import PermissionService
 class Pass17OrderAccessTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False); self.tmp.close()
-        self.db = Database(self.tmp.name); migrate(self.db)
+        self.db = Database(self.tmp.name); self.db.initialize(); migrate(self.db)
         self.accounts = AccountService(self.db); self.permissions = PermissionService(self.db)
         self.orders = OrderService(self.db, self.accounts, self.permissions)
         with self.db.connect() as c:
             for row in [("admin","admin","administrator"),("employee","employee","employee"),("customer1","customer1","customer"),("customer2","customer2","customer")]:
-                c.execute("INSERT INTO users(id,username,password_hash,account_type,active) VALUES(?,?,?,?,1)", row+ ("x",) if False else (row[0],row[1],"x",row[2]))
+                c.execute("INSERT INTO users(id,username,password_hash,account_type,active) VALUES(?,?,?,?,1)", (row[0],row[1],"x",row[2]))
             c.execute("INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)", ("cust1","Customer One","one@example.com","",""))
             c.execute("INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)", ("cust2","Customer Two","two@example.com","","")); c.commit()
         self.accounts.link_customer("customer1","cust1"); self.accounts.link_customer("customer2","cust2")
