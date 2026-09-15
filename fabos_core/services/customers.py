@@ -1,5 +1,6 @@
 import uuid
 
+
 class CustomerService:
     SORT_COLUMNS = {
         "name": "c.name COLLATE NOCASE",
@@ -30,34 +31,76 @@ class CustomerService:
         with self.database.connect() as conn:
             return conn.execute(sql, (query.strip(), like, like, like)).fetchall()
 
+    def list_for_user(self, user_id, query="", sort_column="name", descending=False):
+        """Return only the linked customer's record for a customer account.
+
+        Employee/administrator callers should use the existing unrestricted
+        list() method after their permission boundary has been enforced.
+        """
+        with self.database.connect() as conn:
+            linked = conn.execute(
+                "SELECT customer_id FROM customer_accounts WHERE user_id=?", (user_id,)
+            ).fetchone()
+        if not linked:
+            return []
+        customer_id = linked[0]
+        row = self.get(customer_id)
+        if query:
+            needle = query.strip().lower()
+            values = (str(row["name"] or ""), str(row["email"] or ""), str(row["phone"] or ""))
+            if not any(needle in value.lower() for value in values):
+                return []
+        return [row]
+
     def get(self, customer_id):
         with self.database.connect() as conn:
-            row=conn.execute("SELECT * FROM customers WHERE id=?",(customer_id,)).fetchone()
-            if row is None: raise KeyError("Customer not found")
+            row = conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+            if row is None:
+                raise KeyError("Customer not found")
             return row
 
+    def get_for_user(self, user_id, customer_id):
+        with self.database.connect() as conn:
+            linked = conn.execute(
+                "SELECT customer_id FROM customer_accounts WHERE user_id=?", (user_id,)
+            ).fetchone()
+        if not linked or str(linked[0]) != str(customer_id):
+            raise PermissionError("Customer access denied")
+        return self.get(customer_id)
+
     def save(self, data, customer_id=None):
-        name=(data.get("name") or "").strip()
-        if not name: raise ValueError("Customer name is required.")
-        values=(name,(data.get("email") or "").strip(),(data.get("phone") or "").strip(),(data.get("notes") or "").strip())
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise ValueError("Customer name is required.")
+        values = (name, (data.get("email") or "").strip(), (data.get("phone") or "").strip(), (data.get("notes") or "").strip())
         with self.database.connect() as conn:
             if customer_id:
-                conn.execute("UPDATE customers SET name=?,email=?,phone=?,notes=? WHERE id=?", values+(customer_id,))
+                conn.execute("UPDATE customers SET name=?,email=?,phone=?,notes=? WHERE id=?", values + (customer_id,))
             else:
-                customer_id=str(uuid.uuid4())
-                conn.execute("INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)",(customer_id,)+values)
+                customer_id = str(uuid.uuid4())
+                conn.execute("INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)", (customer_id,) + values)
             conn.commit()
         return customer_id
 
     def delete(self, customer_id):
         with self.database.connect() as conn:
-            linked=conn.execute("SELECT (SELECT COUNT(*) FROM quotes WHERE customer_id=?)+(SELECT COUNT(*) FROM orders WHERE customer_id=?)",(customer_id,customer_id)).fetchone()[0]
+            linked = conn.execute(
+                "SELECT (SELECT COUNT(*) FROM quotes WHERE customer_id=?) + (SELECT COUNT(*) FROM orders WHERE customer_id=?)",
+                (customer_id, customer_id),
+            ).fetchone()[0]
             if linked:
                 raise ValueError("This customer has linked quotes or orders and cannot be deleted. Archive support will be added later.")
-            conn.execute("DELETE FROM customers WHERE id=?",(customer_id,)); conn.commit()
+            conn.execute("DELETE FROM customers WHERE id=?", (customer_id,))
+            conn.commit()
 
     def activity(self, customer_id):
         with self.database.connect() as conn:
-            quotes=conn.execute("SELECT quote_number,status,total_cents,created_at FROM quotes WHERE customer_id=? ORDER BY created_at DESC",(customer_id,)).fetchall()
-            orders=conn.execute("SELECT order_number,status,total_cents,created_at FROM orders WHERE customer_id=? ORDER BY created_at DESC",(customer_id,)).fetchall()
+            quotes = conn.execute(
+                "SELECT quote_number,status,total_cents,created_at FROM quotes WHERE customer_id=? ORDER BY created_at DESC",
+                (customer_id,),
+            ).fetchall()
+            orders = conn.execute(
+                "SELECT order_number,status,total_cents,created_at FROM orders WHERE customer_id=? ORDER BY created_at DESC",
+                (customer_id,),
+            ).fetchall()
         return quotes, orders
