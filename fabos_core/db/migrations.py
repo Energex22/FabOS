@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS manufacturing_observations(id TEXT PRIMARY KEY,produc
 (13,"""ALTER TABLE print_jobs ADD COLUMN material_cost_cents INTEGER NOT NULL DEFAULT 0;"""),
 (14,"""ALTER TABLE print_jobs ADD COLUMN machine_cost_cents INTEGER NOT NULL DEFAULT 0;"""),
 (15,"""ALTER TABLE print_jobs ADD COLUMN packaging_cost_cents INTEGER NOT NULL DEFAULT 0;"""),
-(16,"""ALTER TABLE print_jobs ADD COLUMN profit_cents INTEGER;""),
+(16,"""ALTER TABLE print_jobs ADD COLUMN profit_cents INTEGER;"""),
 (17,"""CREATE TABLE IF NOT EXISTS shop_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 INSERT OR IGNORE INTO shop_settings(key,value) VALUES('machine_hourly_cost','0.35');
 INSERT OR IGNORE INTO shop_settings(key,value) VALUES('default_packaging_cost','0.50');
@@ -75,6 +75,11 @@ CREATE TABLE IF NOT EXISTS employee_profiles(user_id TEXT PRIMARY KEY REFERENCES
 CREATE INDEX IF NOT EXISTS idx_customer_accounts_customer ON customer_accounts(customer_id);
 CREATE INDEX IF NOT EXISTS idx_employee_profiles_status ON employee_profiles(employment_status);
 UPDATE users SET account_type=CASE WHEN lower(COALESCE(role,'')) IN ('owner','admin','administrator') THEN 'administrator' WHEN lower(COALESCE(role,'')) IN ('employee','staff') THEN 'employee' WHEN lower(COALESCE(role,''))='customer' THEN 'customer' ELSE 'administrator' END;"""),
+(37,"""CREATE TABLE IF NOT EXISTS permissions(key TEXT PRIMARY KEY,name TEXT NOT NULL,description TEXT);
+CREATE TABLE IF NOT EXISTS role_permissions(account_type TEXT NOT NULL,permission TEXT NOT NULL REFERENCES permissions(key) ON DELETE CASCADE,PRIMARY KEY(account_type,permission));
+CREATE TABLE IF NOT EXISTS user_permissions(user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,permission TEXT NOT NULL REFERENCES permissions(key) ON DELETE CASCADE,allowed INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(user_id,permission));
+CREATE INDEX IF NOT EXISTS idx_role_permissions_permission ON role_permissions(permission);
+CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id);"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:
