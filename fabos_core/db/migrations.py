@@ -212,6 +212,35 @@ INSERT OR IGNORE INTO shop_settings(key,value) VALUES('diagnostic_log_retention_
 INSERT OR IGNORE INTO shop_settings(key,value) VALUES('beta_channel','1');
 """),
 (31,"""ALTER TABLE print_jobs ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;"""),
+(36,"""ALTER TABLE users ADD COLUMN email TEXT;
+ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT 'administrator';
+ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE users ADD COLUMN last_login_at TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL AND email<>'';
+CREATE TABLE IF NOT EXISTS customer_accounts(
+ user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ customer_id TEXT NOT NULL UNIQUE REFERENCES customers(id) ON DELETE CASCADE,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS employee_profiles(
+ user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ department TEXT,
+ position TEXT,
+ employment_status TEXT NOT NULL DEFAULT 'active',
+ metadata_json TEXT NOT NULL DEFAULT '{}',
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_customer_accounts_customer ON customer_accounts(customer_id);
+CREATE INDEX IF NOT EXISTS idx_employee_profiles_status ON employee_profiles(employment_status);
+UPDATE users SET account_type=CASE
+ WHEN lower(COALESCE(role,'')) IN ('owner','admin','administrator') THEN 'administrator'
+ WHEN lower(COALESCE(role,'')) IN ('employee','staff') THEN 'employee'
+ WHEN lower(COALESCE(role,''))='customer' THEN 'customer'
+ ELSE 'administrator' END
+ WHERE account_type IS NULL OR account_type='';
+"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:
