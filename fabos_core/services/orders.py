@@ -64,6 +64,23 @@ class OrderService:
             if requested not in allowed: raise ValueError("Invalid order transition: %s -> %s"%(current,requested))
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
         return self.get(order_id)[0]
+    def set_status_internal(self,order_id,status,reason=""):
+        """Trusted service-to-service transition for local automation/undo paths.
+
+        This still validates the lifecycle graph; it only skips interactive RBAC
+        because the caller is already inside the trusted FabOS process.
+        """
+        requested=(status or "").strip().lower()
+        if requested not in self.ORDER_TRANSITIONS: raise ValueError("Unsupported order status")
+        with self.database.connect() as conn:
+            row=conn.execute("SELECT status FROM orders WHERE id=?",(order_id,)).fetchone()
+            if not row: raise KeyError("Order not found")
+            current=(row["status"] or "").strip().lower()
+            if current==requested:return self.get(order_id)[0]
+            allowed=self.ORDER_TRANSITIONS.get(current)
+            if allowed is None or requested not in allowed: raise ValueError("Invalid order transition: %s -> %s"%(current,requested))
+            conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
+        return self.get(order_id)[0]
     def dossier(self, order_id):
         with self.database.connect() as conn:
             order=conn.execute("""SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(c.email,'') customer_email,COALESCE(c.phone,'') customer_phone,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=?""",(order_id,)).fetchone()
