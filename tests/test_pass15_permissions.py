@@ -11,6 +11,7 @@ class Pass15PermissionTests(unittest.TestCase):
         self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         self.tmp.close()
         self.db = Database(self.tmp.name)
+        self.db.initialize()
         migrate(self.db)
         self.permissions = PermissionService(self.db)
 
