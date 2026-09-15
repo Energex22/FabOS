@@ -12,6 +12,7 @@ class Pass16AuthTests(unittest.TestCase):
         self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         self.tmp.close()
         self.db = Database(self.tmp.name)
+        self.db.initialize()
         migrate(self.db)
         self.accounts = AccountService(self.db)
         self.auth = AuthService(self.db, self.accounts)
