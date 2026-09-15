@@ -1,6 +1,7 @@
-import tkinter as tk,os,math,json
+import tkinter as tk
+import os
+import json
 from tkinter import ttk,messagebox,filedialog
-from pathlib import Path
 
 class ManufacturingMixin:
  def _build_design_vault_page(self):
@@ -355,6 +356,21 @@ class ManufacturingMixin:
   canvas.configure(yscrollcommand=scroll.set)
   canvas.pack(side='left',fill='both',expand=True,padx=(14,0),pady=14)
   scroll.pack(side='right',fill='y',padx=(0,14),pady=14)
+
+  def wheel(event):
+   if getattr(event,'delta',0):canvas.yview_scroll(int(-1*(event.delta/120)),'units')
+   elif getattr(event,'num',None)==4:canvas.yview_scroll(-1,'units')
+   elif getattr(event,'num',None)==5:canvas.yview_scroll(1,'units')
+   return 'break'
+  def bind_wheel_tree(widget):
+   widget.bind('<MouseWheel>',wheel,add='+')
+   widget.bind('<Button-4>',wheel,add='+')
+   widget.bind('<Button-5>',wheel,add='+')
+   for child in widget.winfo_children():bind_wheel_tree(child)
+  def bind_wheel(_event=None):
+   bind_wheel_tree(body);bind_wheel_tree(canvas)
+  canvas.bind('<Enter>',bind_wheel)
+  body.bind('<Enter>',bind_wheel)
 
   tk.Label(body,text='%s • %s'%(r['order_number'],r['product_name'] or 'Product'),
            bg=self._c('surface'),fg=self._c('text'),font=('Segoe UI',13,'bold')).pack(anchor='w',padx=16,pady=(4,2))

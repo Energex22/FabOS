@@ -1,5 +1,5 @@
 from pathlib import Path
-import hashlib,shutil,uuid,struct,re,math
+import hashlib,shutil,uuid,struct,re
 class DesignVaultService:
  def __init__(self,db,data_dir):self.db=db;self.root=Path(data_dir)/'Design Vault';self.root.mkdir(parents=True,exist_ok=True)
  def ensure_product(self,pid):

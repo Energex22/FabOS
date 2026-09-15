@@ -1,6 +1,6 @@
 from datetime import datetime
 from pathlib import Path
-import sqlite3,os
+import sqlite3
 
 class BackupService:
     def __init__(self,source,destination):

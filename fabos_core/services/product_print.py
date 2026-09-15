@@ -1,4 +1,3 @@
-import shutil
 from pathlib import Path
 from urllib.request import Request,urlopen
 from urllib.parse import urljoin,urlparse
@@ -173,7 +172,6 @@ class ProductPrintService:
 
  def upload_gcode(self,printer,gcode_path,start=False):
   # Multipart upload accepted by OctoPrint. print=true will select and start if operational.
-  import mimetypes
   boundary='----FabOS'+uuid.uuid4().hex
   name=Path(gcode_path).name
   pieces=[]

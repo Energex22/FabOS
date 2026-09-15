@@ -1,5 +1,5 @@
 from pathlib import Path
-import shutil,sqlite3
+import shutil
 
 class ReliabilityService:
     def __init__(self,app):
