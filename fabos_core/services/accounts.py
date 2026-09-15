@@ -5,9 +5,6 @@ It provides the stable account/customer/employee relationships that later auth a
 RBAC layers can build on without replacing the existing users table.
 """
 
-from datetime import datetime
-import uuid
-
 
 class AccountService:
     ACCOUNT_TYPES = ("customer", "employee", "administrator")
@@ -85,12 +82,23 @@ class AccountService:
             ).fetchone()
             if existing_user:
                 raise ValueError("Customer is already linked to another user")
+            existing_link = conn.execute(
+                "SELECT user_id FROM customer_accounts WHERE user_id=?", (user_id,)
+            ).fetchone()
+            if existing_link:
+                conn.execute(
+                    "UPDATE customer_accounts SET customer_id=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+                    (customer_id, user_id),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO customer_accounts(user_id,customer_id) VALUES(?,?)",
+                    (user_id, customer_id),
+                )
             conn.execute(
-                "INSERT INTO customer_accounts(user_id,customer_id) VALUES(?,?) "
-                "ON CONFLICT(user_id) DO UPDATE SET customer_id=excluded.customer_id,updated_at=CURRENT_TIMESTAMP",
-                (user_id, customer_id),
+                "UPDATE users SET account_type='customer',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (user_id,),
             )
-            conn.execute("UPDATE users SET account_type='customer',updated_at=CURRENT_TIMESTAMP WHERE id=?", (user_id,))
             conn.commit()
         return self.customer_for_user(user_id)
 
@@ -107,14 +115,23 @@ class AccountService:
         if not employment_status:
             employment_status = "active"
         with self.database.connect() as conn:
+            existing_profile = conn.execute(
+                "SELECT user_id FROM employee_profiles WHERE user_id=?", (user_id,)
+            ).fetchone()
+            if existing_profile:
+                conn.execute(
+                    "UPDATE employee_profiles SET department=?,position=?,employment_status=?,metadata_json=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+                    (department, position, employment_status, metadata_json, user_id),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO employee_profiles(user_id,department,position,employment_status,metadata_json,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)",
+                    (user_id, department, position, employment_status, metadata_json),
+                )
             conn.execute(
-                "INSERT INTO employee_profiles(user_id,department,position,employment_status,metadata_json,updated_at) "
-                "VALUES(?,?,?,?,?,CURRENT_TIMESTAMP) "
-                "ON CONFLICT(user_id) DO UPDATE SET department=excluded.department,position=excluded.position,"
-                "employment_status=excluded.employment_status,metadata_json=excluded.metadata_json,updated_at=CURRENT_TIMESTAMP",
-                (user_id, department, position, employment_status, metadata_json),
+                "UPDATE users SET account_type='employee',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (user_id,),
             )
-            conn.execute("UPDATE users SET account_type='employee',updated_at=CURRENT_TIMESTAMP WHERE id=?", (user_id,))
             conn.commit()
         return self.employee_for_user(user_id)
 
