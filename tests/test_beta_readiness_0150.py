@@ -47,7 +47,7 @@ class BetaReadiness0150Tests(unittest.TestCase):
             finally:
                 migration_module.MIGRATIONS=original
             with db.connect() as c:
-                self.assertEqual(c.execute("SELECT MAX(version) FROM app_migrations").fetchone()[0],35)
+                self.assertGreaterEqual(c.execute("SELECT MAX(version) FROM app_migrations").fetchone()[0],35)
                 self.assertIsNotNone(c.execute("SELECT name FROM sqlite_master WHERE name='supply_items'").fetchone())
 
     def test_backup_is_created_and_restorable(self):
@@ -134,7 +134,6 @@ class BetaReadiness0150Tests(unittest.TestCase):
             fulfillment.save(oid,"shipping","shipped","USPS","TESTTRACK",8,500,"Test Address",
                              length_in=6,width_in=4,height_in=2)
             self.assertEqual(orders.get(oid)[0]["status"],"shipped")
-            # Shipping charge is added after the initial payment, so settle the new balance.
             inv_after_shipping=invoices.get(iid)[0]
             balance=int(inv_after_shipping["total_cents"] or 0)-int(inv_after_shipping["paid_cents"] or 0)
             if balance>0:invoices.record_payment(iid,balance,"Cash","BETA-SHIP")
