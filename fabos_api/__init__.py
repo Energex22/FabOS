@@ -1,4 +1,6 @@
 """Provider-independent FabOS API boundary."""
+from urllib.parse import urlsplit
+
 from fabos_api.app import FabOSAPI, create_wsgi_app
 from fabos_core.services.customer_accounts import CustomerAccountService
 
@@ -26,13 +28,34 @@ def _api_context(self, headers, permission=None):
 
 
 def _api_request(self, method, path, body=None, headers=None):
-    parsed = path.split("?", 1)[0].strip("/").split("/")
-    if parsed == ["api", self.VERSION, "auth", "register"] and (method or "GET").upper() == "POST":
+    parsed_url = urlsplit(path or "/")
+    parsed = [part for part in parsed_url.path.strip("/").split("/") if part]
+    method = (method or "GET").upper()
+
+    if parsed == ["api", self.VERSION, "auth", "register"] and method == "POST":
         try:
             service = CustomerAccountService(self.core.database, self.core.accounts, self.core.auth)
-            return self._response(201, service.register(body.get("name"), body.get("email"), body.get("password"), body.get("phone", "")))
+            result = service.register(
+                body.get("name"),
+                body.get("email"),
+                body.get("password"),
+                body.get("phone", ""),
+            )
+            return self._response(201, result)
         except Exception as exc:
             return self._error(exc)
+
+    if parsed == ["api", self.VERSION, "customer", "me"] and method == "GET":
+        try:
+            context = self._context(headers)
+            if context.get("account_type") != "customer":
+                raise PermissionError("Customer account required")
+            user = self.core.accounts.account_summary(context["id"])
+            customer = self.core.accounts.customer_for_user(context["id"])
+            return self._response(200, {"user": user, "customer": customer})
+        except Exception as exc:
+            return self._error(exc)
+
     return _original_request(self, method, path, body, headers)
 
 
