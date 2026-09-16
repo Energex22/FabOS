@@ -92,8 +92,8 @@ class CustomerCommerceService:
             if not product_id:
                 raise ValueError("Each order item requires a productId")
             product = self.products.get(product_id)
-            if not product:
-                raise ValueError("Product not found")
+            if not product or not self.products.is_customer_eligible(product_id):
+                raise ValueError("Product is not available for customer ordering")
             quantity = self._positive_quantity(requested.get("quantity", 1))
             variant_id = str(requested.get("variantId") or requested.get("variant_id") or "").strip()
             configuration = requested.get("configuration") or {}
