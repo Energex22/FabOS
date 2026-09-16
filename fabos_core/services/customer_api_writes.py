@@ -3,6 +3,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
 
+class RegistrationRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=1024)
+    phone: str = Field(default="", max_length=50)
+
 class QuoteProject(BaseModel):
     idea: str = Field(min_length=1, max_length=4000)
     dimensions: str = Field(default="", max_length=1000)
@@ -25,6 +31,15 @@ class OrderRequest(BaseModel):
     notes: str = Field(default="", max_length=4000)
 
 def register_customer_write_routes(app, get_application, current_user):
+    @app.post("/api/v1/auth/register")
+    def register_customer(payload: RegistrationRequest, application=Depends(get_application)):
+        try:
+            result = application.customer_commerce.register_customer(payload.name, payload.email, payload.password, payload.phone)
+            summary = result["user"]
+            return {"token": result["token"], "expires_at": result["expires_at"], "user": _json(summary["user"]), "customer": _json(summary.get("customer"))}
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.post("/api/v1/customer/quotes")
     def create_customer_quote(payload: QuoteRequest, user=Depends(current_user), application=Depends(get_application)):
         try:
