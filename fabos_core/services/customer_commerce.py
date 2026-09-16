@@ -1,5 +1,6 @@
 """Customer-facing commerce operations for the public FabOS API."""
 
+import json
 import uuid
 from datetime import date
 
@@ -60,6 +61,20 @@ class CustomerCommerceService:
             raise ValueError("Quantity must be between 1 and 1000")
         return quantity
 
+    @staticmethod
+    def _shipping_address(value):
+        if not isinstance(value, dict):
+            raise ValueError("Shipping address is required")
+        address = {
+            "address": str(value.get("address") or "").strip(),
+            "city": str(value.get("city") or "").strip(),
+            "state": str(value.get("state") or "").strip(),
+            "zip": str(value.get("zip") or "").strip(),
+        }
+        if not all(address.values()):
+            raise ValueError("Complete shipping address is required")
+        return address
+
     def create_quote_request(self, user_id, project):
         customer = self._customer(user_id)
         idea = str(project.get("idea") or "").strip()
@@ -79,8 +94,9 @@ class CustomerCommerceService:
         quote_id = self.quotes.save({"customer_id": customer["id"], "status": "draft", "notes": notes}, [{"product_id": None, "description": "\n".join(description_parts), "quantity": quantity, "unit_price_cents": 0, "material": material, "color": "", "estimated_minutes": 0, "estimated_filament_g": 0}])
         return self.quotes.get_for_user(user_id, quote_id)
 
-    def create_order(self, user_id, items, notes=""):
+    def create_order(self, user_id, items, shipping_address, notes=""):
         customer = self._customer(user_id)
+        shipping_address = self._shipping_address(shipping_address)
         if not isinstance(items, list) or not items:
             raise ValueError("At least one order item is required")
         resolved_items = []
@@ -111,17 +127,21 @@ class CustomerCommerceService:
             resolved_items.append({"product_id": product_id, "description": str(product["name"]), "quantity": quantity, "unit_price_cents": unit_price_cents, "material": material, "color": color, "estimated_minutes": int(product["estimated_minutes"] or 0), "estimated_filament_g": float(product["estimated_filament_g"] or 0)})
         quote_id = self.quotes.save({"customer_id": customer["id"], "status": "approved", "notes": str(notes or "").strip()}, resolved_items)
         shipping_cents = int(float(self.shop_settings.get("shipping_flat_cents", "0") or 0))
-        total_cents = subtotal_cents + max(0, shipping_cents)
+        tax_percent = float(self.shop_settings.get("default_tax_percent", "0") or 0)
+        tax_cents = int(round(subtotal_cents * max(0.0, tax_percent) / 100.0))
+        total_cents = subtotal_cents + max(0, shipping_cents) + tax_cents
         order_id = str(uuid.uuid4())
         prefix = "O-" + date.today().strftime("%Y%m") + "-"
         with self.database.connect() as conn:
             row = conn.execute("SELECT order_number FROM orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1", (prefix + "%",)).fetchone()
             sequence = int(row[0].split("-")[-1]) + 1 if row else 1
             order_number = prefix + ("%04d" % sequence)
-            conn.execute("INSERT INTO orders(id,order_number,customer_id,quote_id,status,due_at,total_cents) VALUES(?,?,?,?,?,?,?)", (order_id, order_number, customer["id"], quote_id, "pending", None, total_cents))
+            conn.execute("""INSERT INTO orders
+                (id,order_number,customer_id,quote_id,status,due_at,total_cents,tax_cents,shipping_cents,shipping_address_json,checkout_notes,checkout_channel)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (order_id, order_number, customer["id"], quote_id, "pending", None, total_cents, tax_cents, shipping_cents, json.dumps(shipping_address), str(notes or "").strip(), "customer-web"))
             conn.commit()
         row, saved_items = self._order_for_customer(user_id, order_id)
-        return row, saved_items, subtotal_cents, shipping_cents, total_cents
+        return row, saved_items, subtotal_cents, shipping_cents, tax_cents, total_cents
 
     def _order_for_customer(self, user_id, order_id):
         customer = self._customer(user_id)
