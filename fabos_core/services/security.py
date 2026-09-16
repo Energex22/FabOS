@@ -36,11 +36,18 @@ class SecurityService:
         return user
 
     def context(self, token, permission=None):
-        session = self.authenticate(token)
-        user = self.actor(session["user_id"])
+        authenticated = self.authenticate(token)
+        # AuthService.authenticate currently returns the authenticated user row,
+        # while provider adapters may return a session containing user_id. Accept
+        # both shapes so the security boundary remains provider-independent.
+        try:
+            user_id = authenticated["user_id"]
+        except (KeyError, TypeError):
+            user_id = authenticated["id"] if authenticated else None
+        user = self.actor(user_id)
         if permission:
             self.permissions.require(user["account_type"], permission, user_id=user["id"])
-        return {"user": user, "session": session}
+        return {"user": user, "session": authenticated}
 
     def customer_scope(self, user_id, customer_id):
         user = self.actor(user_id)
