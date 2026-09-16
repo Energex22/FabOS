@@ -81,7 +81,7 @@ def _api_request(self, method, path, body=None, headers=None):
 
     if parsed == ["api", self.VERSION, "checkout", "order"] and method == "POST":
         try:
-            context = self._context(headers, "order.manage")
+            context = self._context(headers)
             if context.get("account_type") != "customer":
                 raise PermissionError("Customer account required")
             service = CheckoutService(self.core.database, self.core.accounts, self.core.products, self.core.shop_settings)
