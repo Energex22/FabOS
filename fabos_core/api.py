@@ -84,8 +84,16 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class StorefrontUpdate(BaseModel):
+    visibility: str = Field(default="draft", min_length=1, max_length=20)
+    origin_type: str = Field(default="catalog_import", min_length=1, max_length=40)
+    source_customer_id: Optional[str] = Field(default=None, max_length=100)
+    customer_title: Optional[str] = Field(default=None, max_length=200)
+    customer_description: Optional[str] = Field(default=None, max_length=4000)
+
+
 def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
-    app = FastAPI(title="FabOS Customer API", version="1.1")
+    app = FastAPI(title="FabOS Customer API", version="1.2")
     fabos = application or FabOSApplication()
     app.state.fabos = fabos
 
@@ -115,9 +123,14 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="Customer account required")
         return user
 
+    def administrator_user(user: Any = Depends(current_user)):
+        if str(user["account_type"] or "").lower() != "administrator":
+            raise HTTPException(status_code=403, detail="Administrator account required")
+        return user
+
     @app.get("/api/v1/health")
     def health(application: FabOSApplication = Depends(get_application)):
-        return {"status": "ok", "service": "FabOS Customer API", "version": "1.1"}
+        return {"status": "ok", "service": "FabOS Customer API", "version": "1.2"}
 
     @app.get("/api/v1/catalog")
     def catalog(q: str = "", category: str = "All", sort: str = "name", desc: bool = False, application: FabOSApplication = Depends(get_application)):
@@ -136,6 +149,42 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         if not row or not application.products.is_customer_eligible(product_id):
             raise HTTPException(status_code=404, detail="Product not found")
         return _public_product(row, application, application.products.storefront_state(product_id))
+
+    @app.get("/api/v1/admin/catalog")
+    def admin_catalog(q: str = "", category: str = "All", sort: str = "name", desc: bool = False, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        rows = application.products.list(query=q, category=category, order_by=sort, descending=desc)
+        products = []
+        for row in rows:
+            state = application.products.storefront_state(row["id"])
+            products.append({"product": _json(row), "storefront": state, "customer_eligible": application.products.is_customer_eligible(row["id"])})
+        return {"products": products}
+
+    @app.get("/api/v1/admin/catalog/{product_id}")
+    def admin_catalog_product(product_id: str, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        row = application.products.get(product_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Product not found")
+        return {"product": _json(row), "storefront": application.products.storefront_state(product_id), "customer_eligible": application.products.is_customer_eligible(product_id)}
+
+    @app.patch("/api/v1/admin/catalog/{product_id}/storefront")
+    def update_storefront(product_id: str, payload: StorefrontUpdate, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        row = application.products.get(product_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Product not found")
+        values = payload.model_dump()
+        if values["visibility"].lower() == "published":
+            state = application.products.storefront_state(product_id)
+            reasons = []
+            if not state["has_model"]:
+                reasons.append("A printable 3D model is required")
+            if not state["has_price"]:
+                reasons.append("A customer price greater than zero is required")
+            if state["license_status"] in {"blocked", "prohibited", "commercially_prohibited", "review_required"}:
+                reasons.append("The license requires review or does not allow commercial publication")
+            if reasons:
+                raise HTTPException(status_code=409, detail={"message": "Product is not ready to publish", "reasons": reasons})
+        state = application.products.save_storefront(product_id, values)
+        return {"product": _json(row), "storefront": state, "customer_eligible": application.products.is_customer_eligible(product_id)}
 
     @app.post("/api/v1/auth/login")
     def login(payload: LoginRequest, application: FabOSApplication = Depends(get_application)):
