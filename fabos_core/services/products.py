@@ -8,6 +8,27 @@ from typing import Dict, List, Optional
 class ProductService:
     def __init__(self, database):
         self.database = database
+        self._ensure_storefront_schema()
+
+    def _ensure_storefront_schema(self):
+        with self.database.connect() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS product_storefront(
+                    id TEXT PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+                    visibility TEXT NOT NULL DEFAULT 'draft',
+                    origin_type TEXT NOT NULL DEFAULT 'catalog_import',
+                    source_customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    customer_title TEXT,
+                    customer_description TEXT,
+                    published_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_product_storefront_visibility ON product_storefront(visibility,sort_order);
+                CREATE INDEX IF NOT EXISTS idx_product_storefront_origin ON product_storefront(origin_type,source_customer_id);
+            """)
+            conn.commit()
 
     def import_catalog_if_empty(self, csv_path: Path) -> int:
         with self.database.connect() as conn:
@@ -84,7 +105,6 @@ class ProductService:
     def images(self, product_id):
         with self.database.connect() as conn:
             return conn.execute("SELECT * FROM product_images WHERE product_id=? ORDER BY is_primary DESC,created_at", (product_id,)).fetchall()
-
 
     def has_real_image(self, product_id):
         with self.database.connect() as conn:
@@ -166,6 +186,105 @@ class ProductService:
         with self.database.connect() as conn:
             return conn.execute("SELECT * FROM product_variants WHERE product_id=? ORDER BY name", (product_id,)).fetchall()
 
+    def _table_columns(self, conn, table):
+        try:
+            return {str(row[1]) for row in conn.execute("PRAGMA table_info(%s)" % table).fetchall()}
+        except Exception:
+            return set()
+
+    def _model_file_count(self, conn, product_id):
+        model_exts = ("%.stl", "%.3mf", "%.obj", "%.step", "%.stp")
+        count = 0
+        if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='product_files'").fetchone():
+            cols = self._table_columns(conn, "product_files")
+            usable = [c for c in ("path", "file_path", "filename", "original_name", "name", "file_type", "mime_type", "kind") if c in cols]
+            if usable:
+                clauses = []
+                for col in usable:
+                    clauses.extend(["LOWER(CAST(%s AS TEXT)) LIKE ?" % col for _ in model_exts])
+                args = [product_id]
+                for _ in usable:
+                    args.extend(model_exts)
+                count += conn.execute("SELECT COUNT(*) FROM product_files WHERE product_id=? AND (" + " OR ".join(clauses) + ")", args).fetchone()[0]
+        if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='designs'").fetchone():
+            asset_cols = self._table_columns(conn, "design_assets")
+            if asset_cols and "design_id" in asset_cols:
+                path_col = "stored_path" if "stored_path" in asset_cols else ("original_name" if "original_name" in asset_cols else None)
+                if path_col:
+                    clauses = ["LOWER(CAST(a.%s AS TEXT)) LIKE ?" % path_col for _ in model_exts]
+                    args = [product_id] + list(model_exts)
+                    count += conn.execute(
+                        "SELECT COUNT(*) FROM design_assets a JOIN designs d ON d.id=a.design_id WHERE d.product_id=? AND (" + " OR ".join(clauses) + ")",
+                        args,
+                    ).fetchone()[0]
+        return int(count)
+
+    def storefront_state(self, product_id):
+        self._ensure_storefront_schema()
+        with self.database.connect() as conn:
+            row = conn.execute("SELECT * FROM product_storefront WHERE id=?", (product_id,)).fetchone()
+            model_count = self._model_file_count(conn, product_id)
+            product = conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
+        if not product:
+            return None
+        return {
+            "visibility": str(row["visibility"] if row else "draft"),
+            "origin_type": str(row["origin_type"] if row else "catalog_import"),
+            "customer_title": row["customer_title"] if row else None,
+            "customer_description": row["customer_description"] if row else None,
+            "model_file_count": model_count,
+            "has_model": model_count > 0,
+            "has_price": int(product["price_cents"] or 0) > 0,
+            "license_status": str(product["license_status"] or "").lower(),
+            "has_real_image": self.has_real_image(product_id),
+        }
+
+    def is_customer_eligible(self, product_id):
+        state = self.storefront_state(product_id)
+        if not state:
+            return False
+        if state["visibility"] != "published":
+            return False
+        if not state["has_model"] or not state["has_price"]:
+            return False
+        return state["license_status"] not in {"blocked", "prohibited", "commercially_prohibited", "review_required"}
+
+    def customer_catalog(self, query="", category="All", order_by="name", descending=False):
+        rows = self.list(query=query, category=category, order_by=order_by, descending=descending)
+        eligible = []
+        with self.database.connect() as conn:
+            for row in rows:
+                state = self.storefront_state(row["id"])
+                if state and self.is_customer_eligible(row["id"]):
+                    eligible.append((row, state))
+        return eligible
+
+    def save_storefront(self, product_id, values):
+        self._ensure_storefront_schema()
+        allowed_visibility = {"draft", "review", "published", "retired"}
+        visibility = str(values.get("visibility") or "draft").lower()
+        if visibility not in allowed_visibility:
+            raise ValueError("Invalid storefront visibility")
+        origin = str(values.get("origin_type") or "catalog_import")
+        source_customer_id = values.get("source_customer_id")
+        title = values.get("customer_title")
+        description = values.get("customer_description")
+        with self.database.connect() as conn:
+            existing = conn.execute("SELECT id FROM product_storefront WHERE id=?", (product_id,)).fetchone()
+            published_at = "CURRENT_TIMESTAMP" if visibility == "published" else "NULL"
+            if existing:
+                conn.execute(
+                    "UPDATE product_storefront SET visibility=?,origin_type=?,source_customer_id=?,customer_title=?,customer_description=?,published_at=" + published_at + ",updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (visibility, origin, source_customer_id, title, description, product_id),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO product_storefront(id,visibility,origin_type,source_customer_id,customer_title,customer_description,published_at) VALUES(?,?,?,?,?,?," + published_at + ")",
+                    (product_id, visibility, origin, source_customer_id, title, description),
+                )
+            conn.commit()
+        return self.storefront_state(product_id)
+
     def save(self, values: Dict[str, object], product_id: Optional[str] = None) -> str:
         product_id = product_id or str(uuid.uuid4())
         with self.database.connect() as conn:
@@ -189,6 +308,7 @@ class ProductService:
                      price_cents,estimated_minutes,estimated_filament_g,id)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", payload)
             conn.commit()
+        self._ensure_storefront_schema()
         return product_id
 
     def delete(self, product_id):
