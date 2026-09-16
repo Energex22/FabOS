@@ -1,16 +1,7 @@
 """HTTP endpoints for provider callbacks and internal physical payments."""
 import json
 
-from fastapi import Depends, Header, HTTPException, Request
-from pydantic import BaseModel, Field
-
 from fabos_core.services.payments import PaymentProviderError, PaymentProviderNotConfigured
-
-
-class PhysicalPaymentRequest(BaseModel):
-    order_id: str = Field(min_length=1, max_length=200)
-    source_id: str = Field(min_length=1, max_length=500)
-    provider: str = Field(default="square", min_length=1, max_length=30)
 
 
 def _record_refund(application, provider_name, payload):
@@ -32,6 +23,7 @@ def _record_refund(application, provider_name, payload):
         return None
 
     obj = ((event.get("data") or {}).get("object") or {})
+    metadata = {}
     if provider_name == "stripe":
         amount_cents = int(obj.get("amount") or obj.get("amount_refunded") or 0)
         provider_payment_id = str(obj.get("payment_intent") or obj.get("charge") or "")
@@ -79,7 +71,7 @@ def _record_refund(application, provider_name, payload):
                 (provider_payment_id,),
             ).fetchone()
         if not transaction:
-            order_id = str((metadata.get("order_id") if provider_name == "stripe" else "") or "")
+            order_id = str(metadata.get("order_id") or "")
             if order_id:
                 transaction = conn.execute(
                     "SELECT * FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",
@@ -132,6 +124,15 @@ def _record_refund(application, provider_name, payload):
 
 
 def register_payment_routes(app, get_application, administrator_user):
+    """Register HTTP payment routes without making FastAPI a test-time import requirement."""
+    from fastapi import Depends, Header, HTTPException, Request
+    from pydantic import BaseModel, Field
+
+    class PhysicalPaymentRequest(BaseModel):
+        order_id: str = Field(min_length=1, max_length=200)
+        source_id: str = Field(min_length=1, max_length=500)
+        provider: str = Field(default="square", min_length=1, max_length=30)
+
     @app.post("/api/v1/webhooks/payments/{provider_name}")
     async def payment_webhook(
         provider_name: str,
