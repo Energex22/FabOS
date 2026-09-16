@@ -21,10 +21,19 @@ class _Accounts:
         return {"id": user_id, "account_type": "customer", "active": True}
 
 
+class _Products:
+    def list(self, *args):
+        return [{"id": "p1", "name": "Widget", "category": "Home", "price_cents": 2450}]
+
+    def categories(self):
+        return ["Home", "Desk"]
+
+
 class _Core:
     def __init__(self, structured=True):
         self.security = _Security(structured)
         self.accounts = _Accounts()
+        self.products = _Products()
 
 
 class Pass23SecurityContextCompatibilityTests(unittest.TestCase):
@@ -41,6 +50,17 @@ class Pass23SecurityContextCompatibilityTests(unittest.TestCase):
         self.assertEqual(context["id"], "customer-1")
         self.assertEqual(context["account_type"], "customer")
 
+    def test_public_catalog_does_not_require_authentication(self):
+        api = FabOSAPI(_Core())
+        result = api.request("GET", "/api/v1/catalog")
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result["data"]["products"][0]["price"], 24.5)
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_public_catalog_categories_does_not_require_authentication(self):
+        api = FabOSAPI(_Core())
+        result = api.request("GET", "/api/v1/catalog/categories")
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result["data"]["categories"], ["Home", "Desk"])
+
+
+if __name__ == "__main__": unittest.main()
