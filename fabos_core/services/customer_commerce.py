@@ -5,12 +5,39 @@ from datetime import date
 
 
 class CustomerCommerceService:
-    def __init__(self, database, accounts, products, quotes, shop_settings):
+    def __init__(self, database, accounts, products, quotes, shop_settings, auth=None):
         self.database = database
         self.accounts = accounts
         self.products = products
         self.quotes = quotes
         self.shop_settings = shop_settings
+        self.auth = auth
+
+    def register_customer(self, name, email, password, phone=""):
+        if self.auth is None:
+            raise RuntimeError("Authentication service is required")
+        name = str(name or "").strip()
+        email = str(email or "").strip().lower()
+        phone = str(phone or "").strip()
+        if not name:
+            raise ValueError("Name is required")
+        if not email or "@" not in email:
+            raise ValueError("A valid email is required")
+        if self.accounts.get_by_email(email):
+            raise ValueError("An account with that email already exists")
+        customer_id = str(uuid.uuid4())
+        user_id = str(uuid.uuid4())
+        username = "customer-" + user_id
+        password_hash = self.auth.hash_password(password)
+        with self.database.connect() as conn:
+            conn.execute("INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)", (customer_id, name, email, phone, ""))
+            conn.execute("INSERT INTO users(id,username,password_hash,email,account_type,active) VALUES(?,?,?,?,?,1)", (user_id, username, password_hash, email, "customer"))
+            conn.execute("INSERT INTO customer_accounts(user_id,customer_id) VALUES(?,?)", (user_id, customer_id))
+            conn.commit()
+        result = self.auth.login(email, password)
+        if not result:
+            raise RuntimeError("Customer account could not be authenticated after creation")
+        return result
 
     def _customer(self, user_id):
         user = self.accounts.get_user(user_id)
@@ -49,19 +76,7 @@ class CustomerCommerceService:
             description_parts.append("Material: " + material)
         if notes:
             description_parts.append("Notes: " + notes)
-        quote_id = self.quotes.save(
-            {"customer_id": customer["id"], "status": "draft", "notes": notes},
-            [{
-                "product_id": None,
-                "description": "\n".join(description_parts),
-                "quantity": quantity,
-                "unit_price_cents": 0,
-                "material": material,
-                "color": "",
-                "estimated_minutes": 0,
-                "estimated_filament_g": 0,
-            }],
-        )
+        quote_id = self.quotes.save({"customer_id": customer["id"], "status": "draft", "notes": notes}, [{"product_id": None, "description": "\n".join(description_parts), "quantity": quantity, "unit_price_cents": 0, "material": material, "color": "", "estimated_minutes": 0, "estimated_filament_g": 0}])
         return self.quotes.get_for_user(user_id, quote_id)
 
     def create_order(self, user_id, items, notes=""):
@@ -93,20 +108,8 @@ class CustomerCommerceService:
                 material = material or str(variant["material"] or "")
                 color = color or str(variant["color"] or "")
             subtotal_cents += unit_price_cents * quantity
-            resolved_items.append({
-                "product_id": product_id,
-                "description": str(product["name"]),
-                "quantity": quantity,
-                "unit_price_cents": unit_price_cents,
-                "material": material,
-                "color": color,
-                "estimated_minutes": int(product["estimated_minutes"] or 0),
-                "estimated_filament_g": float(product["estimated_filament_g"] or 0),
-            })
-        quote_id = self.quotes.save(
-            {"customer_id": customer["id"], "status": "approved", "notes": str(notes or "").strip()},
-            resolved_items,
-        )
+            resolved_items.append({"product_id": product_id, "description": str(product["name"]), "quantity": quantity, "unit_price_cents": unit_price_cents, "material": material, "color": color, "estimated_minutes": int(product["estimated_minutes"] or 0), "estimated_filament_g": float(product["estimated_filament_g"] or 0)})
+        quote_id = self.quotes.save({"customer_id": customer["id"], "status": "approved", "notes": str(notes or "").strip()}, resolved_items)
         shipping_cents = int(float(self.shop_settings.get("shipping_flat_cents", "0") or 0))
         total_cents = subtotal_cents + max(0, shipping_cents)
         order_id = str(uuid.uuid4())
