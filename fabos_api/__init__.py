@@ -2,6 +2,7 @@
 from urllib.parse import urlsplit
 
 from fabos_api.app import FabOSAPI, create_wsgi_app
+from fabos_core.services.commerce_pricing import CommercePricingService
 from fabos_core.services.customer_accounts import CustomerAccountService
 
 _original_context = FabOSAPI._context
@@ -56,6 +57,21 @@ def _api_request(self, method, path, body=None, headers=None):
             user = summary.get("user") if isinstance(summary, dict) else None
             customer = self.core.accounts.customer_for_user(context["id"])
             return self._response(200, {"user": user, "customer": customer})
+        except Exception as exc:
+            return self._error(exc)
+
+    if parsed == ["api", self.VERSION, "checkout", "estimate"] and method == "POST":
+        try:
+            context = self._context(headers)
+            if context.get("account_type") != "customer":
+                raise PermissionError("Customer account required")
+            service = CommercePricingService(self.core.products, self.core.shop_settings)
+            result = service.estimate(
+                body.get("items"),
+                body.get("shipping_mode"),
+                body.get("shipping_weight_g", 0),
+            )
+            return self._response(200, result)
         except Exception as exc:
             return self._error(exc)
 
