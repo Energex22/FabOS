@@ -17,8 +17,9 @@ def _record_refund(application, provider_name, payload):
     """Reconcile a provider refund into FabOS's existing invoice ledger.
 
     Refunds are stored as negative payment-ledger entries so InvoiceService.reconcile()
-    computes the customer's actual net paid amount. The provider event id is the
-    idempotency key, preventing duplicate webhook deliveries from double-counting.
+    computes the customer's actual net paid amount. The provider refund id (when
+    available) is preferred over the webhook event id so multiple provider events for
+    the same refund remain idempotent.
     """
     try:
         event = json.loads(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
@@ -33,19 +34,22 @@ def _record_refund(application, provider_name, payload):
     obj = ((event.get("data") or {}).get("object") or {})
     if provider_name == "stripe":
         amount_cents = int(obj.get("amount") or obj.get("amount_refunded") or 0)
-        provider_payment_id = str(
-            obj.get("payment_intent") or obj.get("charge") or ""
-        )
+        provider_payment_id = str(obj.get("payment_intent") or obj.get("charge") or "")
         metadata = obj.get("metadata") or {}
         payment_id = str(metadata.get("payment_id") or "")
-        refund_reference = f"stripe-refund:{event_id}"
+        refund_items = ((obj.get("refunds") or {}).get("data") or [])
+        refund_id = str(refund_items[0].get("id") or "") if refund_items else ""
+        if event_type == "refund.created":
+            refund_id = str(obj.get("id") or refund_id)
+            provider_payment_id = str(obj.get("payment_intent") or obj.get("charge") or provider_payment_id)
+        refund_reference = f"stripe-refund:{refund_id or event_id}"
     elif provider_name == "square":
         refund = obj.get("refund") or obj
         amount_money = refund.get("amount_money") or {}
         amount_cents = int(amount_money.get("amount") or 0)
         provider_payment_id = str(refund.get("payment_id") or "")
         payment_id = ""
-        refund_reference = f"square-refund:{event_id}"
+        refund_reference = f"square-refund:{refund.get('id') or event_id}"
         if str(refund.get("status") or "").upper() not in {"COMPLETED", "PENDING"}:
             return None
     else:
