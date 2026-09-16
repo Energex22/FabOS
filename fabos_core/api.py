@@ -13,17 +13,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from fabos_core.application import FabOSApplication
+from fabos_core.services.customer_api_writes import register_customer_write_routes
 
 
 CUSTOMER_STATUS = {
-    "new": "Order received",
-    "pending": "Order received",
-    "confirmed": "Order received",
-    "in_production": "Preparing your order",
-    "ready": "Final quality check",
-    "shipped": "Shipping",
-    "completed": "Delivered",
-    "cancelled": "Cancelled",
+    "new": "Order received", "pending": "Order received", "confirmed": "Order received",
+    "in_production": "Preparing your order", "ready": "Final quality check",
+    "shipped": "Shipping", "completed": "Delivered", "cancelled": "Cancelled",
 }
 
 
@@ -110,6 +106,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             item["price"] = round(int(row["price_cents"] or 0) / 100, 2)
             item.pop("price_cents", None)
             item["images"] = [_json(image) for image in application.products.images(row["id"])]
+            item["variants"] = [_json(variant) for variant in application.products.variants(row["id"])]
             item.pop("product_files", None)
             products.append(item)
         return {"products": products}
@@ -206,6 +203,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             safe_items.append(value)
         return {"order": order, "items": safe_items}
 
+    register_customer_write_routes(app, get_application, customer_user)
     return app
 
 
