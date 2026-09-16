@@ -59,7 +59,6 @@ class FabOSAPI:
 
     @staticmethod
     def _public_product(row):
-        """Return only fields intended for the public storefront."""
         if row is None:
             return None
         data = dict(row)
@@ -84,21 +83,24 @@ class FabOSAPI:
             if route == ["api", self.VERSION, "health"] and method == "GET":
                 return self._response(200, {"ok": True, "service": "FabOS", "api_version": self.VERSION})
 
-            # Public storefront catalog. This deliberately has no authentication
-            # requirement; checkout/account/order operations remain protected.
             if route == ["api", self.VERSION, "catalog"] and method == "GET":
                 rows = self.core.products.list(
-                    query.get("q", [""])[0],
-                    query.get("category", ["All"])[0],
-                    query.get("license", ["All"])[0],
-                    query.get("sort", ["name"])[0],
+                    query.get("q", [""])[0], query.get("category", ["All"])[0],
+                    query.get("license", ["All"])[0], query.get("sort", ["name"])[0],
                     query.get("desc", ["0"])[0] not in ("0", "false", "no"),
                 )
                 return self._response(200, {"products": [self._public_product(row) for row in rows]})
 
             if route == ["api", self.VERSION, "catalog", "categories"] and method == "GET":
-                rows = self.core.products.categories()
-                return self._response(200, {"categories": rows})
+                return self._response(200, {"categories": self.core.products.categories()})
+
+            if len(route) == 4 and route[:3] == ["api", self.VERSION, "catalog"] and method == "GET":
+                product = self.core.products.get(route[3])
+                if product is None:
+                    raise KeyError("Product not found")
+                return self._response(200, {"product": self._public_product(product),
+                                            "images": self.core.products.images(route[3]),
+                                            "variants": self.core.products.variants(route[3])})
 
             if route == ["api", self.VERSION, "auth", "login"] and method == "POST":
                 result = self.core.auth.login(body.get("identifier", ""), body.get("password", ""),
@@ -159,8 +161,7 @@ class FabOSAPI:
                                                               query.get("group", ["all"])[0])
                     else:
                         rows = self.core.quotes.list(query.get("q", [""])[0], query.get("status", ["All"])[0],
-                                                     query.get("sort", ["created"])[0],
-                                                     query.get("desc", ["1"])[0] not in ("0", "false", "no"),
+                                                     query.get("sort", ["created"])[0], query.get("desc", ["1"])[0] not in ("0", "false", "no"),
                                                      query.get("group", ["all"])[0])
                     return self._response(200, {"quotes": rows})
                 if len(route) == 4 and method == "GET":
