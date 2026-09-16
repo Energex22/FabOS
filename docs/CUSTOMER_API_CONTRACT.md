@@ -1,6 +1,6 @@
 # FabOS customer API boundary
 
-This document is the backend-side contract for the separate FabOS-Web customer frontend. The HTTP boundary is now implemented as the first FastAPI slice; create-quote/order submission and binary file upload remain later slices because they require additional business-flow decisions.
+This document is the backend-side contract for the separate FabOS-Web customer frontend. The HTTP boundary is implemented as a FastAPI + Uvicorn layer over the existing FabOS application and domain services.
 
 ## Runtime
 
@@ -26,15 +26,22 @@ The development server binds to `127.0.0.1:8000`. `FABOS_CORS_ORIGINS` may be se
 - `PATCH /api/v1/customer/me`
 - `GET /api/v1/customer/quotes`
 - `GET /api/v1/customer/quotes/{quote_id}`
+- `POST /api/v1/customer/quotes`
 - `GET /api/v1/customer/orders`
 - `GET /api/v1/customer/orders/{order_id}`
-
-## Planned routes
-
-- `POST /api/v1/customer/quotes`
 - `POST /api/v1/customer/orders`
 
-These are deliberately not implemented with ad-hoc database writes. The next slice will extend the appropriate FabOS domain services so browser-submitted totals, product prices, customer IDs, shipping values, and ownership are resolved authoritatively inside FabOS.
+## Customer quote submission
+
+`POST /api/v1/customer/quotes` accepts a project object containing `idea`, optional `dimensions`, `material`, `quantity`, and `notes`. A `file` object may contain metadata such as a filename; binary file transfer is intentionally not part of this endpoint.
+
+The server resolves the authenticated customer from the session and creates the quote through FabOS's quote service. The browser cannot select another customer's ID or set an authoritative price.
+
+## Customer order submission
+
+`POST /api/v1/customer/orders` accepts an `items` array containing `productId`, optional `variantId`, `quantity`, and optional configuration data, plus optional order notes.
+
+FabOS resolves the product and active variant from its catalog, calculates unit prices and the subtotal from server-side catalog data, applies the configured shipping setting, creates the linked quote/order records, and returns the authoritative totals. Browser-supplied totals, shipping amounts, customer IDs, and status values are ignored.
 
 ## Authentication
 
@@ -60,12 +67,6 @@ The API translates internal statuses into stable customer-facing labels:
 - `cancelled` → `Cancelled`
 
 The translation belongs in the API serializer so internal workflow changes do not become frontend breaking changes.
-
-## Request authority
-
-Customer-submitted prices, totals, shipping charges, customer IDs, order IDs, quote IDs, permissions, and status values are untrusted input. FabOS must resolve authoritative values from its database/services and must not trust totals or ownership supplied by the browser.
-
-The API returns HTTP errors at the boundary and intentionally uses generic ownership failures so one customer cannot use the API to enumerate another customer's records.
 
 ## File uploads
 
