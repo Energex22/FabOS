@@ -1,7 +1,14 @@
 """Write-side HTTP handlers for customer commerce."""
+from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import Depends, HTTPException
+import os
+import tempfile
+import uuid
+from fastapi import Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+
+MAX_CUSTOM_UPLOAD_BYTES = 25 * 1024 * 1024
+ALLOWED_CUSTOM_UPLOAD_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj"}
 
 class RegistrationRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
@@ -65,15 +72,76 @@ def register_customer_write_routes(app, get_application, current_user):
             customer_id = next((str(row["id"]) for row in existing if str(row["email"] or "").lower()==payload.email.strip().lower()), None)
             if not customer_id:
                 customer_id = application.customers.save({"name":payload.name.strip(),"email":payload.email.strip().lower(),"phone":"","notes":"Public custom-work request"})
-            description_parts=[project["idea"]]
-            if project.get("dimensions"):description_parts.append("Dimensions: "+project["dimensions"])
-            if project.get("material"):description_parts.append("Material: "+project["material"])
-            if project.get("notes"):description_parts.append("Notes: "+project["notes"])
-            quote_id=application.quotes.save({"customer_id":customer_id,"status":"draft","notes":project.get("notes","")},[{"product_id":None,"description":"\n".join(description_parts),"quantity":project.get("quantity",1),"unit_price_cents":0,"material":project.get("material",""),"color":"","estimated_minutes":0,"estimated_filament_g":0}])
+            quote_id = _create_public_quote(application, customer_id, project)
             quote=application.quotes.get(quote_id)[0]
             return {"quote":_json(quote),"request_number":str(quote["quote_number"]),"file":payload.file}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/v1/quote-requests/upload")
+    async def create_public_quote_request_with_file(
+        name: str = File(..., min_length=1, max_length=200),
+        email: str = File(..., min_length=3, max_length=320),
+        idea: str = File(..., min_length=1, max_length=4000),
+        dimensions: str = File(default="", max_length=1000),
+        material: str = File(default="", max_length=200),
+        quantity: int = File(default=1, ge=1, le=1000),
+        notes: str = File(default="", max_length=4000),
+        file: UploadFile = File(...),
+        application=Depends(get_application),
+    ):
+        filename = Path(file.filename or "").name
+        extension = Path(filename).suffix.lower()
+        if extension not in ALLOWED_CUSTOM_UPLOAD_EXTENSIONS:
+            raise HTTPException(status_code=415, detail="Unsupported 3D model file type")
+        if not filename:
+            raise HTTPException(status_code=400, detail="A model filename is required")
+        existing = application.customers.list(query=email.strip())
+        customer_id = next((str(row["id"]) for row in existing if str(row["email"] or "").lower()==email.strip().lower()), None)
+        if not customer_id:
+            customer_id = application.customers.save({"name":name.strip(),"email":email.strip().lower(),"phone":"","notes":"Public custom-work request"})
+        project = {"idea":idea,"dimensions":dimensions,"material":material,"quantity":quantity,"notes":notes}
+        project["notes"] = (project["notes"] or "").strip()
+        project["notes"] += ("\n" if project["notes"] else "") + "File: " + filename
+        quote_id = _create_public_quote(application, customer_id, project)
+        quote = application.quotes.get(quote_id)[0]
+        design_id = str(uuid.uuid4())
+        version_id = str(uuid.uuid4())
+        safe_name = "Custom Quote " + str(quote["quote_number"])
+        temp_path = None
+        size = 0
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
+                temp_path = tmp.name
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_CUSTOM_UPLOAD_BYTES:
+                        raise HTTPException(status_code=413, detail="3D model must be 25 MB or smaller")
+                    tmp.write(chunk)
+            with application.database.connect() as conn:
+                conn.execute("CREATE TABLE IF NOT EXISTS quote_designs(quote_id TEXT PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+                conn.execute("INSERT INTO designs(id,product_id,name,current_version,notes) VALUES(?,?,?,1,?)",(design_id,None,safe_name,"Customer custom quote %s"%quote["quote_number"]))
+                conn.execute("INSERT INTO design_versions(id,design_id,version,label,notes) VALUES(?,?,?,?,?)",(version_id,design_id,1,"Customer upload","Uploaded with custom quote request"))
+                conn.execute("INSERT INTO quote_designs(quote_id,design_id) VALUES(?,?)",(quote_id,design_id))
+                conn.commit()
+            application.design_vault.import_file(design_id,temp_path,make_primary=True)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            with application.database.connect() as conn:
+                conn.execute("DELETE FROM quote_designs WHERE quote_id=?",(quote_id,))
+                conn.execute("DELETE FROM designs WHERE id=?",(design_id,))
+                conn.commit()
+            raise HTTPException(status_code=500, detail="The model could not be stored") from exc
+        finally:
+            try:
+                if temp_path: os.unlink(temp_path)
+            except OSError: pass
+            await file.close()
+        return {"quote":_json(quote),"request_number":str(quote["quote_number"]),"design_id":design_id,"file":{"name":filename,"bytes":size,"extension":extension}}
 
     @app.post("/api/v1/customer/quotes")
     def create_customer_quote(payload: QuoteRequest, user=Depends(current_user), application=Depends(get_application)):
@@ -114,6 +182,13 @@ def register_customer_write_routes(app, get_application, current_user):
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+def _create_public_quote(application, customer_id, project):
+    description_parts=[project["idea"]]
+    if project.get("dimensions"):description_parts.append("Dimensions: "+project["dimensions"])
+    if project.get("material"):description_parts.append("Material: "+project["material"])
+    if project.get("notes"):description_parts.append("Notes: "+project["notes"])
+    return application.quotes.save({"customer_id":customer_id,"status":"draft","notes":project.get("notes","")},[{"product_id":None,"description":"\n".join(description_parts),"quantity":project.get("quantity",1),"unit_price_cents":0,"material":project.get("material",""),"color":"","estimated_minutes":0,"estimated_filament_g":0}])
 
 def _json(value):
     if value is None or isinstance(value, (str, int, float, bool)):
