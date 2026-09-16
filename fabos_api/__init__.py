@@ -25,6 +25,9 @@ def _api_context(self, headers, permission=None):
                 summary_user = summary.get("user")
                 if isinstance(summary_user, dict):
                     normalized.setdefault("account_type", summary_user.get("account_type"))
+                # Lightweight test doubles and older account adapters may expose
+                # account_type directly rather than nesting it under user.
+                normalized.setdefault("account_type", summary.get("account_type"))
         except Exception:
             pass
     return normalized
