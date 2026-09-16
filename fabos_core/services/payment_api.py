@@ -1,4 +1,6 @@
 """HTTP endpoints for provider callbacks and internal physical payments."""
+import json
+
 from fastapi import Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -9,6 +11,120 @@ class PhysicalPaymentRequest(BaseModel):
     order_id: str = Field(min_length=1, max_length=200)
     source_id: str = Field(min_length=1, max_length=500)
     provider: str = Field(default="square", min_length=1, max_length=30)
+
+
+def _record_refund(application, provider_name, payload):
+    """Reconcile a provider refund into FabOS's existing invoice ledger.
+
+    Refunds are stored as negative payment-ledger entries so InvoiceService.reconcile()
+    computes the customer's actual net paid amount. The provider event id is the
+    idempotency key, preventing duplicate webhook deliveries from double-counting.
+    """
+    try:
+        event = json.loads(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
+    except (TypeError, ValueError):
+        return None
+
+    event_id = str(event.get("id") or event.get("event_id") or "").strip()
+    event_type = str(event.get("type") or "").strip().lower()
+    if not event_id or "refund" not in event_type:
+        return None
+
+    obj = ((event.get("data") or {}).get("object") or {})
+    if provider_name == "stripe":
+        amount_cents = int(obj.get("amount") or obj.get("amount_refunded") or 0)
+        provider_payment_id = str(
+            obj.get("payment_intent") or obj.get("charge") or ""
+        )
+        metadata = obj.get("metadata") or {}
+        payment_id = str(metadata.get("payment_id") or "")
+        refund_reference = f"stripe-refund:{event_id}"
+    elif provider_name == "square":
+        refund = obj.get("refund") or obj
+        amount_money = refund.get("amount_money") or {}
+        amount_cents = int(amount_money.get("amount") or 0)
+        provider_payment_id = str(refund.get("payment_id") or "")
+        payment_id = ""
+        refund_reference = f"square-refund:{event_id}"
+        if str(refund.get("status") or "").upper() not in {"COMPLETED", "PENDING"}:
+            return None
+    else:
+        return None
+
+    if amount_cents <= 0:
+        return None
+
+    db = application.database
+    with db.connect() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM payments WHERE reference=? LIMIT 1",
+            (refund_reference,),
+        ).fetchone()
+        if existing:
+            return {"recorded": False, "duplicate": True, "reference": refund_reference}
+
+        transaction = None
+        if payment_id:
+            transaction = conn.execute(
+                "SELECT * FROM payment_transactions WHERE id=?",
+                (payment_id,),
+            ).fetchone()
+        if not transaction and provider_payment_id:
+            transaction = conn.execute(
+                "SELECT * FROM payment_transactions WHERE provider_payment_id=? ORDER BY created_at DESC LIMIT 1",
+                (provider_payment_id,),
+            ).fetchone()
+        if not transaction:
+            order_id = str((metadata.get("order_id") if provider_name == "stripe" else "") or "")
+            if order_id:
+                transaction = conn.execute(
+                    "SELECT * FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",
+                    (order_id,),
+                ).fetchone()
+        if not transaction:
+            return {"recorded": False, "duplicate": False, "reason": "payment_transaction_not_found"}
+
+        invoice_id = transaction["invoice_id"]
+        original_paid = int(
+            conn.execute(
+                "SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents>0",
+                (invoice_id,),
+            ).fetchone()[0]
+            or 0
+        )
+        already_refunded = int(
+            conn.execute(
+                "SELECT COALESCE(-SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents<0",
+                (invoice_id,),
+            ).fetchone()[0]
+            or 0
+        )
+        remaining = max(0, original_paid - already_refunded)
+        refund_amount = min(amount_cents, remaining)
+        if refund_amount <= 0:
+            return {"recorded": False, "duplicate": False, "reason": "refund_exceeds_recorded_payment"}
+
+        conn.execute(
+            "INSERT INTO payments(id,invoice_id,amount_cents,method,reference,notes) VALUES(?,?,?,?,?,?)",
+            (
+                f"refund-{event_id}",
+                invoice_id,
+                -refund_amount,
+                provider_name,
+                refund_reference,
+                "Gateway refund reconciled by FabOS",
+            ),
+        )
+        conn.commit()
+
+    application.invoices.reconcile(invoice_id)
+    return {
+        "recorded": True,
+        "duplicate": False,
+        "reference": refund_reference,
+        "amount_cents": refund_amount,
+        "invoice_id": invoice_id,
+    }
 
 
 def register_payment_routes(app, get_application, administrator_user):
@@ -24,7 +140,11 @@ def register_payment_routes(app, get_application, administrator_user):
         provider = provider_name.strip().lower()
         signature = stripe_signature if provider == "stripe" else x_square_hmacsha256_signature
         try:
-            return application.payments.handle_webhook(payload, signature, provider)
+            result = application.payments.handle_webhook(payload, signature, provider)
+            refund = _record_refund(application, provider, payload)
+            if refund:
+                result["refund"] = refund
+            return result
         except PaymentProviderNotConfigured as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except PaymentProviderError as exc:
