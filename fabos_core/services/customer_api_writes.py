@@ -20,6 +20,12 @@ class QuoteRequest(BaseModel):
     project: QuoteProject
     file: Optional[Dict[str, Any]] = None
 
+class PublicQuoteRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    email: str = Field(min_length=3, max_length=320)
+    project: QuoteProject
+    file: Optional[Dict[str, Any]] = None
+
 class ShippingAddress(BaseModel):
     address: str = Field(min_length=1, max_length=300)
     city: str = Field(min_length=1, max_length=100)
@@ -48,16 +54,17 @@ def register_customer_write_routes(app, get_application, current_user):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/v1/quote-requests")
-    def create_public_quote_request(payload: QuoteRequest, application=Depends(get_application)):
+    def create_public_quote_request(payload: PublicQuoteRequest, application=Depends(get_application)):
         try:
             project = payload.project.dict()
             file_name = str((payload.file or {}).get("name") or "").strip()
             if file_name:
                 project["notes"] = (project.get("notes") or "").strip()
                 project["notes"] += ("\n" if project["notes"] else "") + "File: " + file_name
-            customer_id = next((str(row["id"]) for row in application.customers.list(query=project.get("_email","")) if str(row["email"] or "").lower()==str(payload.file or {}).get("contact_email","").lower()), None)
+            existing = application.customers.list(query=payload.email.strip())
+            customer_id = next((str(row["id"]) for row in existing if str(row["email"] or "").lower()==payload.email.strip().lower()), None)
             if not customer_id:
-                customer_id = application.customers.save({"name": payload.file.get("contact_name","") if payload.file else "", "email": payload.file.get("contact_email","") if payload.file else "", "phone":"", "notes":"Public custom-work request"})
+                customer_id = application.customers.save({"name":payload.name.strip(),"email":payload.email.strip().lower(),"phone":"","notes":"Public custom-work request"})
             description_parts=[project["idea"]]
             if project.get("dimensions"):description_parts.append("Dimensions: "+project["dimensions"])
             if project.get("material"):description_parts.append("Material: "+project["material"])
