@@ -20,6 +20,12 @@ class QuoteRequest(BaseModel):
     project: QuoteProject
     file: Optional[Dict[str, Any]] = None
 
+class ShippingAddress(BaseModel):
+    address: str = Field(min_length=1, max_length=300)
+    city: str = Field(min_length=1, max_length=100)
+    state: str = Field(min_length=1, max_length=100)
+    zip: str = Field(min_length=1, max_length=20)
+
 class OrderItem(BaseModel):
     productId: str = Field(min_length=1, max_length=200)
     variantId: Optional[str] = Field(default=None, max_length=200)
@@ -28,6 +34,7 @@ class OrderItem(BaseModel):
 
 class OrderRequest(BaseModel):
     items: List[OrderItem] = Field(min_length=1, max_length=100)
+    shippingAddress: ShippingAddress
     notes: str = Field(default="", max_length=4000)
 
 def register_customer_write_routes(app, get_application, current_user):
@@ -58,11 +65,11 @@ def register_customer_write_routes(app, get_application, current_user):
     def create_customer_order(payload: OrderRequest, user=Depends(current_user), application=Depends(get_application)):
         try:
             items = [item.dict() for item in payload.items]
-            row, saved_items, subtotal_cents, shipping_cents, total_cents = application.customer_commerce.create_order(user["id"], items, payload.notes)
+            row, saved_items, subtotal_cents, shipping_cents, tax_cents, total_cents = application.customer_commerce.create_order(user["id"], items, payload.shippingAddress.dict(), payload.notes)
             order = _json(row)
             order["status"] = "Order received"
             order.pop("customer_id", None)
-            return {"order": order, "items": [_json(item) for item in saved_items], "totals": {"subtotal": round(subtotal_cents / 100, 2), "shipping": round(shipping_cents / 100, 2), "total": round(total_cents / 100, 2)}}
+            return {"order": order, "items": [_json(item) for item in saved_items], "totals": {"subtotal": round(subtotal_cents / 100, 2), "shipping": round(shipping_cents / 100, 2), "tax": round(tax_cents / 100, 2), "total": round(total_cents / 100, 2)}}
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except (KeyError, ValueError) as exc:
