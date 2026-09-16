@@ -1,5 +1,6 @@
 """Internal workflow for turning a customer custom design into a storefront product."""
 import uuid
+from pathlib import Path
 
 
 class CustomProductWorkflowService:
@@ -7,6 +8,14 @@ class CustomProductWorkflowService:
         self.database = database
         self.products = products
         self.design_vault = design_vault
+
+    def _model_asset(self, design_id):
+        assets = list(self.design_vault.assets(design_id))
+        allowed = {".stl", ".3mf", ".obj", ".step", ".stp"}
+        for asset in assets:
+            if Path(str(asset["original_name"] or "")).suffix.lower() in allowed:
+                return asset
+        return None
 
     def promote_quote_design(self, quote_id, values):
         name = str(values.get("name") or "").strip()
@@ -30,7 +39,7 @@ class CustomProductWorkflowService:
         design = self.design_vault.get(link["design_id"])
         if not design:
             raise KeyError("Design not found")
-        model = self.design_vault.primary_model_asset(link["design_id"])
+        model = self._model_asset(link["design_id"])
         if not model:
             raise ValueError("A printable model is required before this custom design can become a product")
         if visibility == "published" and license_status in {"blocked", "prohibited", "commercially_prohibited", "review_required"}:
