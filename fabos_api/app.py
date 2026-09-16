@@ -57,6 +57,23 @@ class FabOSAPI:
             pass
         return self._response(500, {"error": "Internal server error"})
 
+    @staticmethod
+    def _public_product(row):
+        """Return only fields intended for the public storefront."""
+        if row is None:
+            return None
+        data = dict(row)
+        return {
+            "id": data.get("id"),
+            "sku": data.get("sku"),
+            "name": data.get("name"),
+            "category": data.get("category") or "Other",
+            "description": data.get("description") or "",
+            "price": round(float(data.get("price_cents") or 0) / 100.0, 2),
+            "estimated_minutes": data.get("estimated_minutes") or 0,
+            "estimated_filament_g": data.get("estimated_filament_g") or 0,
+        }
+
     def request(self, method, path, body=None, headers=None):
         method = (method or "GET").upper()
         parsed = urlsplit(path or "/")
@@ -66,6 +83,22 @@ class FabOSAPI:
         try:
             if route == ["api", self.VERSION, "health"] and method == "GET":
                 return self._response(200, {"ok": True, "service": "FabOS", "api_version": self.VERSION})
+
+            # Public storefront catalog. This deliberately has no authentication
+            # requirement; checkout/account/order operations remain protected.
+            if route == ["api", self.VERSION, "catalog"] and method == "GET":
+                rows = self.core.products.list(
+                    query.get("q", [""])[0],
+                    query.get("category", ["All"])[0],
+                    query.get("license", ["All"])[0],
+                    query.get("sort", ["name"])[0],
+                    query.get("desc", ["0"])[0] not in ("0", "false", "no"),
+                )
+                return self._response(200, {"products": [self._public_product(row) for row in rows]})
+
+            if route == ["api", self.VERSION, "catalog", "categories"] and method == "GET":
+                rows = self.core.products.categories()
+                return self._response(200, {"categories": rows})
 
             if route == ["api", self.VERSION, "auth", "login"] and method == "POST":
                 result = self.core.auth.login(body.get("identifier", ""), body.get("password", ""),
