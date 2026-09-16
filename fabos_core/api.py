@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from fabos_core.application import FabOSApplication
 from fabos_core.services.customer_api_writes import register_customer_write_routes
+from fabos_core.services.payment_api import register_payment_routes
 
 
 CUSTOMER_STATUS = {
@@ -103,7 +104,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         allow_origins=origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "Stripe-Signature", "x-square-hmacsha256-signature"],
     )
 
     def get_application() -> FabOSApplication:
@@ -262,6 +263,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         return {"order": order, "items": safe_items}
 
     register_customer_write_routes(app, get_application, customer_user)
+    register_payment_routes(app, get_application, administrator_user)
     return app
 
 
