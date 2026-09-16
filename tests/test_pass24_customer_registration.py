@@ -1,6 +1,9 @@
+import tempfile
 import unittest
+from pathlib import Path
 
-from fabos_core.database import Database
+from fabos_core.db.database import Database
+from fabos_core.db.migrations import migrate
 from fabos_core.services.accounts import AccountService
 from fabos_core.services.auth import AuthService
 from fabos_core.services.customer_accounts import CustomerAccountService
@@ -8,12 +11,16 @@ from fabos_core.services.customer_accounts import CustomerAccountService
 
 class Pass24CustomerRegistrationTests(unittest.TestCase):
     def setUp(self):
-        self.db = Database(":memory:")
+        self.temp = tempfile.TemporaryDirectory()
+        self.db = Database(Path(self.temp.name) / "fabos.db")
         self.db.initialize()
-        self.db.migrate()
+        migrate(self.db)
         self.accounts = AccountService(self.db)
         self.auth = AuthService(self.db, self.accounts)
         self.service = CustomerAccountService(self.db, self.accounts, self.auth)
+
+    def tearDown(self):
+        self.temp.cleanup()
 
     def test_register_creates_customer_account_and_session(self):
         result = self.service.register("Test Customer", "test@example.com", "password123")
