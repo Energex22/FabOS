@@ -1,17 +1,34 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from fabos_api import FabOSAPI
-from fabos_core.application import FabOSApplication
+from fabos_core.db.database import Database
+from fabos_core.db.migrations import migrate
+from fabos_core.services.accounts import AccountService
+from fabos_core.services.auth import AuthService
+from fabos_core.services.permissions import PermissionService
+from fabos_core.services.security import SecurityService
 
 
 class Pass24CustomerAPITests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.core = FabOSApplication(data_dir=Path(self.temp.name))
-        self.core.database.initialize()
-        self.core.database.migrate()
+        database = Database(Path(self.temp.name) / "fabos.db")
+        database.initialize()
+        migrate(database)
+        accounts = AccountService(database)
+        permissions = PermissionService(database)
+        auth = AuthService(database, accounts)
+        security = SecurityService(database, auth, accounts, permissions)
+        self.core = SimpleNamespace(
+            database=database,
+            accounts=accounts,
+            permissions=permissions,
+            auth=auth,
+            security=security,
+        )
         self.api = FabOSAPI(self.core)
 
     def tearDown(self):
@@ -34,11 +51,11 @@ class Pass24CustomerAPITests(unittest.TestCase):
         self.assertEqual(profile["data"]["customer"]["email"], "api@example.com")
         self.assertEqual(profile["data"]["user"]["account_type"], "customer")
 
-    def test_non_customer_cannot_use_customer_profile_route(self):
-        self.assertEqual(
-            self.api.request("GET", "/api/v1/customer/me", headers={"Authorization": "Bearer invalid"})["status"],
-            401,
+    def test_invalid_session_cannot_use_customer_profile_route(self):
+        result = self.api.request(
+            "GET", "/api/v1/customer/me", headers={"Authorization": "Bearer invalid"}
         )
+        self.assertEqual(result["status"], 401)
 
 
 if __name__ == "__main__":
