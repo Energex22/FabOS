@@ -21,7 +21,9 @@ def _api_context(self, headers, permission=None):
         try:
             summary = self.core.accounts.account_summary(normalized["id"])
             if isinstance(summary, dict):
-                normalized.setdefault("account_type", summary.get("account_type"))
+                summary_user = summary.get("user")
+                if isinstance(summary_user, dict):
+                    normalized.setdefault("account_type", summary_user.get("account_type"))
         except Exception:
             pass
     return normalized
@@ -50,7 +52,8 @@ def _api_request(self, method, path, body=None, headers=None):
             context = self._context(headers)
             if context.get("account_type") != "customer":
                 raise PermissionError("Customer account required")
-            user = self.core.accounts.account_summary(context["id"])
+            summary = self.core.accounts.account_summary(context["id"])
+            user = summary.get("user") if isinstance(summary, dict) else None
             customer = self.core.accounts.customer_for_user(context["id"])
             return self._response(200, {"user": user, "customer": customer})
         except Exception as exc:
