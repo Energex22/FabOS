@@ -103,6 +103,18 @@ def register_customer_write_routes(app, get_application, current_user):
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.post("/api/v1/customer/orders/{order_id}/payment-session")
+    def create_customer_payment_session(order_id: str, user=Depends(current_user), application=Depends(get_application)):
+        try:
+            payment = application.payments.create_checkout(user["id"], order_id)
+            return {"payment": _json(payment)}
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
 def _json(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
