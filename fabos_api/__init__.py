@@ -13,6 +13,12 @@ def _mapping(value):
     if isinstance(value, dict):
         return value
     try:
+        keys = value.keys()
+    except AttributeError:
+        keys = None
+    if keys is not None:
+        return {key: value[key] for key in keys}
+    try:
         return dict(value)
     except (TypeError, ValueError):
         return None
@@ -29,13 +35,10 @@ def _api_context(self, headers, permission=None):
         normalized.setdefault("account_type", user.get("account_type"))
     if normalized.get("id") and not normalized.get("account_type"):
         try:
-            summary = self.core.accounts.account_summary(normalized["id"])
-            summary = _mapping(summary) or {}
+            summary = _mapping(self.core.accounts.account_summary(normalized["id"])) or {}
             summary_user = _mapping(summary.get("user"))
             if summary_user:
                 normalized.setdefault("account_type", summary_user.get("account_type"))
-            # Lightweight test doubles and older account adapters may expose
-            # account_type directly rather than nesting it under user.
             normalized.setdefault("account_type", summary.get("account_type"))
         except Exception:
             pass
@@ -65,8 +68,8 @@ def _api_request(self, method, path, body=None, headers=None):
             context = self._context(headers)
             if context.get("account_type") != "customer":
                 raise PermissionError("Customer account required")
-            summary = self.core.accounts.account_summary(context["id"])
-            user = summary.get("user") if isinstance(summary, dict) else None
+            summary = _mapping(self.core.accounts.account_summary(context["id"])) or {}
+            user = summary.get("user")
             customer = self.core.accounts.customer_for_user(context["id"])
             return self._response(200, {"user": user, "customer": customer})
         except Exception as exc:
