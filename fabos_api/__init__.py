@@ -65,7 +65,9 @@ def _api_request(self, method, path, body=None, headers=None):
             if context.get("account_type") != "customer":
                 raise PermissionError("Customer account required")
             summary = _mapping(self.core.accounts.account_summary(context["id"])) or {}
-            return self._response(200, {"user": summary.get("user"), "customer": self.core.accounts.customer_for_user(context["id"])})
+            user = _mapping(summary.get("user"))
+            customer = _mapping(summary.get("customer"))
+            return self._response(200, {"user": user, "customer": customer})
         except Exception as exc:
             return self._error(exc)
 
