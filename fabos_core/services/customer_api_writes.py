@@ -50,6 +50,20 @@ class OrderRequest(BaseModel):
     shippingAddress: ShippingAddress
     notes: str = Field(default="", max_length=4000)
 
+class CustomProductRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    sku: str = Field(default="", max_length=100)
+    category: str = Field(default="Custom Designs", max_length=100)
+    description: str = Field(default="", max_length=4000)
+    customer_title: str = Field(default="", max_length=200)
+    customer_description: str = Field(default="", max_length=4000)
+    price: float = Field(gt=0, le=100000)
+    hours: float = Field(default=0, ge=0, le=10000)
+    filament: float = Field(default=0, ge=0, le=100000)
+    license_name: str = Field(default="Customer-origin design", max_length=200)
+    license_status: str = Field(default="review_required", max_length=50)
+    visibility: str = Field(default="draft", max_length=20)
+
 def register_customer_write_routes(app, get_application, current_user):
     @app.post("/api/v1/auth/register")
     def register_customer(payload: RegistrationRequest, application=Depends(get_application)):
@@ -178,6 +192,18 @@ def register_customer_write_routes(app, get_application, current_user):
             return {"payment": _json(payment)}
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/admin/quote-requests/{quote_id}/product")
+    def promote_custom_quote_to_product(quote_id: str, payload: CustomProductRequest, user=Depends(current_user), application=Depends(get_application)):
+        if str(user["account_type"] or "").lower() != "administrator":
+            raise HTTPException(status_code=403, detail="Administrator account required")
+        try:
+            result = application.custom_product_workflow.promote_quote_design(quote_id, payload.dict())
+            return _json(result)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
