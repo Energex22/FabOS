@@ -47,6 +47,27 @@ def register_customer_write_routes(app, get_application, current_user):
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.post("/api/v1/quote-requests")
+    def create_public_quote_request(payload: QuoteRequest, application=Depends(get_application)):
+        try:
+            project = payload.project.dict()
+            file_name = str((payload.file or {}).get("name") or "").strip()
+            if file_name:
+                project["notes"] = (project.get("notes") or "").strip()
+                project["notes"] += ("\n" if project["notes"] else "") + "File: " + file_name
+            customer_id = next((str(row["id"]) for row in application.customers.list(query=project.get("_email","")) if str(row["email"] or "").lower()==str(payload.file or {}).get("contact_email","").lower()), None)
+            if not customer_id:
+                customer_id = application.customers.save({"name": payload.file.get("contact_name","") if payload.file else "", "email": payload.file.get("contact_email","") if payload.file else "", "phone":"", "notes":"Public custom-work request"})
+            description_parts=[project["idea"]]
+            if project.get("dimensions"):description_parts.append("Dimensions: "+project["dimensions"])
+            if project.get("material"):description_parts.append("Material: "+project["material"])
+            if project.get("notes"):description_parts.append("Notes: "+project["notes"])
+            quote_id=application.quotes.save({"customer_id":customer_id,"status":"draft","notes":project.get("notes","")},[{"product_id":None,"description":"\n".join(description_parts),"quantity":project.get("quantity",1),"unit_price_cents":0,"material":project.get("material",""),"color":"","estimated_minutes":0,"estimated_filament_g":0}])
+            quote=application.quotes.get(quote_id)[0]
+            return {"quote":_json(quote),"request_number":str(quote["quote_number"]),"file":payload.file}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/v1/customer/quotes")
     def create_customer_quote(payload: QuoteRequest, user=Depends(current_user), application=Depends(get_application)):
         try:
