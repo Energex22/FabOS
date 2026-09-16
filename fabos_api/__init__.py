@@ -9,25 +9,34 @@ _original_context = FabOSAPI._context
 _original_request = FabOSAPI.request
 
 
+def _mapping(value):
+    if isinstance(value, dict):
+        return value
+    try:
+        return dict(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _api_context(self, headers, permission=None):
     context = _original_context(self, headers, permission)
     if not isinstance(context, dict):
         return context
     normalized = dict(context)
-    user = context.get("user")
-    if isinstance(user, dict):
+    user = _mapping(context.get("user"))
+    if user:
         normalized.setdefault("id", user.get("id"))
         normalized.setdefault("account_type", user.get("account_type"))
     if normalized.get("id") and not normalized.get("account_type"):
         try:
             summary = self.core.accounts.account_summary(normalized["id"])
-            if isinstance(summary, dict):
-                summary_user = summary.get("user")
-                if isinstance(summary_user, dict):
-                    normalized.setdefault("account_type", summary_user.get("account_type"))
-                # Lightweight test doubles and older account adapters may expose
-                # account_type directly rather than nesting it under user.
-                normalized.setdefault("account_type", summary.get("account_type"))
+            summary = _mapping(summary) or {}
+            summary_user = _mapping(summary.get("user"))
+            if summary_user:
+                normalized.setdefault("account_type", summary_user.get("account_type"))
+            # Lightweight test doubles and older account adapters may expose
+            # account_type directly rather than nesting it under user.
+            normalized.setdefault("account_type", summary.get("account_type"))
         except Exception:
             pass
     return normalized
