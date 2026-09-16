@@ -4,11 +4,16 @@ from fabos_api import FabOSAPI
 
 
 class _Security:
+    def __init__(self, structured=True):
+        self.structured = structured
+
     def context(self, token, permission=None):
-        return {
-            "user": {"id": "customer-1", "account_type": "customer"},
-            "session": {"user_id": "customer-1"},
-        }
+        if self.structured:
+            return {
+                "user": {"id": "customer-1", "account_type": "customer"},
+                "session": {"user_id": "customer-1"},
+            }
+        return {"id": "customer-1"}
 
 
 class _Accounts:
@@ -17,8 +22,9 @@ class _Accounts:
 
 
 class _Core:
-    security = _Security()
-    accounts = _Accounts()
+    def __init__(self, structured=True):
+        self.security = _Security(structured)
+        self.accounts = _Accounts()
 
 
 class Pass23SecurityContextCompatibilityTests(unittest.TestCase):
@@ -28,6 +34,12 @@ class Pass23SecurityContextCompatibilityTests(unittest.TestCase):
         self.assertEqual(context["id"], "customer-1")
         self.assertEqual(context["account_type"], "customer")
         self.assertEqual(context["user"]["id"], "customer-1")
+
+    def test_legacy_id_only_context_resolves_account_type(self):
+        api = FabOSAPI(_Core(structured=False))
+        context = api._context({"Authorization": "Bearer token"})
+        self.assertEqual(context["id"], "customer-1")
+        self.assertEqual(context["account_type"], "customer")
 
 
 if __name__ == "__main__":
