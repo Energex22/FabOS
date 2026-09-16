@@ -2,6 +2,7 @@
 from urllib.parse import urlsplit
 
 from fabos_api.app import FabOSAPI, create_wsgi_app
+from fabos_core.services.checkout import CheckoutService
 from fabos_core.services.commerce_pricing import CommercePricingService
 from fabos_core.services.customer_accounts import CustomerAccountService
 
@@ -53,12 +54,7 @@ def _api_request(self, method, path, body=None, headers=None):
     if parsed == ["api", self.VERSION, "auth", "register"] and method == "POST":
         try:
             service = CustomerAccountService(self.core.database, self.core.accounts, self.core.auth)
-            result = service.register(
-                body.get("name"),
-                body.get("email"),
-                body.get("password"),
-                body.get("phone", ""),
-            )
+            result = service.register(body.get("name"), body.get("email"), body.get("password"), body.get("phone", ""))
             return self._response(201, result)
         except Exception as exc:
             return self._error(exc)
@@ -69,9 +65,7 @@ def _api_request(self, method, path, body=None, headers=None):
             if context.get("account_type") != "customer":
                 raise PermissionError("Customer account required")
             summary = _mapping(self.core.accounts.account_summary(context["id"])) or {}
-            user = summary.get("user")
-            customer = self.core.accounts.customer_for_user(context["id"])
-            return self._response(200, {"user": user, "customer": customer})
+            return self._response(200, {"user": summary.get("user"), "customer": self.core.accounts.customer_for_user(context["id"])})
         except Exception as exc:
             return self._error(exc)
 
@@ -81,12 +75,18 @@ def _api_request(self, method, path, body=None, headers=None):
             if context.get("account_type") != "customer":
                 raise PermissionError("Customer account required")
             service = CommercePricingService(self.core.products, self.core.shop_settings)
-            result = service.estimate(
-                body.get("items"),
-                body.get("shipping_mode"),
-                body.get("shipping_weight_g", 0),
-            )
-            return self._response(200, result)
+            return self._response(200, service.estimate(body.get("items"), body.get("shipping_mode"), body.get("shipping_weight_g", 0)))
+        except Exception as exc:
+            return self._error(exc)
+
+    if parsed == ["api", self.VERSION, "checkout", "order"] and method == "POST":
+        try:
+            context = self._context(headers, "order.manage")
+            if context.get("account_type") != "customer":
+                raise PermissionError("Customer account required")
+            service = CheckoutService(self.core.database, self.core.accounts, self.core.products, self.core.shop_settings)
+            result = service.create_order(context["id"], body.get("items"), body.get("shipping_address"), body.get("notes", ""), body.get("shipping_mode"))
+            return self._response(201, {"order": result})
         except Exception as exc:
             return self._error(exc)
 
