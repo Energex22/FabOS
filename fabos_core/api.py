@@ -50,6 +50,28 @@ def _customer_payload(customer: Any) -> Optional[Dict[str, Any]]:
     return _json(customer) if customer else None
 
 
+def _public_product(row: Any, application: FabOSApplication, storefront: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    item = _json(row)
+    item["price"] = round(int(row["price_cents"] or 0) / 100, 2)
+    item.pop("price_cents", None)
+    if storefront:
+        if storefront.get("customer_title"):
+            item["name"] = storefront["customer_title"]
+        if storefront.get("customer_description"):
+            item["description"] = storefront["customer_description"]
+    item["images"] = [_json(image) for image in application.products.images(row["id"])]
+    item["variants"] = [_json(variant) for variant in application.products.variants(row["id"])]
+    item["storefront"] = {
+        "origin": storefront.get("origin_type", "catalog_import") if storefront else "catalog_import",
+        "model_file_count": storefront.get("model_file_count", 0) if storefront else 0,
+    }
+    item.pop("product_files", None)
+    item.pop("license_status", None)
+    item.pop("source_url", None)
+    item.pop("designer", None)
+    return item
+
+
 class ProfileUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=200)
     email: Optional[str] = Field(default=None, max_length=320)
@@ -63,7 +85,7 @@ class LoginRequest(BaseModel):
 
 
 def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
-    app = FastAPI(title="FabOS Customer API", version="1.0")
+    app = FastAPI(title="FabOS Customer API", version="1.1")
     fabos = application or FabOSApplication()
     app.state.fabos = fabos
 
@@ -95,38 +117,25 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
 
     @app.get("/api/v1/health")
     def health(application: FabOSApplication = Depends(get_application)):
-        return {"status": "ok", "service": "FabOS Customer API", "version": "1.0"}
+        return {"status": "ok", "service": "FabOS Customer API", "version": "1.1"}
 
     @app.get("/api/v1/catalog")
     def catalog(q: str = "", category: str = "All", sort: str = "name", desc: bool = False, application: FabOSApplication = Depends(get_application)):
-        rows = application.products.list(query=q, category=category, order_by=sort, descending=desc)
-        products = []
-        for row in rows:
-            item = _json(row)
-            item["price"] = round(int(row["price_cents"] or 0) / 100, 2)
-            item.pop("price_cents", None)
-            item["images"] = [_json(image) for image in application.products.images(row["id"])]
-            item["variants"] = [_json(variant) for variant in application.products.variants(row["id"])]
-            item.pop("product_files", None)
-            products.append(item)
+        rows = application.products.customer_catalog(query=q, category=category, order_by=sort, descending=desc)
+        products = [_public_product(row, application, storefront) for row, storefront in rows]
         return {"products": products}
 
     @app.get("/api/v1/catalog/categories")
     def catalog_categories(application: FabOSApplication = Depends(get_application)):
-        return {"categories": application.products.categories()}
+        rows = application.products.customer_catalog()
+        return {"categories": sorted({str(row["category"]) for row, _ in rows if str(row["category"] or "").strip()})}
 
     @app.get("/api/v1/catalog/{product_id}")
     def catalog_product(product_id: str, application: FabOSApplication = Depends(get_application)):
         row = application.products.get(product_id)
-        if not row:
+        if not row or not application.products.is_customer_eligible(product_id):
             raise HTTPException(status_code=404, detail="Product not found")
-        item = _json(row)
-        item["price"] = round(int(row["price_cents"] or 0) / 100, 2)
-        item.pop("price_cents", None)
-        item["images"] = [_json(image) for image in application.products.images(product_id)]
-        item["variants"] = [_json(variant) for variant in application.products.variants(product_id)]
-        item.pop("product_files", None)
-        return item
+        return _public_product(row, application, application.products.storefront_state(product_id))
 
     @app.post("/api/v1/auth/login")
     def login(payload: LoginRequest, application: FabOSApplication = Depends(get_application)):
