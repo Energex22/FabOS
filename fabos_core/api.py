@@ -46,9 +46,7 @@ def _user_payload(user: Any) -> Dict[str, Any]:
     data = _json(user)
     if not data:
         return {}
-    # Never return password hashes or other session/account internals.
-    for key in ("password_hash",):
-        data.pop(key, None)
+    data.pop("password_hash", None)
     return data
 
 
@@ -94,6 +92,11 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="Invalid or expired session")
         return user
 
+    def customer_user(user: Any = Depends(current_user)):
+        if str(user["account_type"] or "").lower() != "customer":
+            raise HTTPException(status_code=403, detail="Customer account required")
+        return user
+
     @app.get("/api/v1/health")
     def health(application: FabOSApplication = Depends(get_application)):
         return {"status": "ok", "service": "FabOS Customer API", "version": "1.0"}
@@ -104,10 +107,9 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         products = []
         for row in rows:
             item = _json(row)
-            images = [_json(image) for image in application.products.images(row["id"])]
             item["price"] = round(int(row["price_cents"] or 0) / 100, 2)
             item.pop("price_cents", None)
-            item["images"] = images
+            item["images"] = [_json(image) for image in application.products.images(row["id"])]
             item.pop("product_files", None)
             products.append(item)
         return {"products": products}
@@ -134,7 +136,8 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         result = application.auth.login(payload.identifier, payload.password)
         if not result:
             raise HTTPException(status_code=401, detail="Invalid credentials")
-        return {"token": result["token"], "expires_at": result["expires_at"], "user": _user_payload(result["user"]["user"]), "customer": _customer_payload(result["user"].get("customer"))}
+        summary = result["user"]
+        return {"token": result["token"], "expires_at": result["expires_at"], "user": _user_payload(summary["user"]), "customer": _customer_payload(summary.get("customer"))}
 
     @app.post("/api/v1/auth/logout")
     def logout(authorization: Optional[str] = Header(default=None), application: FabOSApplication = Depends(get_application)):
@@ -144,12 +147,12 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         return {"logged_out": True}
 
     @app.get("/api/v1/customer/me")
-    def me(user: Any = Depends(current_user), application: FabOSApplication = Depends(get_application)):
+    def me(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         customer = application.accounts.customer_for_user(user["id"])
         return {"user": _user_payload(user), "customer": _customer_payload(customer)}
 
     @app.patch("/api/v1/customer/me")
-    def update_me(payload: ProfileUpdate, user: Any = Depends(current_user), application: FabOSApplication = Depends(get_application)):
+    def update_me(payload: ProfileUpdate, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         customer = application.accounts.customer_for_user(user["id"])
         if not customer:
             raise HTTPException(status_code=409, detail="Customer account is not linked")
@@ -160,40 +163,39 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         return {"user": _user_payload(updated_user), "customer": _customer_payload(application.accounts.customer_for_user(user["id"]))}
 
     @app.get("/api/v1/customer/quotes")
-    def customer_quotes(user: Any = Depends(current_user), application: FabOSApplication = Depends(get_application)):
+    def customer_quotes(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         rows = application.quotes.list_for_user(user["id"])
         return {"quotes": [_json(row) for row in rows]}
 
     @app.get("/api/v1/customer/quotes/{quote_id}")
-    def customer_quote(quote_id: str, user: Any = Depends(current_user), application: FabOSApplication = Depends(get_application)):
+    def customer_quote(quote_id: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         try:
             row, items = application.quotes.get_for_user(user["id"], quote_id)
         except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
+            raise HTTPException(status_code=403, detail="Quote access denied") from exc
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail="Quote not found") from exc
         return {"quote": _json(row), "items": [_json(item) for item in items]}
 
     @app.get("/api/v1/customer/orders")
-    def customer_orders(user: Any = Depends(current_user), application: FabOSApplication = Depends(get_application)):
+    def customer_orders(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         rows = application.orders.list_for_user(user["id"])
         orders = []
         for row in rows:
             item = _json(row)
-            status = str(row["status"] or "new").lower()
-            item["status"] = CUSTOMER_STATUS.get(status, "Order received")
+            item["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
             item.pop("customer_id", None)
             orders.append(item)
         return {"orders": orders}
 
     @app.get("/api/v1/customer/orders/{order_id}")
-    def customer_order(order_id: str, user: Any = Depends(current_user), application: FabOSApplication = Depends(get_application)):
+    def customer_order(order_id: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         try:
             row, items = application.orders.get_for_user(user["id"], order_id)
         except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
+            raise HTTPException(status_code=403, detail="Order access denied") from exc
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=404, detail="Order not found") from exc
         order = _json(row)
         order["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
         order.pop("customer_id", None)
