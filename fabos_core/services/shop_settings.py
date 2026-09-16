@@ -7,7 +7,7 @@ class ShopSettingsService:
         "filament_low_threshold_g":"250","filament_reorder_days":"14",
         "backup_retention":"30","default_slicer":"Cura","cura_engine_path":"",
         "cura_petg_profile_path":"","cura_fdmprinter_path":"","cura_fdmextruder_path":"",
-        "customer_update_signature":"","shipping_mode":"flat","shipping_flat_cents":"0",
+        "customer_update_signature":"","shipping_mode":"calculated","shipping_flat_cents":"0",
         "shipping_calculated_base_cents":"0","shipping_calculated_per_kg_cents":"0"
     }
     def __init__(self,db):self.db=db
