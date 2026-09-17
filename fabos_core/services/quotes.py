@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import date, timedelta
 
@@ -75,7 +76,10 @@ class QuoteService:
                 conn.execute("UPDATE quotes SET customer_id=?,status=?,total_cents=?,expires_at=?,notes=? WHERE id=?",(data["customer_id"],data.get("status","draft"),total,data.get("expires_at") or None,data.get("notes",""),quote_id)); conn.execute("DELETE FROM quote_items WHERE quote_id=?",(quote_id,))
             else:
                 quote_id=str(uuid.uuid4()); conn.execute("INSERT INTO quotes(id,quote_number,customer_id,status,total_cents,expires_at,notes) VALUES(?,?,?,?,?,?,?)",(quote_id,self.next_number(conn),data["customer_id"],data.get("status","draft"),total,data.get("expires_at") or None,data.get("notes","")))
-            for i in items: conn.execute("INSERT INTO quote_items(id,quote_id,product_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?)",(str(uuid.uuid4()),quote_id,i.get("product_id"),i.get("description") or "Custom item",int(i.get("quantity",1)),int(i.get("unit_price_cents",0)),i.get("material",""),i.get("color",""),int(i.get("estimated_minutes") or 0),float(i.get("estimated_filament_g") or 0)))
+            for i in items:
+                item_id=str(uuid.uuid4())
+                conn.execute("INSERT INTO quote_items(id,quote_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?,?)",(item_id,quote_id,i.get("product_id"),i.get("variant_id"),i.get("description") or "Custom item",int(i.get("quantity",1)),int(i.get("unit_price_cents",0)),i.get("material",""),i.get("color",""),int(i.get("estimated_minutes") or 0),float(i.get("estimated_filament_g") or 0)))
+                conn.execute("INSERT INTO quote_price_snapshots(id,quote_id,quote_item_id,unit_price_cents,pricing_mode,calculation_json) VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),quote_id,item_id,int(i.get("unit_price_cents",0)),str(i.get("pricing_mode") or "manual"),json.dumps(i.get("pricing_breakdown"),sort_keys=True) if i.get("pricing_breakdown") is not None else None))
             conn.commit()
         return quote_id
     def convert_to_order(self,quote_id):
