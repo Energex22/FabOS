@@ -39,37 +39,56 @@ def _json(value: Any) -> Any:
     return str(value)
 
 
+def _pick(value: Any, fields: tuple[str, ...]) -> Dict[str, Any]:
+    data = _json(value) or {}
+    return {field: data[field] for field in fields if field in data}
+
+
 def _user_payload(user: Any) -> Dict[str, Any]:
-    data = _json(user)
-    if not data:
-        return {}
-    data.pop("password_hash", None)
-    return data
+    return _pick(user, ("name", "email"))
 
 
 def _customer_payload(customer: Any) -> Optional[Dict[str, Any]]:
-    return _json(customer) if customer else None
+    if not customer:
+        return None
+    return _pick(customer, ("name", "email", "phone"))
+
+
+def _quote_payload(row: Any) -> Dict[str, Any]:
+    return _pick(row, ("id", "quote_number", "status", "notes", "created_at", "updated_at", "total_cents"))
+
+
+def _quote_item_payload(item: Any) -> Dict[str, Any]:
+    return _pick(item, ("id", "description", "quantity", "unit_price_cents", "material", "color", "estimated_minutes", "estimated_filament_g"))
+
+
+def _order_payload(row: Any) -> Dict[str, Any]:
+    return _pick(row, ("id", "order_number", "status", "created_at", "updated_at", "total_cents", "shipping_cents", "tax_cents", "shipping_address_json", "checkout_notes"))
+
+
+def _order_item_payload(item: Any) -> Dict[str, Any]:
+    return _pick(item, ("id", "product_name", "description", "quantity", "unit_price_cents", "material", "color"))
+
+
+def _payment_payload(payment: Any) -> Dict[str, Any]:
+    return _pick(payment, ("status", "checkout_url"))
 
 
 def _public_product(row: Any, application: FabOSApplication, storefront: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    item = _json(row)
-    item["price"] = round(int(row["price_cents"] or 0) / 100, 2)
-    item.pop("price_cents", None)
+    raw = _json(row) or {}
+    item = _pick(raw, ("id", "sku", "name", "description", "category", "subcategory", "active"))
+    item["price"] = round(int(raw.get("price_cents") or 0) / 100, 2)
     if storefront:
         if storefront.get("customer_title"):
             item["name"] = storefront["customer_title"]
         if storefront.get("customer_description"):
             item["description"] = storefront["customer_description"]
-    item["images"] = [_json(image) for image in application.products.images(row["id"])]
-    item["variants"] = [_json(variant) for variant in application.products.variants(row["id"])]
+    item["images"] = [_pick(image, ("id", "path", "is_primary", "alt_text")) for image in application.products.images(row["id"])]
+    item["variants"] = [_pick(variant, ("id", "name", "material", "color", "price_cents", "active")) for variant in application.products.variants(row["id"])]
     item["storefront"] = {
         "origin": storefront.get("origin_type", "catalog_import") if storefront else "catalog_import",
         "model_file_count": storefront.get("model_file_count", 0) if storefront else 0,
     }
-    item.pop("product_files", None)
-    item.pop("license_status", None)
-    item.pop("source_url", None)
-    item.pop("designer", None)
     return item
 
 
@@ -231,7 +250,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     @app.get("/api/v1/customer/quotes")
     def customer_quotes(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         rows = application.quotes.list_for_user(user["id"])
-        return {"quotes": [_json(row) for row in rows]}
+        return {"quotes": [_quote_payload(row) for row in rows]}
 
     @app.get("/api/v1/customer/quotes/{quote_id}")
     def customer_quote(quote_id: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
@@ -241,16 +260,15 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="Quote access denied") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Quote not found") from exc
-        return {"quote": _json(row), "items": [_json(item) for item in items]}
+        return {"quote": _quote_payload(row), "items": [_quote_item_payload(item) for item in items]}
 
     @app.get("/api/v1/customer/orders")
     def customer_orders(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         rows = application.orders.list_for_user(user["id"])
         orders = []
         for row in rows:
-            item = _json(row)
+            item = _order_payload(row)
             item["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
-            item.pop("customer_id", None)
             orders.append(item)
         return {"orders": orders}
 
@@ -262,15 +280,9 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="Order access denied") from exc
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Order not found") from exc
-        order = _json(row)
+        order = _order_payload(row)
         order["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
-        order.pop("customer_id", None)
-        safe_items = []
-        for item in items:
-            value = _json(item)
-            value.pop("quote_id", None)
-            safe_items.append(value)
-        return {"order": order, "items": safe_items}
+        return {"order": order, "items": [_order_item_payload(item) for item in items]}
 
     register_customer_write_routes(app, get_application, customer_user)
     register_payment_routes(app, get_application, administrator_user)
