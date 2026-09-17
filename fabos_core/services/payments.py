@@ -42,9 +42,11 @@ class StripePaymentProvider(PaymentProvider):
         self.secret_key = os.environ.get("STRIPE_SECRET_KEY", "").strip()
         self.webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
         if not self.secret_key: raise PaymentProviderNotConfigured("STRIPE_SECRET_KEY is not configured")
-    def _request(self, path, fields):
+    def _request(self, path, fields, idempotency_key=None):
         body = urllib.parse.urlencode(fields).encode("utf-8")
-        request = urllib.request.Request(self.api_base + path, data=body, method="POST", headers={"Authorization":"Bearer "+self.secret_key,"Content-Type":"application/x-www-form-urlencoded","User-Agent":"FabOS/1.0"})
+        headers={"Authorization":"Bearer "+self.secret_key,"Content-Type":"application/x-www-form-urlencoded","User-Agent":"FabOS/1.0"}
+        if idempotency_key: headers["Idempotency-Key"]=str(idempotency_key)
+        request = urllib.request.Request(self.api_base + path, data=body, method="POST", headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=15) as response: return json.loads(response.read().decode("utf-8"))
         except Exception as exc: raise PaymentProviderError("Stripe request failed") from exc
@@ -52,7 +54,7 @@ class StripePaymentProvider(PaymentProvider):
         success_url=os.environ.get("STRIPE_SUCCESS_URL","").strip();cancel_url=os.environ.get("STRIPE_CANCEL_URL","").strip()
         if not success_url or not cancel_url: raise PaymentProviderNotConfigured("STRIPE_SUCCESS_URL and STRIPE_CANCEL_URL are required")
         fields={"mode":"payment","success_url":success_url,"cancel_url":cancel_url,"line_items[0][price_data][currency]":currency.lower(),"line_items[0][price_data][product_data][name]":"FabOS order "+str(metadata["order_id"]),"line_items[0][price_data][unit_amount]":str(int(amount_cents)),"line_items[0][quantity]":"1","client_reference_id":str(metadata["order_id"]),"metadata[payment_id]":str(payment_id),"metadata[order_id]":str(metadata["order_id"])}
-        session=self._request("/checkout/sessions",fields)
+        session=self._request("/checkout/sessions",fields,idempotency_key=payment_id)
         return {"provider_payment_id":session.get("payment_intent") or session.get("id"),"checkout_url":session.get("url"),"status":"pending","metadata":{**metadata,"stripe_session_id":session.get("id")}}
     def parse_webhook(self,payload,signature=None):
         if not self.webhook_secret: raise PaymentProviderNotConfigured("STRIPE_WEBHOOK_SECRET is not configured")
@@ -131,20 +133,37 @@ class PaymentService:
         with self.database.connect() as conn: order=conn.execute("SELECT * FROM orders WHERE id=? AND customer_id=?",(order_id,customer["id"])).fetchone()
         if not order: raise KeyError("Order not found")
         return customer,order
+    def _prepare_transaction(self,order,customer_id,invoice_id,provider_name,channel):
+        amount_cents=int(order["total_cents"] or 0)
+        metadata={"order_id":str(order["id"]),"invoice_id":invoice_id,"channel":channel}
+        with self.database.connect() as conn:
+            existing=conn.execute("SELECT * FROM payment_transactions WHERE order_id=?",(order["id"],)).fetchone()
+            if existing:
+                status=str(existing["status"] or "").lower()
+                if status not in {"failed","cancelled"} and not (status=="created" and str(existing["provider"] or "").lower()=="unconfigured"):
+                    return str(existing["id"]),amount_cents,metadata,False
+                conn.execute("UPDATE payment_transactions SET invoice_id=?,customer_id=?,amount_cents=?,currency=?,provider=?,provider_payment_id=NULL,checkout_url=NULL,status='created',metadata_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(invoice_id,customer_id,amount_cents,"USD",provider_name,json.dumps(metadata,sort_keys=True),existing["id"]))
+                conn.commit()
+                return str(existing["id"]),amount_cents,metadata,True
+            payment_id=str(uuid.uuid4())
+            conn.execute("INSERT INTO payment_transactions(id,order_id,invoice_id,customer_id,amount_cents,currency,provider,status,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)",(payment_id,order["id"],invoice_id,customer_id,amount_cents,"USD",provider_name,"created",json.dumps(metadata,sort_keys=True)))
+            conn.commit()
+            return payment_id,amount_cents,metadata,True
     def _new_transaction(self,order,customer_id,invoice_id,provider_name,channel):
-        payment_id=str(uuid.uuid4());amount_cents=int(order["total_cents"] or 0);metadata={"order_id":str(order["id"]),"invoice_id":invoice_id,"channel":channel}
-        with self.database.connect() as conn: conn.execute("INSERT INTO payment_transactions(id,order_id,invoice_id,customer_id,amount_cents,currency,provider,status,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)",(payment_id,order["id"],invoice_id,customer_id,amount_cents,"USD",provider_name,"created",json.dumps(metadata,sort_keys=True)));conn.commit()
+        payment_id,amount_cents,metadata,created=self._prepare_transaction(order,customer_id,invoice_id,provider_name,channel)
+        if not created: raise ValueError("A payment attempt is already active for this order")
         return payment_id,amount_cents,metadata
     def create_checkout(self,user_id,order_id):
         customer,order=self._customer_for_order(user_id,order_id)
         if str(order["status"] or "").lower() in {"cancelled","completed"}: raise ValueError("Payment is not available for this order")
         invoice_id,_=self.invoices.create_from_order(order_id)
-        with self.database.connect() as conn:
-            existing=conn.execute("SELECT * FROM payment_transactions WHERE order_id=?",(order_id,)).fetchone()
-            if existing and str(existing["status"] or "").lower() not in {"failed","cancelled"}: return self._json(existing)
-        provider=self._build_provider("stripe");payment_id,amount_cents,metadata=self._new_transaction(order,customer["id"],invoice_id,provider.name,"customer-web")
+        provider=self._build_provider("stripe")
+        payment_id,amount_cents,metadata,attempt_ready=self._prepare_transaction(order,customer["id"],invoice_id,provider.name,"customer-web")
+        if not attempt_ready: return self.get(payment_id)
         try: result=provider.create_checkout(payment_id=payment_id,amount_cents=amount_cents,currency="USD",metadata=metadata)
-        except PaymentProviderNotConfigured: return {"id":payment_id,"order_id":order_id,"invoice_id":invoice_id,"amount_cents":amount_cents,"currency":"USD","provider":provider.name,"status":"not_configured","payment_required":amount_cents>0,"checkout_url":None}
+        except PaymentProviderNotConfigured:
+            with self.database.connect() as conn: conn.execute("UPDATE payment_transactions SET provider='unconfigured',status='created',updated_at=CURRENT_TIMESTAMP WHERE id=?",(payment_id,));conn.commit()
+            return {"id":payment_id,"order_id":order_id,"invoice_id":invoice_id,"amount_cents":amount_cents,"currency":"USD","provider":provider.name,"status":"not_configured","payment_required":amount_cents>0,"checkout_url":None}
         except PaymentProviderError: self._set_status(payment_id,"failed");raise
         self._update_gateway_fields(payment_id,result,str(result.get("status") or "pending"));return self.get(payment_id)
     def record_physical_payment(self,order_id,source_id,provider_name="square"):
@@ -152,9 +171,9 @@ class PaymentService:
         if not order: raise KeyError("Order not found")
         if str(order["status"] or "").lower() in {"cancelled","completed"}: raise ValueError("Payment is not available for this order")
         provider=self._build_provider(provider_name)
-        with self.database.connect() as conn: existing=conn.execute("SELECT * FROM payment_transactions WHERE order_id=?",(order_id,)).fetchone()
-        if existing and str(existing["status"] or "").lower() not in {"failed","cancelled"}: return self._json(existing)
-        invoice_id,_=self.invoices.create_from_order(order_id);payment_id,amount_cents,metadata=self._new_transaction(order,order["customer_id"],invoice_id,provider.name,"physical")
+        invoice_id,_=self.invoices.create_from_order(order_id)
+        payment_id,amount_cents,metadata,attempt_ready=self._prepare_transaction(order,order["customer_id"],invoice_id,provider.name,"physical")
+        if not attempt_ready: return self.get(payment_id)
         try: result=provider.create_physical_payment(payment_id=payment_id,amount_cents=amount_cents,currency="USD",source_id=source_id,metadata=metadata)
         except PaymentProviderError: self._set_status(payment_id,"failed");raise
         self._update_gateway_fields(payment_id,result,str(result.get("status") or "pending"));
