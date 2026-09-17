@@ -36,11 +36,16 @@ class AdministrationSettingsTests(unittest.TestCase):
         self.assertIn("self.customer_commerce=CustomerCommerceService(", text)
 
     def test_admin_api_is_registered_and_protected_by_administrator_dependency(self):
-        api = (Path(__file__).resolve().parents[1] / "fabos_core" / "services" / "admin_api.py").read_text(encoding="utf-8")
+        root = Path(__file__).resolve().parents[1]
+        api = (root / "fabos_core" / "services" / "admin_api.py").read_text(encoding="utf-8")
+        http_api = (root / "fabos_core" / "api.py").read_text(encoding="utf-8")
         self.assertIn("/api/v1/admin/users", api)
         self.assertIn("/api/v1/admin/settings", api)
         self.assertIn("Depends(administrator_user)", api)
         self.assertIn("/api/v1/admin/permissions", api)
+        self.assertIn("register_admin_routes", http_api)
+        self.assertIn("register_admin_routes(app, get_application, administrator_user)", http_api)
+        self.assertIn('"PUT", "DELETE"', http_api)
 
 
 if __name__ == "__main__":
