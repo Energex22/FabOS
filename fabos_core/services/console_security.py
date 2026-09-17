@@ -7,6 +7,7 @@ sessions are rejected when local-only mode is enabled.
 
 import ctypes
 import os
+import time
 
 
 class ConsoleSecurityService:
@@ -14,10 +15,15 @@ class ConsoleSecurityService:
 
     REMOTE_SESSION_METRIC = 0x1000  # SM_REMOTESESSION
 
+    MAX_FAILED_ATTEMPTS = 5
+    LOCKOUT_SECONDS = 60
+
     def __init__(self, auth, accounts, shop_settings=None):
         self.auth = auth
         self.accounts = accounts
         self.shop_settings = shop_settings
+        self._failed_attempts = 0
+        self._locked_until = 0.0
 
     @classmethod
     def is_local_session(cls):
@@ -61,6 +67,9 @@ class ConsoleSecurityService:
         return value not in {"0", "false", "no", "off"}
 
     def authenticate_owner(self, identifier, password):
+        now = time.monotonic()
+        if now < self._locked_until:
+            return None
         if self.local_only_enabled() and not self.is_local_session():
             return None
         identifier = (identifier or "").strip()
@@ -77,7 +86,13 @@ class ConsoleSecurityService:
             return None
         result = self.auth.login(identifier, password)
         if not result:
+            self._failed_attempts += 1
+            if self._failed_attempts >= self.MAX_FAILED_ATTEMPTS:
+                self._locked_until = time.monotonic() + self.LOCKOUT_SECONDS
+                self._failed_attempts = 0
             return None
+        self._failed_attempts = 0
+        self._locked_until = 0.0
         # Console authentication is intentionally owner-only even if another
         # administrator has otherwise valid FabOS credentials.
         return result
