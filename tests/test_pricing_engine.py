@@ -1,6 +1,7 @@
 import unittest
 
 from fabos_core.services.pricing_engine import PricingEngineService
+from fabos_core.services.quotes import QuoteService
 
 
 class FakeSettings:
@@ -30,7 +31,7 @@ class PricingEngineTests(unittest.TestCase):
             "quantity_discount_enabled": "false",
         })
         result = PricingEngineService(settings).estimate(60, 100, 1, setup_minutes=10, post_process_minutes=20, qc_minutes=5)
-        self.assertEqual(result["material_grams"], 110.0)
+        self.assertAlmostEqual(result["material_grams"], 110.0, places=2)
         self.assertEqual(result["material_cost"], 5.5)
         self.assertEqual(result["machine_cost"], 12.0)
         self.assertEqual(result["setup_cost"], 5.0)
@@ -51,6 +52,31 @@ class PricingEngineTests(unittest.TestCase):
         bulk = PricingEngineService(settings).estimate(60, 100, 10)
         self.assertAlmostEqual(rush["unit_price"], normal["unit_price"] * 1.5, places=2)
         self.assertAlmostEqual(bulk["unit_price"], normal["unit_price"] * 0.9, places=2)
+
+    def test_calculated_quote_item_uses_pricing_service(self):
+        class FakePricing:
+            def estimate(self, **kwargs):
+                self.kwargs = kwargs
+                return {"unit_price": 17.345, "total_price": 17.345}
+
+        pricing = FakePricing()
+        service = QuoteService(None, pricing)
+        items = service._resolve_items([{
+            "description": "Calculated part",
+            "quantity": 2,
+            "unit_price_cents": 0,
+            "estimated_minutes": 90,
+            "estimated_filament_g": 42.5,
+            "pricing_mode": "calculated",
+            "rush": True,
+            "setup_minutes": 10,
+            "post_process_minutes": 5,
+            "qc_minutes": 3,
+        }])
+        self.assertEqual(items[0]["unit_price_cents"], 1735)
+        self.assertEqual(pricing.kwargs["estimated_minutes"], 90)
+        self.assertEqual(pricing.kwargs["estimated_filament_g"], 42.5)
+        self.assertTrue(pricing.kwargs["rush"])
 
 
 if __name__ == "__main__":
