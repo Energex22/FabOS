@@ -3,7 +3,12 @@ class OrderService:
     SORT_COLUMNS={"number":"o.order_number","customer":"customer_name COLLATE NOCASE","status":"o.status","due":"o.due_at","total":"o.total_cents","created":"o.created_at"}
     ORDER_TRANSITIONS={"pending":{"confirmed","cancelled"},"confirmed":{"in_production","cancelled"},"in_production":{"ready","cancelled"},"ready":{"shipped","completed","cancelled"},"shipped":{"completed"},"completed":set(),"cancelled":set()}
     TERMINAL_STATUSES={"completed","cancelled"}
-    def __init__(self,database,accounts=None,permissions=None): self.database=database; self.accounts=accounts; self.permissions=permissions
+    def __init__(self,database,accounts=None,permissions=None): self.database=database; self.accounts=accounts; self.permissions=permissions; self._ensure_order_item_schema()
+    def _ensure_order_item_schema(self):
+        with self.database.connect() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS order_items(id TEXT PRIMARY KEY,order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,product_id TEXT REFERENCES products(id) ON DELETE SET NULL,variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL,description TEXT NOT NULL,quantity INTEGER NOT NULL DEFAULT 1,unit_price_cents INTEGER NOT NULL DEFAULT 0,material TEXT,color TEXT,estimated_minutes INTEGER,estimated_filament_g REAL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id)")
+            conn.commit()
     def list(self,query="",status="All",sort_column="created",descending=True,group="all"):
         col=self.SORT_COLUMNS.get(sort_column,"o.created_at"); direction="DESC" if descending else "ASC"; like="%%%s%%"%query.strip(); where=["(?='' OR o.order_number LIKE ? OR COALESCE(c.name,'') LIKE ?)"]; args=[query.strip(),like,like]
         if group=="active": where.append("o.status NOT IN ('completed','cancelled','shipped') AND COALESCE(f.status,'') NOT IN ('shipped','delivered','picked_up')")
@@ -17,21 +22,21 @@ class OrderService:
         with self.database.connect() as conn:return conn.execute(sql,args).fetchall()
     def _items_for_order(self,conn,order_id,quote_id=None):
         items=conn.execute("SELECT oi.*,p.name product_name,v.name variant_name FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id LEFT JOIN product_variants v ON v.id=oi.variant_id WHERE oi.order_id=? ORDER BY oi.rowid",(order_id,)).fetchall()
-        if items or not quote_id: return items
+        if items or not quote_id:return items
         return conn.execute("SELECT qi.*,p.name product_name,'' variant_name FROM quote_items qi LEFT JOIN products p ON p.id=qi.product_id WHERE qi.quote_id=? ORDER BY qi.rowid",(quote_id,)).fetchall()
     def get(self,order_id):
         with self.database.connect() as conn:
             row=conn.execute("SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=?",(order_id,)).fetchone()
-            if not row: raise KeyError("Order not found")
+            if not row:raise KeyError("Order not found")
             items=self._items_for_order(conn,order_id,row["quote_id"])
         return row,items
     def _user(self,user_id):
-        if not user_id: raise PermissionError("Authenticated user is required")
+        if not user_id:raise PermissionError("Authenticated user is required")
         if self.accounts is None:
             from fabos_core.services.accounts import AccountService
             self.accounts=AccountService(self.database)
         user=self.accounts.get_user(user_id)
-        if not user or not user["active"]: raise PermissionError("Authenticated user is inactive or not found")
+        if not user or not user["active"]:raise PermissionError("Authenticated user is inactive or not found")
         return user
     def _require(self,user_id,permission):
         user=self._user(user_id)
@@ -41,59 +46,54 @@ class OrderService:
         self.permissions.require(user["account_type"],permission,user_id=user_id); return user
     def _customer_order_allowed(self,user_id,order_id):
         user=self._user(user_id)
-        if user["account_type"]!="customer": return True
+        if user["account_type"]!="customer":return True
         customer=self.accounts.customer_for_user(user_id)
-        if not customer: return False
+        if not customer:return False
         with self.database.connect() as conn:return bool(conn.execute("SELECT 1 FROM orders WHERE id=? AND customer_id=?",(order_id,customer["id"])).fetchone())
     def get_for_user(self,user_id,order_id):
         self._require(user_id,"order.read")
-        if not self._customer_order_allowed(user_id,order_id): raise PermissionError("Order access denied")
+        if not self._customer_order_allowed(user_id,order_id):raise PermissionError("Order access denied")
         return self.get(order_id)
     def list_for_user(self,user_id,query="",status="All",sort_column="created",descending=True,group="all"):
         user=self._require(user_id,"order.read")
-        if user["account_type"]!="customer": return self.list(query,status,sort_column,descending,group)
+        if user["account_type"]!="customer":return self.list(query,status,sort_column,descending,group)
         customer=self.accounts.customer_for_user(user_id)
-        if not customer: return []
+        if not customer:return []
         return [row for row in self.list(query,status,sort_column,descending,group) if row["customer_id"]==customer["id"]]
     def set_status(self,order_id,status,actor_user_id=None):
         self._require(actor_user_id,"order.manage"); requested=(status or "").strip().lower()
-        if requested not in self.ORDER_TRANSITIONS: raise ValueError("Unsupported order status")
+        if requested not in self.ORDER_TRANSITIONS:raise ValueError("Unsupported order status")
         with self.database.connect() as conn:
             row=conn.execute("SELECT status FROM orders WHERE id=?",(order_id,)).fetchone()
-            if not row: raise KeyError("Order not found")
+            if not row:raise KeyError("Order not found")
             current=(row["status"] or "").strip().lower()
             if current==requested:return self.get(order_id)[0]
             allowed=self.ORDER_TRANSITIONS.get(current)
-            if allowed is None: raise ValueError("Order has unsupported current status: %s"%current)
-            if requested not in allowed: raise ValueError("Invalid order transition: %s -> %s"%(current,requested))
+            if allowed is None:raise ValueError("Order has unsupported current status: %s"%current)
+            if requested not in allowed:raise ValueError("Invalid order transition: %s -> %s"%(current,requested))
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
         return self.get(order_id)[0]
     def set_status_internal(self,order_id,status,reason=""):
-        """Trusted service-to-service transition for local automation/undo paths.
-
-        This still validates the lifecycle graph; it only skips interactive RBAC
-        because the caller is already inside the trusted FabOS process.
-        """
         requested=(status or "").strip().lower()
-        if requested not in self.ORDER_TRANSITIONS: raise ValueError("Unsupported order status")
+        if requested not in self.ORDER_TRANSITIONS:raise ValueError("Unsupported order status")
         with self.database.connect() as conn:
             row=conn.execute("SELECT status FROM orders WHERE id=?",(order_id,)).fetchone()
-            if not row: raise KeyError("Order not found")
+            if not row:raise KeyError("Order not found")
             current=(row["status"] or "").strip().lower()
             if current==requested:return self.get(order_id)[0]
             allowed=self.ORDER_TRANSITIONS.get(current)
-            if allowed is None or requested not in allowed: raise ValueError("Invalid order transition: %s -> %s"%(current,requested))
+            if allowed is None or requested not in allowed:raise ValueError("Invalid order transition: %s -> %s"%(current,requested))
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
         return self.get(order_id)[0]
     def dossier(self, order_id):
         with self.database.connect() as conn:
-            order=conn.execute("""SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(c.email,'') customer_email,COALESCE(c.phone,'') customer_phone,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=?""",(order_id,)).fetchone()
+            order=conn.execute("SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(c.email,'') customer_email,COALESCE(c.phone,'') customer_phone,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=?",(order_id,)).fetchone()
             if not order:raise KeyError("Order not found")
             items=self._items_for_order(conn,order_id,order["quote_id"])
-            jobs=conn.execute("""SELECT j.*,COALESCE(p.name,'Custom Job') product_name,COALESCE(pr.name,'Unassigned') printer_name FROM print_jobs j LEFT JOIN products p ON p.id=j.product_id LEFT JOIN printers pr ON pr.id=j.printer_id WHERE j.order_id=? ORDER BY j.created_at""",(order_id,)).fetchall()
-            qc=conn.execute("""SELECT q.*,COALESCE(p.name,'Custom Job') product_name FROM qc_inspections q LEFT JOIN print_jobs j ON j.id=q.print_job_id LEFT JOIN products p ON p.id=j.product_id WHERE q.order_id=? ORDER BY q.created_at""",(order_id,)).fetchall()
-            invoices=conn.execute("""SELECT i.*,(i.total_cents-i.paid_cents) balance_cents FROM invoices i WHERE i.order_id=? ORDER BY i.created_at DESC""",(order_id,)).fetchall()
-            payments=conn.execute("""SELECT p.*,i.invoice_number FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.order_id=? ORDER BY p.paid_at DESC""",(order_id,)).fetchall()
+            jobs=conn.execute("SELECT j.*,COALESCE(p.name,'Custom Job') product_name,COALESCE(pr.name,'Unassigned') printer_name FROM print_jobs j LEFT JOIN products p ON p.id=j.product_id LEFT JOIN printers pr ON pr.id=j.printer_id WHERE j.order_id=? ORDER BY j.created_at",(order_id,)).fetchall()
+            qc=conn.execute("SELECT q.*,COALESCE(p.name,'Custom Job') product_name FROM qc_inspections q LEFT JOIN print_jobs j ON j.id=q.print_job_id LEFT JOIN products p ON p.id=j.product_id WHERE q.order_id=? ORDER BY q.created_at",(order_id,)).fetchall()
+            invoices=conn.execute("SELECT i.*,(i.total_cents-i.paid_cents) balance_cents FROM invoices i WHERE i.order_id=? ORDER BY i.created_at DESC",(order_id,)).fetchall()
+            payments=conn.execute("SELECT p.*,i.invoice_number FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.order_id=? ORDER BY p.paid_at DESC",(order_id,)).fetchall()
             fulfillment=conn.execute("SELECT * FROM fulfillments WHERE order_id=?",(order_id,)).fetchone()
         total_jobs=len(jobs);completed_jobs=sum(1 for j in jobs if j["status"]=="completed"); qc_total=len(qc);qc_passed=sum(1 for q in qc if q["status"]=="passed");paid=sum(int(p["amount_cents"] or 0) for p in payments);active_invoice=next((i for i in invoices if i["status"]!="void"),None)
         if order["status"]=="cancelled":next_action="Cancelled"
