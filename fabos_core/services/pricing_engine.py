@@ -42,7 +42,7 @@ class PricingEngineService:
         payment_fee_percent = max(0.0, self._number("payment_fee_percent", 0.0))
         payment_fee_fixed = max(0.0, self._number("payment_fee_fixed_cents", 0.0)) / 100.0
 
-        material_grams = grams * (1.0 + waste_percent / 100.0)
+        material_grams = round(grams * (1.0 + waste_percent / 100.0), 6)
         material_cost = material_grams * material_cost_per_g
         machine_cost = (minutes / 60.0) * machine_hourly
         setup_cost = (max(0.0, float(setup_minutes or 0)) / 60.0) * setup_rate
