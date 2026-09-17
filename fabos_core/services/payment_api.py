@@ -52,49 +52,25 @@ def _record_refund(application, provider_name, payload):
 
     db = application.database
     with db.connect() as conn:
-        existing = conn.execute(
-            "SELECT 1 FROM payments WHERE reference=? LIMIT 1",
-            (refund_reference,),
-        ).fetchone()
+        existing = conn.execute("SELECT 1 FROM payments WHERE reference=? LIMIT 1", (refund_reference,)).fetchone()
         if existing:
             return {"recorded": False, "duplicate": True, "reference": refund_reference}
 
         transaction = None
         if payment_id:
-            transaction = conn.execute(
-                "SELECT * FROM payment_transactions WHERE id=?",
-                (payment_id,),
-            ).fetchone()
+            transaction = conn.execute("SELECT * FROM payment_transactions WHERE id=?", (payment_id,)).fetchone()
         if not transaction and provider_payment_id:
-            transaction = conn.execute(
-                "SELECT * FROM payment_transactions WHERE provider_payment_id=? ORDER BY created_at DESC LIMIT 1",
-                (provider_payment_id,),
-            ).fetchone()
+            transaction = conn.execute("SELECT * FROM payment_transactions WHERE provider_payment_id=? ORDER BY created_at DESC LIMIT 1", (provider_payment_id,)).fetchone()
         if not transaction:
             order_id = str(metadata.get("order_id") or "")
             if order_id:
-                transaction = conn.execute(
-                    "SELECT * FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",
-                    (order_id,),
-                ).fetchone()
+                transaction = conn.execute("SELECT * FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1", (order_id,)).fetchone()
         if not transaction:
             return {"recorded": False, "duplicate": False, "reason": "payment_transaction_not_found"}
 
         invoice_id = transaction["invoice_id"]
-        original_paid = int(
-            conn.execute(
-                "SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents>0",
-                (invoice_id,),
-            ).fetchone()[0]
-            or 0
-        )
-        already_refunded = int(
-            conn.execute(
-                "SELECT COALESCE(-SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents<0",
-                (invoice_id,),
-            ).fetchone()[0]
-            or 0
-        )
+        original_paid = int(conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents>0", (invoice_id,)).fetchone()[0] or 0)
+        already_refunded = int(conn.execute("SELECT COALESCE(-SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents<0", (invoice_id,)).fetchone()[0] or 0)
         remaining = max(0, original_paid - already_refunded)
         refund_amount = min(amount_cents, remaining)
         if refund_amount <= 0:
@@ -102,25 +78,15 @@ def _record_refund(application, provider_name, payload):
 
         conn.execute(
             "INSERT INTO payments(id,invoice_id,amount_cents,method,reference,notes) VALUES(?,?,?,?,?,?)",
-            (
-                f"refund-{event_id}",
-                invoice_id,
-                -refund_amount,
-                provider_name,
-                refund_reference,
-                "Gateway refund reconciled by FabOS",
-            ),
+            (f"refund-{event_id}", invoice_id, -refund_amount, provider_name, refund_reference, "Gateway refund reconciled by FabOS"),
         )
+        remaining_after = remaining - refund_amount
+        new_status = "refunded" if remaining_after <= 0 else "partially_refunded"
+        conn.execute("UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (new_status, transaction["id"]))
         conn.commit()
 
     application.invoices.reconcile(invoice_id)
-    return {
-        "recorded": True,
-        "duplicate": False,
-        "reference": refund_reference,
-        "amount_cents": refund_amount,
-        "invoice_id": invoice_id,
-    }
+    return {"recorded": True, "duplicate": False, "reference": refund_reference, "amount_cents": refund_amount, "invoice_id": invoice_id, "status": new_status}
 
 
 def register_payment_routes(app, get_application, administrator_user):
@@ -134,13 +100,7 @@ def register_payment_routes(app, get_application, administrator_user):
         provider: str = Field(default="square", min_length=1, max_length=30)
 
     @app.post("/api/v1/webhooks/payments/{provider_name}")
-    async def payment_webhook(
-        provider_name: str,
-        request: Request,
-        x_square_hmacsha256_signature: str = Header(default=""),
-        stripe_signature: str = Header(default=""),
-        application=Depends(get_application),
-    ):
+    async def payment_webhook(provider_name: str, request: Request, x_square_hmacsha256_signature: str = Header(default=""), stripe_signature: str = Header(default=""), application=Depends(get_application)):
         payload = await request.body()
         provider = provider_name.strip().lower()
         signature = stripe_signature if provider == "stripe" else x_square_hmacsha256_signature
@@ -156,11 +116,7 @@ def register_payment_routes(app, get_application, administrator_user):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/v1/admin/payments/physical")
-    def record_physical_payment(
-        payload: PhysicalPaymentRequest,
-        user=Depends(administrator_user),
-        application=Depends(get_application),
-    ):
+    def record_physical_payment(payload: PhysicalPaymentRequest, user=Depends(administrator_user), application=Depends(get_application)):
         try:
             return {"payment": application.payments.record_physical_payment(payload.order_id, payload.source_id, payload.provider)}
         except KeyError as exc:
