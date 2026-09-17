@@ -36,7 +36,7 @@ def register_admin_routes(app, get_application, administrator_user):
         rows = application.accounts.list_users()
         users = []
         for row in rows:
-            item = {key: row[key] for key in ("id", "username", "email", "account_type", "active", "created_at", "updated_at", "last_login_at") if key in row.keys()}
+            item = {key: row[key] for key in ("id", "username", "email", "account_type", "role", "active", "created_at", "updated_at", "last_login_at") if key in row.keys()}
             item["permissions"] = sorted(application.permissions.permissions_for_user(row["id"], row["account_type"]))
             users.append(item)
         return {"users": users}
@@ -60,6 +60,10 @@ def register_admin_routes(app, get_application, administrator_user):
         if not row:
             raise HTTPException(status_code=404, detail="User not found")
         values = payload.dict(exclude_unset=True)
+        target_is_owner = str(row["role"] or "").lower() == "owner" if "role" in row.keys() else False
+        actor_is_owner = str(user["role"] or "").lower() == "owner" if "role" in user.keys() else False
+        if target_is_owner and not actor_is_owner:
+            raise HTTPException(status_code=403, detail="Only the owner can modify the owner account")
         if user_id == user["id"] and (values.get("active") is False or values.get("account_type") not in (None, "administrator")):
             raise HTTPException(status_code=409, detail="You cannot disable or demote your own administrator account")
         if row["account_type"] == "administrator" and (values.get("active") is False or values.get("account_type") not in (None, "administrator")):
@@ -71,8 +75,11 @@ def register_admin_routes(app, get_application, administrator_user):
 
     @app.post("/api/v1/admin/users/{user_id}/password")
     def reset_admin_password(user_id: str, payload: PasswordReset, user=Depends(administrator_user), application=Depends(get_application)):
-        if not application.accounts.get_user(user_id):
+        target = application.accounts.get_user(user_id)
+        if not target:
             raise HTTPException(status_code=404, detail="User not found")
+        if str(target["role"] or "").lower() == "owner" and str(user["role"] or "").lower() != "owner":
+            raise HTTPException(status_code=403, detail="Only the owner can change the owner password")
         application.auth.set_password(user_id, payload.password)
         revoked = application.auth.revoke_user_sessions(user_id)
         return {"updated": True, "sessions_revoked": revoked}
@@ -104,8 +111,11 @@ def register_admin_routes(app, get_application, administrator_user):
 
     @app.put("/api/v1/admin/users/{user_id}/permissions/{permission}")
     def set_user_permission(user_id: str, permission: str, payload: PermissionUpdate, user=Depends(administrator_user), application=Depends(get_application)):
-        if not application.accounts.get_user(user_id):
+        target = application.accounts.get_user(user_id)
+        if not target:
             raise HTTPException(status_code=404, detail="User not found")
+        if str(target["role"] or "").lower() == "owner" and str(user["role"] or "").lower() != "owner":
+            raise HTTPException(status_code=403, detail="Only the owner can modify owner permissions")
         try:
             application.permissions.set_user_permission(user_id, permission, payload.allowed)
         except ValueError as exc:
@@ -114,8 +124,11 @@ def register_admin_routes(app, get_application, administrator_user):
 
     @app.delete("/api/v1/admin/users/{user_id}/permissions/{permission}")
     def clear_user_permission(user_id: str, permission: str, user=Depends(administrator_user), application=Depends(get_application)):
-        if not application.accounts.get_user(user_id):
+        target = application.accounts.get_user(user_id)
+        if not target:
             raise HTTPException(status_code=404, detail="User not found")
+        if str(target["role"] or "").lower() == "owner" and str(user["role"] or "").lower() != "owner":
+            raise HTTPException(status_code=403, detail="Only the owner can modify owner permissions")
         try:
             application.permissions.clear_user_permission(user_id, permission)
         except ValueError as exc:
@@ -128,6 +141,9 @@ def register_admin_routes(app, get_application, administrator_user):
 
     @app.put("/api/v1/admin/settings")
     def update_admin_settings(payload: SettingUpdate, user=Depends(administrator_user), application=Depends(get_application)):
+        protected_keys = {"console_lock_enabled", "console_idle_timeout_minutes", "console_local_only"}
+        if payload.key in protected_keys and str(user["role"] or "").lower() != "owner":
+            raise HTTPException(status_code=403, detail="Only the owner can change console security settings")
         try:
             application.shop_settings.set_validated(payload.key, payload.value)
         except KeyError as exc:
