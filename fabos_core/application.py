@@ -36,6 +36,7 @@ from fabos_core.services.customer_updates import CustomerUpdateService
 from fabos_core.services.reliability import ReliabilityService
 from fabos_core.services.shop_settings import ShopSettingsService
 from fabos_core.services.pricing_engine import PricingEngineService
+from fabos_core.services.price_history import PriceHistoryService
 from fabos_core.services.global_search import GlobalSearchService
 from fabos_core.services.octoprint_print import OctoPrintPrintService
 from fabos_core.services.model_plate import ModelPlateService
@@ -45,7 +46,6 @@ from fabos_core.services.checkout import CheckoutService
 from fabos_core.db.migrations import migrate
 from pathlib import Path
 from fabos_core.services.operations_hub import OperationsHubService
-from fabos_core.services.price_history import PriceHistoryService
 
 
 class FabOSApplication:
