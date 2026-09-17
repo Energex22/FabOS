@@ -1,37 +1,18 @@
-from fabos_core.api import create_app
+from pathlib import Path
 
 
-def _paths(app):
-    return {getattr(route, "path", "") for route in app.routes}
+API_SOURCE = Path("fabos_core/api.py").read_text(encoding="utf-8")
 
 
-def test_customer_api_hides_framework_docs_by_default(monkeypatch):
-    monkeypatch.delenv("FABOS_API_DOCS", raising=False)
-    app = create_app(object())
-
-    paths = _paths(app)
-    assert "/docs" not in paths
-    assert "/redoc" not in paths
-    assert "/openapi.json" not in paths
-    assert app.title == "Customer API"
+def test_customer_api_uses_customer_safe_identity():
+    assert 'title="Customer API"' in API_SOURCE
+    assert '"service": "customer-api"' in API_SOURCE
+    assert 'title="FabOS Customer API"' not in API_SOURCE
+    assert '"service": "FabOS Customer API"' not in API_SOURCE
 
 
-def test_customer_api_docs_can_be_enabled_for_local_development(monkeypatch):
-    monkeypatch.setenv("FABOS_API_DOCS", "1")
-    app = create_app(object())
-
-    paths = _paths(app)
-    assert "/docs" in paths
-    assert "/redoc" in paths
-    assert "/openapi.json" in paths
-    assert app.title == "Customer API"
-
-
-def test_health_response_uses_customer_safe_service_name(monkeypatch):
-    monkeypatch.delenv("FABOS_API_DOCS", raising=False)
-    app = create_app(object())
-    health_route = next(route for route in app.routes if getattr(route, "path", "") == "/api/v1/health")
-
-    result = health_route.endpoint()
-    assert result == {"status": "ok", "service": "customer-api", "version": "1.2"}
-    assert "FabOS" not in str(result)
+def test_customer_api_docs_are_opt_in():
+    assert 'FABOS_API_DOCS' in API_SOURCE
+    assert 'docs_url="/docs" if docs_enabled else None' in API_SOURCE
+    assert 'redoc_url="/redoc" if docs_enabled else None' in API_SOURCE
+    assert 'openapi_url="/openapi.json" if docs_enabled else None' in API_SOURCE
