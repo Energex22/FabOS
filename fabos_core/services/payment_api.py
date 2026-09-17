@@ -2,6 +2,7 @@
 import json
 
 from fabos_core.services.payments import PaymentProviderError, PaymentProviderNotConfigured
+from fabos_core.services.admin_api import register_admin_routes
 
 
 def _record_refund(application, provider_name, payload):
@@ -85,9 +86,6 @@ def _record_refund(application, provider_name, payload):
         remaining_after = remaining - refund_amount
         new_status = "refunded" if remaining_after <= 0 else "partially_refunded"
 
-        # Older FabOS databases predate payment_transactions.status. Refund ledger
-        # reconciliation must remain safe on those databases; current schemas retain
-        # the richer transaction status when the column is available.
         columns = {row[1] for row in conn.execute("PRAGMA table_info(payment_transactions)").fetchall()}
         if "status" in columns:
             conn.execute("UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (new_status, transaction["id"]))
@@ -98,7 +96,7 @@ def _record_refund(application, provider_name, payload):
 
 
 def register_payment_routes(app, get_application, administrator_user):
-    """Register HTTP payment routes without making FastAPI a test-time import requirement."""
+    """Register payment and administrator routes."""
     from fastapi import Depends, Header, HTTPException, Request
     from pydantic import BaseModel, Field
 
@@ -135,3 +133,5 @@ def register_payment_routes(app, get_application, administrator_user):
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    register_admin_routes(app, get_application, administrator_user)
