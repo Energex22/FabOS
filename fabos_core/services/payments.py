@@ -65,7 +65,7 @@ class StripePaymentProvider(PaymentProvider):
         elif event_type in {"payment_intent.payment_failed","charge.failed"}: status="failed"
         elif event_type=="checkout.session.expired": status="cancelled"
         elif event_type in {"charge.refunded","refund.created"}: status="refunded"
-        return {"event_id":str(event.get("id") or ""),"event_type":event_type,"provider_payment_id":str(obj.get("payment_intent") or obj.get("id") or ""),"payment_id":str(metadata.get("payment_id") or ""),"order_id":str(metadata.get("order_id") or ""),"status":status}
+        return {"event_id":str(event.get("id") or ""),"event_type":event_type,"provider_payment_id":str(obj.get("payment_intent") or obj.get("id") or ""),"payment_id":str(metadata.get("payment_id") or ""),"order_id":str(metadata.get("order_id") or obj.get("client_reference_id") or ""),"status":status}
 
 
 class SquarePaymentProvider(PaymentProvider):
@@ -186,9 +186,12 @@ class PaymentService:
             if conn.execute("SELECT 1 FROM payment_webhook_events WHERE id=?",(event_id,)).fetchone(): return {"processed":False,"duplicate":True,"event_id":event_id}
             conn.execute("INSERT INTO payment_webhook_events(id,provider,event_type,payment_id) VALUES(?,?,?,?)",(event_id,provider.name,event.get("event_type"),event.get("payment_id") or event.get("provider_payment_id")));conn.commit()
         payment_id=event.get("payment_id")
+        if not payment_id and event.get("provider_payment_id"):
+            with self.database.connect() as conn:
+                row=conn.execute("SELECT id FROM payment_transactions WHERE provider_payment_id=? ORDER BY created_at DESC LIMIT 1",(event["provider_payment_id"],)).fetchone();payment_id=row["id"] if row else None
         if not payment_id and event.get("order_id"):
             with self.database.connect() as conn:
-                row=conn.execute("SELECT id FROM payment_transactions WHERE order_id=?",(event["order_id"],)).fetchone();payment_id=row["id"] if row else None
+                row=conn.execute("SELECT id FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",(event["order_id"],)).fetchone();payment_id=row["id"] if row else None
         if payment_id and event.get("status") in self.VALID_STATUSES: self._set_status(payment_id,event["status"],provider_payment_id=event.get("provider_payment_id"))
         return {"processed":True,"duplicate":False,"event_id":event_id,"status":event.get("status")}
     def _update_gateway_fields(self,payment_id,result,status):
