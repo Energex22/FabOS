@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 
 class CustomerCommerceService:
@@ -17,6 +17,10 @@ class CustomerCommerceService:
     def register_customer(self, name, email, password, phone=""):
         if self.auth is None:
             raise RuntimeError("Authentication service is required")
+        if str(self.shop_settings.get("storefront_enabled", "true")).lower() != "true":
+            raise PermissionError("Storefront is currently unavailable")
+        if str(self.shop_settings.get("customer_registration_enabled", "true")).lower() != "true":
+            raise PermissionError("Customer registration is currently disabled")
         name = str(name or "").strip()
         email = str(email or "").strip().lower()
         phone = str(phone or "").strip()
@@ -51,6 +55,12 @@ class CustomerCommerceService:
             raise PermissionError("Customer account is not linked")
         return customer
 
+    def _require_storefront(self, ordering=False):
+        if str(self.shop_settings.get("storefront_enabled", "true")).lower() != "true":
+            raise PermissionError("Storefront is currently unavailable")
+        if ordering and str(self.shop_settings.get("storefront_ordering_enabled", "true")).lower() != "true":
+            raise PermissionError("Customer ordering is currently disabled")
+
     @staticmethod
     def _positive_quantity(value):
         try:
@@ -76,6 +86,7 @@ class CustomerCommerceService:
         return address
 
     def create_quote_request(self, user_id, project):
+        self._require_storefront()
         customer = self._customer(user_id)
         idea = str(project.get("idea") or "").strip()
         if not idea:
@@ -95,6 +106,7 @@ class CustomerCommerceService:
         return self.quotes.get_for_user(user_id, quote_id)
 
     def create_order(self, user_id, items, shipping_address, notes=""):
+        self._require_storefront(ordering=True)
         customer = self._customer(user_id)
         shipping_address = self._shipping_address(shipping_address)
         if not isinstance(items, list) or not items:
@@ -127,20 +139,37 @@ class CustomerCommerceService:
                 raise ValueError("Product price is not available for customer ordering")
             subtotal_cents += unit_price_cents * quantity
             resolved_items.append({"product_id": product_id, "description": str(product["name"]), "quantity": quantity, "unit_price_cents": unit_price_cents, "material": material, "color": color, "estimated_minutes": int(product["estimated_minutes"] or 0), "estimated_filament_g": float(product["estimated_filament_g"] or 0)})
+        minimum_order_cents = int(float(self.shop_settings.get("minimum_order_cents", "0") or 0))
+        if subtotal_cents < minimum_order_cents:
+            raise ValueError("Order subtotal is below the configured minimum order amount")
         quote_id = self.quotes.save({"customer_id": customer["id"], "status": "approved", "notes": str(notes or "").strip()}, resolved_items)
-        shipping_cents = int(float(self.shop_settings.get("shipping_flat_cents", "0") or 0))
+        shipping_mode = str(self.shop_settings.get("shipping_mode", "calculated") or "calculated").lower()
+        if shipping_mode == "free":
+            shipping_cents = 0
+        elif shipping_mode == "flat":
+            shipping_cents = int(float(self.shop_settings.get("shipping_flat_cents", "0") or 0))
+        else:
+            base = int(float(self.shop_settings.get("shipping_calculated_base_cents", "0") or 0))
+            per_kg = float(self.shop_settings.get("shipping_calculated_per_kg_cents", "0") or 0)
+            weight_kg = sum(float(item["estimated_filament_g"] or 0) * int(item["quantity"]) for item in resolved_items) / 1000.0
+            shipping_cents = int(round(base + per_kg * weight_kg))
+            free_threshold = int(float(self.shop_settings.get("free_shipping_threshold_cents", "0") or 0))
+            if free_threshold > 0 and subtotal_cents >= free_threshold:
+                shipping_cents = 0
         tax_percent = float(self.shop_settings.get("default_tax_percent", "0") or 0)
         tax_cents = int(round(subtotal_cents * max(0.0, tax_percent) / 100.0))
         total_cents = subtotal_cents + max(0, shipping_cents) + tax_cents
         order_id = str(uuid.uuid4())
         prefix = "O-" + date.today().strftime("%Y%m") + "-"
+        turnaround_days = int(float(self.shop_settings.get("default_turnaround_days", "7") or 7))
+        due_at = (date.today() + timedelta(days=max(0, turnaround_days))).isoformat()
         with self.database.connect() as conn:
             row = conn.execute("SELECT order_number FROM orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1", (prefix + "%",)).fetchone()
             sequence = int(row[0].split("-")[-1]) + 1 if row else 1
             order_number = prefix + ("%04d" % sequence)
             conn.execute("""INSERT INTO orders
                 (id,order_number,customer_id,quote_id,status,due_at,total_cents,tax_cents,shipping_cents,shipping_address_json,checkout_notes,checkout_channel)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (order_id, order_number, customer["id"], quote_id, "pending", None, total_cents, tax_cents, shipping_cents, json.dumps(shipping_address), str(notes or "").strip(), "customer-web"))
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (order_id, order_number, customer["id"], quote_id, "pending", due_at, total_cents, tax_cents, shipping_cents, json.dumps(shipping_address), str(notes or "").strip(), "customer-web"))
             conn.commit()
         row, saved_items = self._order_for_customer(user_id, order_id)
         return row, saved_items, subtotal_cents, shipping_cents, tax_cents, total_cents
