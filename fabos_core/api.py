@@ -1,6 +1,6 @@
-"""HTTP API boundary for the customer-facing FabOS web application.
+"""HTTP API boundary for the customer-facing web application.
 
-The API delegates business rules to the existing FabOS services. It intentionally
+The API delegates business rules to the existing internal services. It intentionally
 serializes only customer-safe fields and never exposes the internal order dossier.
 """
 
@@ -94,7 +94,17 @@ class StorefrontUpdate(BaseModel):
 
 
 def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
-    app = FastAPI(title="FabOS Customer API", version="1.2")
+    # Customer deployments should not expose framework-generated API docs, which
+    # would otherwise reveal internal service and route details. Local development
+    # can opt in with FABOS_API_DOCS=1 when interactive docs are useful.
+    docs_enabled = os.environ.get("FABOS_API_DOCS", "").strip().lower() in {"1", "true", "yes"}
+    app = FastAPI(
+        title="Customer API",
+        version="1.2",
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
     fabos = application or FabOSApplication()
     app.state.fabos = fabos
 
@@ -131,7 +141,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
 
     @app.get("/api/v1/health")
     def health(application: FabOSApplication = Depends(get_application)):
-        return {"status": "ok", "service": "FabOS Customer API", "version": "1.2"}
+        return {"status": "ok", "service": "customer-api", "version": "1.2"}
 
     @app.get("/api/v1/catalog")
     def catalog(q: str = "", category: str = "All", sort: str = "name", desc: bool = False, application: FabOSApplication = Depends(get_application)):
