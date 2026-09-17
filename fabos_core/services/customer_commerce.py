@@ -128,6 +128,9 @@ class CustomerCommerceService:
             material = str(configuration.get("material") or requested.get("material") or "").strip()
             color = str(configuration.get("color") or requested.get("color") or "").strip()
             unit_price_cents = int(product["price_cents"] or 0)
+            estimated_minutes = int(product["estimated_minutes"] or 0)
+            estimated_filament_g = float(product["estimated_filament_g"] or 0)
+            description = str(product["name"])
             if variant_id:
                 variant = next((candidate for candidate in self.products.variants(product_id) if str(candidate["id"]) == variant_id), None)
                 if not variant or not int(variant["active"]):
@@ -135,10 +138,13 @@ class CustomerCommerceService:
                 unit_price_cents = int(variant["price_cents"] or 0)
                 material = material or str(variant["material"] or "")
                 color = color or str(variant["color"] or "")
+                estimated_minutes = int(variant["estimated_minutes"] or estimated_minutes)
+                estimated_filament_g = float(variant["estimated_filament_g"] or estimated_filament_g)
+                description += " · " + str(variant["name"])
             if unit_price_cents <= 0:
                 raise ValueError("Product price is not available for customer ordering")
             subtotal_cents += unit_price_cents * quantity
-            resolved_items.append({"product_id": product_id, "description": str(product["name"]), "quantity": quantity, "unit_price_cents": unit_price_cents, "material": material, "color": color, "estimated_minutes": int(product["estimated_minutes"] or 0), "estimated_filament_g": float(product["estimated_filament_g"] or 0)})
+            resolved_items.append({"product_id": product_id, "variant_id": variant_id or None, "description": description, "quantity": quantity, "unit_price_cents": unit_price_cents, "material": material, "color": color, "estimated_minutes": estimated_minutes, "estimated_filament_g": estimated_filament_g})
         minimum_order_cents = int(float(self.shop_settings.get("minimum_order_cents", "0") or 0))
         if subtotal_cents < minimum_order_cents:
             raise ValueError("Order subtotal is below the configured minimum order amount")
@@ -180,5 +186,5 @@ class CustomerCommerceService:
             row = conn.execute("SELECT o.*,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=? AND o.customer_id=?", (order_id, customer["id"])).fetchone()
             if not row:
                 raise KeyError("Order not found")
-            items = conn.execute("SELECT qi.*,p.name product_name FROM quote_items qi LEFT JOIN products p ON p.id=qi.product_id WHERE qi.quote_id=? ORDER BY qi.rowid", (row["quote_id"],)).fetchall()
+            items = conn.execute("SELECT oi.*,p.name product_name,v.name variant_name FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id LEFT JOIN product_variants v ON v.id=oi.variant_id WHERE oi.order_id=? ORDER BY oi.rowid", (order_id,)).fetchall()
         return row, items
