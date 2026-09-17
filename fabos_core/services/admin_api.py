@@ -2,13 +2,14 @@
 
 
 def register_admin_routes(app, get_application, administrator_user):
+    from typing import Optional
     from fastapi import Depends, HTTPException
     from pydantic import BaseModel, Field
 
     class AccountUpdate(BaseModel):
-        email: str | None = Field(default=None, max_length=320)
-        account_type: str | None = Field(default=None, max_length=30)
-        active: bool | None = None
+        email: Optional[str] = Field(default=None, max_length=320)
+        account_type: Optional[str] = Field(default=None, max_length=30)
+        active: Optional[bool] = None
 
     class PasswordReset(BaseModel):
         password: str = Field(min_length=8, max_length=1024)
@@ -19,9 +20,6 @@ def register_admin_routes(app, get_application, administrator_user):
     class SettingUpdate(BaseModel):
         key: str = Field(min_length=1, max_length=100)
         value: str = Field(default="", max_length=4000)
-
-    def admin(application, user):
-        return application, user
 
     @app.get("/api/v1/admin/users")
     def list_admin_users(user=Depends(administrator_user), application=Depends(get_application)):
@@ -51,7 +49,7 @@ def register_admin_routes(app, get_application, administrator_user):
         row = application.accounts.get_user(user_id)
         if not row:
             raise HTTPException(status_code=404, detail="User not found")
-        values = payload.model_dump(exclude_unset=True)
+        values = payload.dict(exclude_unset=True)
         if user_id == user["id"] and (values.get("active") is False or values.get("account_type") not in (None, "administrator")):
             raise HTTPException(status_code=409, detail="You cannot disable or demote your own administrator account")
         if row["account_type"] == "administrator" and (values.get("active") is False or values.get("account_type") not in (None, "administrator")):
