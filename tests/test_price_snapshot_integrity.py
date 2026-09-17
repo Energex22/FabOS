@@ -123,3 +123,37 @@ def test_existing_order_is_backfilled_into_immutable_items(tmp_path):
     rows = history.order_items("o1")
     assert len(rows) == 1
     assert rows[0]["unit_price_cents"] == 2000
+
+
+def test_order_snapshot_cannot_be_mutated(tmp_path):
+    db = make_db(tmp_path)
+    quotes = QuoteService(db)
+    with db.connect() as conn:
+        conn.execute("INSERT INTO customers(id,name) VALUES(?,?)", ("c1", "Customer"))
+        conn.commit()
+    quote_id = quotes.save({"customer_id": "c1"}, [{"description": "Widget", "quantity": 1, "unit_price_cents": 2000}])
+    with db.connect() as conn:
+        conn.execute("INSERT INTO orders(id,order_number,customer_id,quote_id,total_cents) VALUES(?,?,?,?,?)", ("o1", "O-TEST-0004", "c1", quote_id, 2000))
+        conn.commit()
+        try:
+            conn.execute("UPDATE order_items SET unit_price_cents=1 WHERE order_id=?", ("o1",))
+        except Exception as exc:
+            assert "immutable" in str(exc).lower()
+        else:
+            raise AssertionError("Order price snapshot was mutable")
+
+
+def test_quote_snapshot_cannot_be_mutated(tmp_path):
+    db = make_db(tmp_path)
+    quotes = QuoteService(db)
+    with db.connect() as conn:
+        conn.execute("INSERT INTO customers(id,name) VALUES(?,?)", ("c1", "Customer"))
+        conn.commit()
+    quote_id = quotes.save({"customer_id": "c1"}, [{"description": "Widget", "quantity": 1, "unit_price_cents": 2000}])
+    with db.connect() as conn:
+        try:
+            conn.execute("UPDATE quote_price_snapshots SET unit_price_cents=1 WHERE quote_id=?", (quote_id,))
+        except Exception as exc:
+            assert "immutable" in str(exc).lower()
+        else:
+            raise AssertionError("Quote price snapshot was mutable")
