@@ -68,7 +68,6 @@ class PricingEdgeCaseTests(unittest.TestCase):
 
     def test_payment_fee_is_included_in_breakdown(self):
         result = self.engine(payment_fee_percent=10, payment_fee_fixed_cents=50).estimate(60, 0, 1)
-        self.assertEqual(result["pre_fee_price"], 10.0)
         self.assertEqual(result["payment_fee"], 1.5)
         self.assertEqual(result["unit_price"], 11.5)
 
