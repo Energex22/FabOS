@@ -55,9 +55,11 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         self._console_idle_after_id = None
         self._console_locked = False
         self._configure_styles()
+        self.withdraw()
         if not self._console_login():
             self.destroy()
             return
+        self.deiconify()
         self.active_page = "Dashboard"
         self.report_callback_exception=self._report_callback_exception
         self.product_sort_column = "name"
