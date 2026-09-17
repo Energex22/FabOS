@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 class QuoteService:
     SORT_COLUMNS={"number":"q.quote_number","customer":"customer_name COLLATE NOCASE","status":"q.status","total":"q.total_cents","expires":"q.expires_at","created":"q.created_at"}
-    def __init__(self,database): self.database=database
+    def __init__(self,database,pricing=None): self.database=database; self.pricing=pricing
     def list(self,query="",status="All",sort_column="created",descending=True,group="all"):
         col=self.SORT_COLUMNS.get(sort_column,"q.created_at"); direction="DESC" if descending else "ASC"; like="%%%s%%"%query.strip()
         where=["(?='' OR q.quote_number LIKE ? OR COALESCE(c.name,'') LIKE ?)"]; args=[query.strip(),like,like]
@@ -39,15 +39,36 @@ class QuoteService:
         with self.database.connect() as conn:
             linked=conn.execute("SELECT customer_id FROM customer_accounts WHERE user_id=?",(user_id,)).fetchone()
             if not linked: raise PermissionError("Quote access denied")
-            row=conn.execute("SELECT q.*,COALESCE(c.name,'No customer') customer_name FROM quotes q LEFT JOIN customers c ON c.id=q.customer_id WHERE q.id=? AND q.customer_id=?",(quote_id,linked[0])).fetchone()
+            row=conn.execute("SELECT q.*,COALESCE(c.name,'No customer') customer_name FROM quotes q LEFT JOIN customers c ON c.id=q.id WHERE q.id=? AND q.customer_id=?",(quote_id,linked[0])).fetchone()
             if not row: raise KeyError("Quote not found")
             items=conn.execute("SELECT qi.*,p.name product_name FROM quote_items qi LEFT JOIN products p ON p.id=qi.product_id WHERE qi.quote_id=? ORDER BY qi.rowid",(quote_id,)).fetchall()
         return row,items
     def next_number(self,conn):
         prefix="Q-"+date.today().strftime("%Y%m")+"-"; row=conn.execute("SELECT quote_number FROM quotes WHERE quote_number LIKE ? ORDER BY quote_number DESC LIMIT 1",(prefix+"%",)).fetchone(); seq=int(row[0].split("-")[-1])+1 if row else 1; return prefix+("%04d"%seq)
+    def _resolve_items(self,items):
+        resolved=[]
+        for item in items:
+            row=dict(item)
+            if str(row.get("pricing_mode") or "").lower() == "calculated":
+                if self.pricing is None: raise RuntimeError("Pricing service is required for calculated quote items")
+                estimate=self.pricing.estimate(
+                    estimated_minutes=row.get("estimated_minutes",0),
+                    estimated_filament_g=row.get("estimated_filament_g",0),
+                    quantity=row.get("quantity",1),
+                    rush=bool(row.get("rush",False)),
+                    setup_minutes=row.get("setup_minutes",0),
+                    post_process_minutes=row.get("post_process_minutes",0),
+                    qc_minutes=row.get("qc_minutes",0),
+                )
+                row["unit_price_cents"]=int(round(estimate["unit_price"]*100))
+                row["pricing_breakdown"]=estimate
+            if int(row.get("unit_price_cents",0) or 0) < 0: raise ValueError("Quote item price cannot be negative")
+            resolved.append(row)
+        return resolved
     def save(self,data,items,quote_id=None):
         if not data.get("customer_id"): raise ValueError("Select a customer.")
         if not items: raise ValueError("Add at least one quote item.")
+        items=self._resolve_items(items)
         total=sum(int(i["quantity"])*int(i["unit_price_cents"]) for i in items)
         with self.database.connect() as conn:
             if quote_id:
