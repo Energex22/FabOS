@@ -239,24 +239,34 @@ class ProductService:
             "has_real_image": self.has_real_image(product_id),
         }
 
+    def storefront_publication_readiness(self, product_id):
+        state = self.storefront_state(product_id)
+        if not state:
+            return {"ready": False, "reasons": ["Product does not exist."], "state": None}
+        reasons = []
+        if not state["has_model"]:
+            reasons.append("A usable STL, 3MF, OBJ, STEP, or STP model is required.")
+        if not state["has_price"]:
+            reasons.append("A positive customer price is required.")
+        if state["license_status"] in {"blocked", "prohibited", "commercially_prohibited", "review_required"}:
+            reasons.append("The current license status does not permit public storefront publication.")
+        return {"ready": not reasons, "reasons": reasons, "state": state}
+
     def is_customer_eligible(self, product_id):
         state = self.storefront_state(product_id)
         if not state:
             return False
         if state["visibility"] != "published":
             return False
-        if not state["has_model"] or not state["has_price"]:
-            return False
-        return state["license_status"] not in {"blocked", "prohibited", "commercially_prohibited", "review_required"}
+        return self.storefront_publication_readiness(product_id)["ready"]
 
     def customer_catalog(self, query="", category="All", order_by="name", descending=False):
         rows = self.list(query=query, category=category, order_by=order_by, descending=descending)
         eligible = []
-        with self.database.connect() as conn:
-            for row in rows:
-                state = self.storefront_state(row["id"])
-                if state and self.is_customer_eligible(row["id"]):
-                    eligible.append((row, state))
+        for row in rows:
+            state = self.storefront_state(row["id"])
+            if state and self.is_customer_eligible(row["id"]):
+                eligible.append((row, state))
         return eligible
 
     def save_storefront(self, product_id, values):
@@ -265,6 +275,10 @@ class ProductService:
         visibility = str(values.get("visibility") or "draft").lower()
         if visibility not in allowed_visibility:
             raise ValueError("Invalid storefront visibility")
+        if visibility == "published":
+            readiness = self.storefront_publication_readiness(product_id)
+            if not readiness["ready"]:
+                raise ValueError("Product is not ready for storefront publication: " + " ".join(readiness["reasons"]))
         origin = str(values.get("origin_type") or "catalog_import")
         source_customer_id = values.get("source_customer_id")
         title = values.get("customer_title")
