@@ -2,6 +2,7 @@
 
 The API delegates business rules to the existing internal services. It intentionally
 serializes only customer-safe fields and never exposes the internal order dossier.
+Administrator routes are separately protected and are not part of the customer UI.
 """
 
 import os
@@ -13,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from fabos_core.application import FabOSApplication
+from fabos_core.services.admin_api import register_admin_routes
 from fabos_core.services.customer_api_writes import register_customer_write_routes
 from fabos_core.services.payment_api import register_payment_routes
 
@@ -130,7 +132,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Stripe-Signature", "x-square-hmacsha256-signature"],
     )
 
@@ -282,6 +284,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         order["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
         return {"order": order, "items": [_order_item_payload(item) for item in items]}
 
+    register_admin_routes(app, get_application, administrator_user)
     register_customer_write_routes(app, get_application, customer_user)
     register_payment_routes(app, get_application, administrator_user)
     return app
