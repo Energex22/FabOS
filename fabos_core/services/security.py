@@ -42,7 +42,7 @@ class SecurityService:
         # both shapes so the security boundary remains provider-independent.
         try:
             user_id = authenticated["user_id"]
-        except (KeyError, TypeError):
+        except (KeyError, IndexError, TypeError):
             user_id = authenticated["id"] if authenticated else None
         user = self.actor(user_id)
         if permission:
