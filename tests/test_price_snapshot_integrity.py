@@ -1,5 +1,3 @@
-import json
-
 from fabos_core.db.database import Database
 from fabos_core.services.price_history import PriceHistoryService
 from fabos_core.services.quotes import QuoteService
@@ -108,3 +106,20 @@ def test_quote_update_creates_new_snapshot_without_rewriting_old_snapshot(tmp_pa
             (quote_id,),
         ).fetchall()
     assert [row["unit_price_cents"] for row in rows] == [2000, 2400]
+
+
+def test_existing_order_is_backfilled_into_immutable_items(tmp_path):
+    db = Database(tmp_path / "fabos.db")
+    db.initialize()
+    with db.connect() as conn:
+        conn.execute("INSERT INTO customers(id,name) VALUES(?,?)", ("c1", "Customer"))
+        conn.execute("INSERT INTO products(id,name,price_cents) VALUES(?,?,?)", ("p1", "Widget", 2000))
+        conn.execute("INSERT INTO quotes(id,quote_number,customer_id,total_cents) VALUES(?,?,?,?)", ("q1", "Q-TEST-0003", "c1", 2000))
+        conn.execute("INSERT INTO quote_items(id,quote_id,product_id,description,quantity,unit_price_cents) VALUES(?,?,?,?,?,?)", ("qi1", "q1", "p1", "Widget", 1, 2000))
+        conn.execute("INSERT INTO orders(id,order_number,customer_id,quote_id,total_cents) VALUES(?,?,?,?,?)", ("o1", "O-TEST-0003", "c1", "q1", 2000))
+        conn.commit()
+
+    history = PriceHistoryService(db)
+    rows = history.order_items("o1")
+    assert len(rows) == 1
+    assert rows[0]["unit_price_cents"] == 2000
