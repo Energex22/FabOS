@@ -19,8 +19,9 @@ from fabos_core.services.payment_api import register_payment_routes
 
 CUSTOMER_STATUS = {
     "new": "Order received", "pending": "Order received", "confirmed": "Order received",
-    "in_production": "Preparing your order", "ready": "Final quality check",
-    "shipped": "Shipping", "completed": "Delivered", "cancelled": "Cancelled",
+    "in_production": "Preparing your order", "production": "Preparing your order",
+    "ready": "Final quality check", "shipped": "Shipping", "completed": "Delivered",
+    "cancelled": "Cancelled",
 }
 
 
@@ -113,9 +114,6 @@ class StorefrontUpdate(BaseModel):
 
 
 def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
-    # Customer deployments should not expose framework-generated API docs, which
-    # would otherwise reveal internal service and route details. Local development
-    # can opt in with FABOS_API_DOCS=1 when interactive docs are useful.
     docs_enabled = os.environ.get("FABOS_API_DOCS", "").strip().lower() in {"1", "true", "yes"}
     app = FastAPI(
         title="Customer API",
