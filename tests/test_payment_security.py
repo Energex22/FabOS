@@ -26,6 +26,8 @@ class _Database:
                 invoice_id TEXT,
                 provider_payment_id TEXT,
                 order_id TEXT,
+                status TEXT DEFAULT 'paid',
+                updated_at TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE payments(
@@ -58,6 +60,18 @@ class _Application:
 
 
 class PaymentSecurityTests(unittest.TestCase):
+    def _seed_payment(self, application, amount=5000):
+        with application.database.connect() as conn:
+            conn.execute(
+                "INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id) VALUES(?,?,?,?)",
+                ("payment-1", "invoice-1", "pi_test", "order-1"),
+            )
+            conn.execute(
+                "INSERT INTO payments(id,invoice_id,amount_cents,method,reference,notes) VALUES(?,?,?,?,?,?)",
+                ("payment-ledger-1", "invoice-1", amount, "stripe", "pi_test", "Gateway payment reconciled by FabOS"),
+            )
+            conn.commit()
+
     def test_stripe_signature_accepts_valid_payload(self):
         secret = "whsec_test"
         payload = json.dumps({"id": "evt_test", "type": "checkout.session.completed"})
@@ -121,55 +135,64 @@ class PaymentSecurityTests(unittest.TestCase):
 
     def test_stripe_refund_is_recorded_as_negative_ledger_entry(self):
         application = _Application()
-        with application.database.connect() as conn:
-            conn.execute(
-                "INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id) VALUES(?,?,?,?)",
-                ("payment-1", "invoice-1", "pi_test", "order-1"),
-            )
-            conn.execute(
-                "INSERT INTO payments(id,invoice_id,amount_cents,method,reference,notes) VALUES(?,?,?,?,?,?)",
-                ("payment-ledger-1", "invoice-1", 5000, "stripe", "pi_test", "Gateway payment reconciled by FabOS"),
-            )
-            conn.commit()
-
+        self._seed_payment(application)
         payload = json.dumps(
             {
                 "id": "evt_refund_1",
                 "type": "refund.created",
-                "data": {
-                    "object": {
-                        "id": "re_test",
-                        "amount": 1800,
-                        "payment_intent": "pi_test",
-                    }
-                },
+                "data": {"object": {"id": "re_test", "amount": 1800, "payment_intent": "pi_test"}},
             }
         )
         result = _record_refund(application, "stripe", payload)
         self.assertTrue(result["recorded"])
         self.assertEqual(result["amount_cents"], 1800)
+        self.assertEqual(result["status"], "partially_refunded")
         with application.database.connect() as conn:
-            row = conn.execute(
-                "SELECT amount_cents,reference FROM payments WHERE invoice_id=? AND amount_cents<0",
-                ("invoice-1",),
-            ).fetchone()
+            row = conn.execute("SELECT amount_cents,reference FROM payments WHERE invoice_id=? AND amount_cents<0", ("invoice-1",)).fetchone()
+            tx = conn.execute("SELECT status FROM payment_transactions WHERE id='payment-1'").fetchone()
         self.assertEqual(row["amount_cents"], -1800)
         self.assertEqual(row["reference"], "stripe-refund:re_test")
+        self.assertEqual(tx["status"], "partially_refunded")
         self.assertEqual(application.invoices.reconciled, ["invoice-1"])
+
+    def test_full_refund_sets_refunded_status(self):
+        application = _Application()
+        self._seed_payment(application, amount=5000)
+        payload = json.dumps(
+            {
+                "id": "evt_refund_full",
+                "type": "refund.created",
+                "data": {"object": {"id": "re_full", "amount": 5000, "payment_intent": "pi_test"}},
+            }
+        )
+        result = _record_refund(application, "stripe", payload)
+        self.assertTrue(result["recorded"])
+        self.assertEqual(result["amount_cents"], 5000)
+        self.assertEqual(result["status"], "refunded")
+        with application.database.connect() as conn:
+            tx = conn.execute("SELECT status FROM payment_transactions WHERE id='payment-1'").fetchone()
+        self.assertEqual(tx["status"], "refunded")
+
+    def test_refund_cannot_overdraw_recorded_payment(self):
+        application = _Application()
+        self._seed_payment(application, amount=5000)
+        payload = json.dumps(
+            {
+                "id": "evt_refund_over",
+                "type": "refund.created",
+                "data": {"object": {"id": "re_over", "amount": 6000, "payment_intent": "pi_test"}},
+            }
+        )
+        result = _record_refund(application, "stripe", payload)
+        self.assertFalse(result["recorded"])
+        self.assertEqual(result["reason"], "refund_exceeds_recorded_payment")
+        with application.database.connect() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM payments WHERE invoice_id=? AND amount_cents<0", ("invoice-1",)).fetchone()[0]
+        self.assertEqual(count, 0)
 
     def test_same_provider_refund_event_is_idempotent(self):
         application = _Application()
-        with application.database.connect() as conn:
-            conn.execute(
-                "INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id) VALUES(?,?,?,?)",
-                ("payment-1", "invoice-1", "pi_test", "order-1"),
-            )
-            conn.execute(
-                "INSERT INTO payments(id,invoice_id,amount_cents,method,reference,notes) VALUES(?,?,?,?,?,?)",
-                ("payment-ledger-1", "invoice-1", 5000, "stripe", "pi_test", "Gateway payment reconciled by FabOS"),
-            )
-            conn.commit()
-
+        self._seed_payment(application)
         payload = json.dumps(
             {
                 "id": "evt_refund_1",
@@ -182,10 +205,7 @@ class PaymentSecurityTests(unittest.TestCase):
         self.assertTrue(first["recorded"])
         self.assertTrue(second["duplicate"])
         with application.database.connect() as conn:
-            count = conn.execute(
-                "SELECT COUNT(*) FROM payments WHERE invoice_id=? AND amount_cents<0",
-                ("invoice-1",),
-            ).fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) FROM payments WHERE invoice_id=? AND amount_cents<0", ("invoice-1",)).fetchone()[0]
         self.assertEqual(count, 1)
 
 
