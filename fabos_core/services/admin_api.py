@@ -21,6 +21,16 @@ def register_admin_routes(app, get_application, administrator_user):
         key: str = Field(min_length=1, max_length=100)
         value: str = Field(default="", max_length=4000)
 
+    class PricingEstimate(BaseModel):
+        estimated_minutes: float = Field(default=0, ge=0)
+        estimated_filament_g: float = Field(default=0, ge=0)
+        quantity: int = Field(default=1, ge=1, le=1000)
+        rush: bool = False
+        setup_minutes: float = Field(default=0, ge=0)
+        post_process_minutes: float = Field(default=0, ge=0)
+        qc_minutes: float = Field(default=0, ge=0)
+        overhead_percent: Optional[float] = Field(default=None, ge=0, le=100)
+
     @app.get("/api/v1/admin/users")
     def list_admin_users(user=Depends(administrator_user), application=Depends(get_application)):
         rows = application.accounts.list_users()
@@ -125,3 +135,16 @@ def register_admin_routes(app, get_application, administrator_user):
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"key": payload.key, "value": application.shop_settings.get(payload.key), "metadata": application.shop_settings.metadata().get(payload.key)}
+
+    @app.post("/api/v1/admin/pricing/estimate")
+    def estimate_admin_pricing(payload: PricingEstimate, user=Depends(administrator_user), application=Depends(get_application)):
+        return application.pricing.estimate(
+            estimated_minutes=payload.estimated_minutes,
+            estimated_filament_g=payload.estimated_filament_g,
+            quantity=payload.quantity,
+            rush=payload.rush,
+            setup_minutes=payload.setup_minutes,
+            post_process_minutes=payload.post_process_minutes,
+            qc_minutes=payload.qc_minutes,
+            overhead_percent=payload.overhead_percent,
+        )
