@@ -71,6 +71,15 @@ class AccountService:
             current_active = bool(current["active"])
             resulting_type = account_type if account_type is not None else current_type
             resulting_active = bool(active) if active is not None else current_active
+            current_role = str(current["role"] or "").lower() if "role" in current.keys() else ""
+            if current_role == "owner" and (
+                resulting_type != "administrator" or not resulting_active
+            ):
+                raise ValueError("Cannot disable or demote the owner account")
+            if current_role == "owner" and account_type is not None and resulting_type == "administrator":
+                # The owner role is intentionally not editable through the generic
+                # account service; owner status is a protected security boundary.
+                raise ValueError("Cannot change the owner account through account management")
             if current_type == "administrator" and current_active and (
                 resulting_type != "administrator" or not resulting_active
             ):
