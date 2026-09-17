@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from unittest import mock
+from unittest import mock
 
 from fabos_core.db.database import Database
 from fabos_core.db.migrations import migrate
@@ -53,6 +54,13 @@ class ConsoleSecurityTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"SSH_CONNECTION": "10.0.0.2 22 10.0.0.3 54321"}, clear=False):
             self.assertFalse(self.security.is_local_session())
             self.assertIsNone(self.security.authenticate_owner("owner", "owner-password"))
+
+    def test_failed_logins_trigger_temporary_lockout(self):
+        for _ in range(self.security.MAX_FAILED_ATTEMPTS):
+            self.assertIsNone(self.security.authenticate_owner("owner", "wrong-password"))
+        self.assertIsNone(self.security.authenticate_owner("owner", "owner-password"))
+        with mock.patch("fabos_core.services.console_security.time.monotonic", return_value=1000.0 + self.security.LOCKOUT_SECONDS + 1):
+            self.assertIsNotNone(self.security.authenticate_owner("owner", "owner-password"))
 
     def test_console_timeout_is_configurable(self):
         self.assertTrue(self.security.lock_enabled())
