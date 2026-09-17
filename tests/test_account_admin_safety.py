@@ -16,6 +16,7 @@ class InMemoryDatabase:
                 email TEXT,
                 account_type TEXT NOT NULL,
                 active INTEGER NOT NULL DEFAULT 1,
+                role TEXT,
                 created_at TEXT,
                 updated_at TEXT
             )"""
@@ -37,7 +38,20 @@ class AccountAdminSafetyTests(unittest.TestCase):
                 ("employee-1", "employee1", "employee@example.com", "employee"),
             ],
         )
+        self.db.connection.execute("UPDATE users SET role='owner' WHERE id='admin-1'")
         self.db.connection.commit()
+
+    def test_owner_cannot_be_disabled_even_when_another_admin_exists(self):
+        self.db.connection.execute("INSERT INTO users(id,username,email,account_type,active,created_at,updated_at,role) VALUES(?,?,?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?)", ("admin-2","admin2","admin2@example.com","administrator","administrator"))
+        self.db.connection.commit()
+        with self.assertRaisesRegex(ValueError, "owner account"):
+            self.service.update_account("admin-1", active=False)
+
+    def test_owner_cannot_be_demoted_even_when_another_admin_exists(self):
+        self.db.connection.execute("INSERT INTO users(id,username,email,account_type,active,created_at,updated_at,role) VALUES(?,?,?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?)", ("admin-2","admin2","admin2@example.com","administrator","administrator"))
+        self.db.connection.commit()
+        with self.assertRaisesRegex(ValueError, "owner account"):
+            self.service.update_account("admin-1", account_type="employee")
 
     def test_last_active_administrator_cannot_be_disabled(self):
         with self.assertRaisesRegex(ValueError, "last active administrator"):
