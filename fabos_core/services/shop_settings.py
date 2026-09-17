@@ -4,7 +4,10 @@ class ShopSettingsService:
         "shop_address": "", "business_hours": "", "timezone": "America/Chicago", "currency_code": "USD", "currency_symbol": "$",
         "invoice_prefix": "INV", "invoice_due_days": "14", "default_tax_percent": "0", "quote_valid_days": "14",
         "machine_hourly_cost": "0.35", "default_packaging_cost": "0.50", "target_margin_percent": "60",
-        "minimum_order_cents": "0", "rush_multiplier": "1.00", "quantity_discount_enabled": "false",
+        "minimum_order_cents": "0", "rush_multiplier": "1.00", "quantity_discount_enabled": "false", "quantity_discount_percent": "0",
+        "default_material_cost_per_g": "0", "labor_hourly_rate": "0", "setup_labor_hourly_rate": "0",
+        "post_process_labor_hourly_rate": "0", "qc_labor_hourly_rate": "0", "overhead_percent": "0",
+        "payment_fee_percent": "0", "payment_fee_fixed_cents": "0",
         "filament_low_threshold_g": "250", "filament_reorder_days": "14", "filament_waste_percent": "5",
         "backup_retention": "30", "backup_enabled": "true", "backup_frequency_hours": "24",
         "default_slicer": "Cura", "cura_engine_path": "", "cura_petg_profile_path": "", "cura_fdmprinter_path": "", "cura_fdmextruder_path": "",
@@ -28,8 +31,11 @@ class ShopSettingsService:
             "minimum_order_cents": "Minimum order amount in cents", "default_turnaround_days": "Normal turnaround in days", "rush_turnaround_days": "Rush turnaround in days",
         },
         "pricing": {
-            "machine_hourly_cost": "Internal machine cost per hour", "default_packaging_cost": "Default packaging cost", "target_margin_percent": "Target margin percentage",
-            "rush_multiplier": "Rush pricing multiplier", "quantity_discount_enabled": "Enable quantity discount rules",
+            "machine_hourly_cost": "Internal machine cost per hour", "default_material_cost_per_g": "Default material cost per gram when no spool cost is available",
+            "labor_hourly_rate": "General hands-on labor rate", "setup_labor_hourly_rate": "Setup/slicing labor rate", "post_process_labor_hourly_rate": "Post-processing labor rate",
+            "qc_labor_hourly_rate": "Quality-control labor rate", "default_packaging_cost": "Default packaging cost", "overhead_percent": "Production overhead percentage",
+            "target_margin_percent": "Target selling margin percentage", "payment_fee_percent": "Payment processing fee percentage", "payment_fee_fixed_cents": "Fixed payment fee in cents",
+            "rush_multiplier": "Rush pricing multiplier", "quantity_discount_enabled": "Enable quantity discount rules", "quantity_discount_percent": "Quantity discount percentage for large orders",
         },
         "inventory": {
             "filament_low_threshold_g": "Low-stock warning threshold in grams", "filament_reorder_days": "Expected replenishment period", "filament_waste_percent": "Estimated material waste percentage",
@@ -57,15 +63,16 @@ class ShopSettingsService:
         },
     }
 
-    BOOL_KEYS = {key for group in META.values() for key in group if key.endswith("_enabled") or key.endswith("_required") or key.endswith("_mode") is False}
+    BOOL_KEYS = {key for group in META.values() for key in group if key.endswith("_enabled") or key.endswith("_required")}
     ENUMS = {
         "storefront_default_visibility": {"draft", "review", "published", "retired"},
         "shipping_mode": {"calculated", "flat", "free"},
         "payment_provider": {"stripe", "square", "none"},
     }
     NUMERIC_KEYS = {
-        "invoice_due_days", "default_tax_percent", "quote_valid_days", "machine_hourly_cost", "default_packaging_cost", "target_margin_percent",
-        "minimum_order_cents", "rush_multiplier", "filament_low_threshold_g", "filament_reorder_days", "filament_waste_percent", "backup_retention",
+        "invoice_due_days", "default_tax_percent", "quote_valid_days", "machine_hourly_cost", "default_material_cost_per_g", "labor_hourly_rate",
+        "setup_labor_hourly_rate", "post_process_labor_hourly_rate", "qc_labor_hourly_rate", "default_packaging_cost", "overhead_percent", "target_margin_percent",
+        "minimum_order_cents", "rush_multiplier", "quantity_discount_percent", "payment_fee_percent", "payment_fee_fixed_cents", "filament_low_threshold_g", "filament_reorder_days", "filament_waste_percent", "backup_retention",
         "backup_frequency_hours", "custom_upload_max_mb", "default_turnaround_days", "rush_turnaround_days", "shipping_flat_cents",
         "shipping_calculated_base_cents", "shipping_calculated_per_kg_cents", "free_shipping_threshold_cents",
     }
@@ -101,7 +108,7 @@ class ShopSettingsService:
                 raise ValueError("Setting %s cannot be negative" % key)
         if key == "rush_multiplier" and float(value) < 1:
             raise ValueError("rush_multiplier must be at least 1")
-        if key in {"default_tax_percent", "target_margin_percent", "filament_waste_percent"} and float(value) > 100:
+        if key in {"default_tax_percent", "target_margin_percent", "filament_waste_percent", "overhead_percent", "payment_fee_percent", "quantity_discount_percent"} and float(value) > 100:
             raise ValueError("Setting %s cannot exceed 100" % key)
         if key == "custom_upload_extensions":
             extensions = [item.strip().lower().lstrip(".") for item in value.split(",") if item.strip()]
