@@ -16,13 +16,14 @@ class PricingEngineService:
         except (TypeError, ValueError):
             return float(default)
 
+    def _enabled(self, key, default=False):
+        value = str(self.shop_settings.get(key, "true" if default else "false") or "").strip().lower()
+        return value in {"1", "true", "yes", "on"}
+
     def estimate(self, estimated_minutes=0, estimated_filament_g=0, quantity=1,
                  rush=False, setup_minutes=0, post_process_minutes=0,
                  qc_minutes=0, overhead_percent=None):
-        """Return a transparent cost/price estimate for a future quote or product.
-
-        All inputs are estimates. Existing quote/order prices are never rewritten.
-        """
+        """Return a transparent cost/price estimate for a future quote or product."""
         minutes = max(0.0, float(estimated_minutes or 0))
         grams = max(0.0, float(estimated_filament_g or 0))
         qty = max(1, int(quantity or 1))
@@ -55,10 +56,9 @@ class PricingEngineService:
         margin_divisor = max(0.0001, 1.0 - margin / 100.0)
         pre_fee_price = unit_cost / margin_divisor
         payment_fee = pre_fee_price * payment_fee_percent / 100.0 + payment_fee_fixed
-        unit_price = pre_fee_price + payment_fee
-        unit_price *= rush_multiplier
+        unit_price = (pre_fee_price + payment_fee) * rush_multiplier
 
-        if self._number("quantity_discount_enabled", 0.0) > 0 and qty >= 10:
+        if self._enabled("quantity_discount_enabled") and qty >= 10:
             discount = max(0.0, min(50.0, self._number("quantity_discount_percent", 0.0)))
             unit_price *= 1.0 - discount / 100.0
 
