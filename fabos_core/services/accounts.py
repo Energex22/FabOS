@@ -64,6 +64,22 @@ class AccountService:
         changes.append("updated_at=CURRENT_TIMESTAMP")
         args.append(user_id)
         with self.database.connect() as conn:
+            current = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            if not current:
+                raise KeyError("User not found")
+            current_type = str(current["account_type"] or "").lower()
+            current_active = bool(current["active"])
+            resulting_type = account_type if account_type is not None else current_type
+            resulting_active = bool(active) if active is not None else current_active
+            if current_type == "administrator" and current_active and (
+                resulting_type != "administrator" or not resulting_active
+            ):
+                other_admin = conn.execute(
+                    "SELECT 1 FROM users WHERE account_type='administrator' AND active=1 AND id<>? LIMIT 1",
+                    (user_id,),
+                ).fetchone()
+                if not other_admin:
+                    raise ValueError("Cannot disable or demote the last active administrator")
             cur = conn.execute("UPDATE users SET " + ",".join(changes) + " WHERE id=?", args)
             if cur.rowcount != 1:
                 raise KeyError("User not found")
@@ -126,7 +142,7 @@ class AccountService:
             else:
                 conn.execute(
                     "INSERT INTO employee_profiles(user_id,department,position,employment_status,metadata_json,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)",
-                    (user_id, department, position, employment_status, metadata_json),
+                    (user_id, department, position, employment_status, metadata_json, user_id),
                 )
             conn.execute(
                 "UPDATE users SET account_type='employee',updated_at=CURRENT_TIMESTAMP WHERE id=?",
