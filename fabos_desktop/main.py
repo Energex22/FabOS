@@ -50,6 +50,14 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         self.minsize(1040, 680)
         self.configure(bg=COLORS["bg"])
         self.core = FabOSApplication()
+        self._console_session_token = None
+        self._console_lock_window = None
+        self._console_idle_after_id = None
+        self._console_locked = False
+        self._configure_styles()
+        if not self._console_login():
+            self.destroy()
+            return
         self.active_page = "Dashboard"
         self.report_callback_exception=self._report_callback_exception
         self.product_sort_column = "name"
@@ -69,12 +77,136 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         self._auto_image_sync_started = False
         self._auto_image_sync_running = False
         self.protocol("WM_DELETE_WINDOW", self.close_app)
-        self._configure_styles()
         self._build_shell()
+        self._bind_console_activity()
         self._bind_global_shortcuts()
         self.show_page("Dashboard")
         self.after(1200,self._refresh_notification_badge)
         self.after(1600,self._refresh_system_footer)
+
+
+    def _console_login(self):
+        win = tk.Toplevel(self)
+        win.title("FabOS Console Login")
+        win.geometry("460x330")
+        win.resizable(False, False)
+        win.configure(bg=COLORS["bg"])
+        win.transient(self)
+        win.grab_set()
+        result = {"authenticated": False}
+        card = tk.Frame(win, bg=COLORS["surface"], highlightbackground=COLORS["border"], highlightthickness=1)
+        card.pack(fill="both", expand=True, padx=24, pady=24)
+        tk.Label(card, text="FABOS CONSOLE", bg=COLORS["surface"], fg=COLORS["text"], font=("Segoe UI", 18, "bold")).pack(anchor="w", padx=24, pady=(24, 4))
+        tk.Label(card, text="Owner authentication required. This console is local-only.", bg=COLORS["surface"], fg=COLORS["muted"], wraplength=370, justify="left").pack(anchor="w", padx=24, pady=(0, 18))
+        identifier, password = tk.StringVar(), tk.StringVar()
+        tk.Label(card, text="USERNAME OR EMAIL", bg=COLORS["surface"], fg=COLORS["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=24)
+        user_entry = tk.Entry(card, textvariable=identifier, bg=COLORS["surface_alt"], fg=COLORS["text"], insertbackground=COLORS["text"], relief="flat", bd=0)
+        user_entry.pack(fill="x", padx=24, ipady=8, pady=(3, 12))
+        tk.Label(card, text="PASSWORD", bg=COLORS["surface"], fg=COLORS["muted"], font=("Segoe UI", 8, "bold")).pack(anchor="w", padx=24)
+        pass_entry = tk.Entry(card, textvariable=password, show="*", bg=COLORS["surface_alt"], fg=COLORS["text"], insertbackground=COLORS["text"], relief="flat", bd=0)
+        pass_entry.pack(fill="x", padx=24, ipady=8, pady=(3, 12))
+        status = tk.StringVar(value="")
+        tk.Label(card, textvariable=status, bg=COLORS["surface"], fg=COLORS["red"], wraplength=370, justify="left").pack(anchor="w", padx=24)
+        def submit(_event=None):
+            if self.core.shop_settings.get("console_local_only", "true") and not self.core.console_security.is_local_session():
+                status.set("This console requires physical/local access. Remote sessions are not permitted.")
+                return
+            auth = self.core.console_security.authenticate_owner(identifier.get(), password.get())
+            if not auth:
+                password.set("")
+                status.set("Owner authentication failed.")
+                return
+            self._console_session_token = auth["token"]
+            result["authenticated"] = True
+            win.destroy()
+        self._button(card, "Unlock FabOS", submit, True).pack(anchor="e", padx=24, pady=(8, 20))
+        pass_entry.bind("<Return>", submit)
+        user_entry.focus_set()
+        self.update_idletasks()
+        win.lift()
+        self.wait_window(win)
+        try:
+            win.grab_release()
+        except Exception:
+            pass
+        return result["authenticated"]
+
+    def _bind_console_activity(self):
+        for sequence in ("<KeyPress>", "<Button>", "<Motion>"):
+            self.bind_all(sequence, self._console_activity, add="+")
+        self._arm_console_idle_timer()
+
+    def _console_activity(self, _event=None):
+        if not self._console_locked:
+            self._arm_console_idle_timer()
+
+    def _arm_console_idle_timer(self):
+        if self._console_locked:
+            return
+        try:
+            if self._console_idle_after_id:
+                self.after_cancel(self._console_idle_after_id)
+        except Exception:
+            pass
+        if not self.core.console_security.lock_enabled():
+            self._console_idle_after_id = None
+            return
+        timeout_ms = self.core.console_security.idle_timeout_minutes() * 60 * 1000
+        self._console_idle_after_id = self.after(timeout_ms, self._lock_console)
+
+    def _lock_console(self):
+        self._console_idle_after_id = None
+        if self._console_locked:
+            return
+        self._console_locked = True
+        if self._console_session_token:
+            try:
+                self.core.console_security.revoke(self._console_session_token)
+            except Exception:
+                pass
+            self._console_session_token = None
+        win = tk.Toplevel(self)
+        self._console_lock_window = win
+        win.title("FabOS Console Locked")
+        win.geometry(self.geometry())
+        win.configure(bg=COLORS["bg"])
+        win.transient(self)
+        win.grab_set()
+        win.protocol("WM_DELETE_WINDOW", lambda: None)
+        card = tk.Frame(win, bg=COLORS["surface"], highlightbackground=COLORS["border"], highlightthickness=1)
+        card.place(relx=.5, rely=.5, anchor="center", width=500, height=300)
+        tk.Label(card, text="CONSOLE LOCKED", bg=COLORS["surface"], fg=COLORS["text"], font=("Segoe UI", 20, "bold")).pack(anchor="w", padx=28, pady=(30, 5))
+        tk.Label(card, text="FabOS is still running. Customer services, printers, jobs, and background services are not stopped.", bg=COLORS["surface"], fg=COLORS["muted"], wraplength=440, justify="left").pack(anchor="w", padx=28, pady=(0, 18))
+        identifier, password = tk.StringVar(), tk.StringVar()
+        tk.Entry(card, textvariable=identifier, bg=COLORS["surface_alt"], fg=COLORS["text"], insertbackground=COLORS["text"], relief="flat", bd=0).pack(fill="x", padx=28, ipady=7, pady=(0, 8))
+        entry = tk.Entry(card, textvariable=password, show="*", bg=COLORS["surface_alt"], fg=COLORS["text"], insertbackground=COLORS["text"], relief="flat", bd=0)
+        entry.pack(fill="x", padx=28, ipady=7)
+        status = tk.StringVar(value="Enter the owner credentials to unlock.")
+        tk.Label(card, textvariable=status, bg=COLORS["surface"], fg=COLORS["muted"], wraplength=440).pack(anchor="w", padx=28, pady=8)
+        def unlock(_event=None):
+            if self.core.shop_settings.get("console_local_only", "true") and not self.core.console_security.is_local_session():
+                status.set("Remote sessions cannot unlock the FabOS console.")
+                return
+            auth = self.core.console_security.authenticate_owner(identifier.get(), password.get())
+            if not auth:
+                password.set("")
+                status.set("Owner authentication failed.")
+                return
+            self._console_session_token = auth["token"]
+            self._console_locked = False
+            self._console_lock_window = None
+            win.grab_release()
+            win.destroy()
+            self._arm_console_idle_timer()
+        self._button(card, "Unlock", unlock, True).pack(anchor="e", padx=28, pady=(4, 20))
+        entry.bind("<Return>", unlock)
+        win.update_idletasks()
+        win.lift()
+        win.focus_force()
+        entry.focus_set()
+
+    def _lock_console_now(self):
+        self._lock_console()
 
     def _configure_styles(self) -> None:
         style = ttk.Style(self)
@@ -231,6 +363,9 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             activebackground=COLORS["border"],activeforeground="white",
             font=("Segoe UI",10,"bold"),padx=12,pady=10,command=self._show_notifications)
         self.notification_button.pack(side="left",pady=8,padx=(0,8))
+        tk.Button(tools, text="🔒  Lock", bg=COLORS["surface_alt"], fg=COLORS["text"], bd=0,
+                  activebackground=COLORS["border"], activeforeground="white",
+                  font=("Segoe UI",10,"bold"), padx=12,pady=10,command=self._lock_console_now).pack(side="left",pady=8,padx=(0,8))
         tk.Button(tools, text="+  New", bg=COLORS["purple"], fg="white", bd=0,
                   activebackground=COLORS["purple_dark"], activeforeground="white",
                   font=("Segoe UI", 10, "bold"), padx=18, pady=10,
@@ -2445,6 +2580,12 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         messagebox.showinfo("Backup complete", str(backup_path))
 
     def close_app(self) -> None:
+        if self._console_session_token:
+            try:
+                self.core.console_security.revoke(self._console_session_token)
+            except Exception:
+                pass
+            self._console_session_token = None
         try:
             if str(self.core.shop_settings.get("auto_backup_on_shutdown","1"))=="1":
                 path=self.core.backups.create("shutdown")
