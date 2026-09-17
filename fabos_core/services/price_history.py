@@ -59,6 +59,10 @@ class PriceHistoryService:
                 DROP TRIGGER IF EXISTS trg_product_price_history;
                 DROP TRIGGER IF EXISTS trg_product_variant_price_history;
                 DROP TRIGGER IF EXISTS trg_order_price_snapshot;
+                DROP TRIGGER IF EXISTS trg_order_items_immutable_update;
+                DROP TRIGGER IF EXISTS trg_order_items_immutable_delete;
+                DROP TRIGGER IF EXISTS trg_quote_price_snapshot_immutable_update;
+                DROP TRIGGER IF EXISTS trg_quote_price_snapshot_immutable_delete;
                 CREATE TRIGGER trg_product_price_history
                 AFTER UPDATE OF price_cents ON products
                 WHEN OLD.price_cents <> NEW.price_cents
@@ -80,6 +84,26 @@ class PriceHistoryService:
                     INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
                     SELECT lower(hex(randomblob(16))),NEW.id,qi.product_id,qi.variant_id,qi.description,qi.quantity,qi.unit_price_cents,qi.material,qi.color,qi.estimated_minutes,qi.estimated_filament_g
                     FROM quote_items qi WHERE qi.quote_id=NEW.quote_id;
+                END;
+                CREATE TRIGGER trg_order_items_immutable_update
+                BEFORE UPDATE ON order_items
+                BEGIN
+                    SELECT RAISE(ABORT,'Order price snapshots are immutable');
+                END;
+                CREATE TRIGGER trg_order_items_immutable_delete
+                BEFORE DELETE ON order_items
+                BEGIN
+                    SELECT RAISE(ABORT,'Order price snapshots are immutable');
+                END;
+                CREATE TRIGGER trg_quote_price_snapshot_immutable_update
+                BEFORE UPDATE ON quote_price_snapshots
+                BEGIN
+                    SELECT RAISE(ABORT,'Quote price snapshots are immutable');
+                END;
+                CREATE TRIGGER trg_quote_price_snapshot_immutable_delete
+                BEFORE DELETE ON quote_price_snapshots
+                BEGIN
+                    SELECT RAISE(ABORT,'Quote price snapshots are immutable');
                 END;
             """)
             conn.execute("""INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
