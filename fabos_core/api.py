@@ -6,7 +6,7 @@ serializes only customer-safe fields and never exposes the internal order dossie
 
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,7 +39,7 @@ def _json(value: Any) -> Any:
     return str(value)
 
 
-def _pick(value: Any, fields: tuple[str, ...]) -> Dict[str, Any]:
+def _pick(value: Any, fields: Tuple[str, ...]) -> Dict[str, Any]:
     data = _json(value) or {}
     return {field: data[field] for field in fields if field in data}
 
