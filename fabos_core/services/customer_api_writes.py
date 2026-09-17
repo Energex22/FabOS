@@ -10,6 +10,52 @@ from pydantic import BaseModel, Field
 MAX_CUSTOM_UPLOAD_BYTES = 25 * 1024 * 1024
 ALLOWED_CUSTOM_UPLOAD_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj"}
 
+
+def _json(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json(v) for v in value]
+    if hasattr(value, "keys"):
+        return {str(k): _json(value[k]) for k in value.keys()}
+    return str(value)
+
+
+def _pick(value, fields):
+    data = _json(value) or {}
+    return {field: data[field] for field in fields if field in data}
+
+
+def _public_user(value):
+    return _pick(value, ("name", "email"))
+
+
+def _public_customer(value):
+    return _pick(value, ("name", "email", "phone")) if value else None
+
+
+def _public_quote(value):
+    return _pick(value, ("id", "quote_number", "status", "notes", "created_at", "updated_at", "total_cents"))
+
+
+def _public_quote_item(value):
+    return _pick(value, ("id", "description", "quantity", "unit_price_cents", "material", "color", "estimated_minutes", "estimated_filament_g"))
+
+
+def _public_order(value):
+    return _pick(value, ("id", "order_number", "status", "created_at", "updated_at", "total_cents", "shipping_cents", "tax_cents", "shipping_address_json", "checkout_notes"))
+
+
+def _public_order_item(value):
+    return _pick(value, ("id", "product_name", "description", "quantity", "unit_price_cents", "material", "color"))
+
+
+def _public_payment(value):
+    return _pick(value, ("status", "checkout_url"))
+
+
 class RegistrationRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     email: str = Field(min_length=3, max_length=320)
@@ -70,7 +116,7 @@ def register_customer_write_routes(app, get_application, current_user):
         try:
             result = application.customer_commerce.register_customer(payload.name, payload.email, payload.password, payload.phone)
             summary = result["user"]
-            return {"token": result["token"], "expires_at": result["expires_at"], "user": _json(summary["user"]), "customer": _json(summary.get("customer"))}
+            return {"token": result["token"], "expires_at": result["expires_at"], "user": _public_user(summary["user"]), "customer": _public_customer(summary.get("customer"))}
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -88,7 +134,7 @@ def register_customer_write_routes(app, get_application, current_user):
                 customer_id = application.customers.save({"name":payload.name.strip(),"email":payload.email.strip().lower(),"phone":"","notes":"Public custom-work request"})
             quote_id = _create_public_quote(application, customer_id, project)
             quote=application.quotes.get(quote_id)[0]
-            return {"quote":_json(quote),"request_number":str(quote["quote_number"]),"file":payload.file}
+            return {"quote":_public_quote(quote),"request_number":str(quote["quote_number"]),"file":payload.file}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -155,7 +201,7 @@ def register_customer_write_routes(app, get_application, current_user):
                 if temp_path: os.unlink(temp_path)
             except OSError: pass
             await file.close()
-        return {"quote":_json(quote),"request_number":str(quote["quote_number"]),"design_id":design_id,"file":{"name":filename,"bytes":size,"extension":extension}}
+        return {"quote":_public_quote(quote),"request_number":str(quote["quote_number"]),"design_id":design_id,"file":{"name":filename,"bytes":size,"extension":extension}}
 
     @app.post("/api/v1/customer/quotes")
     def create_customer_quote(payload: QuoteRequest, user=Depends(current_user), application=Depends(get_application)):
@@ -165,7 +211,7 @@ def register_customer_write_routes(app, get_application, current_user):
                 project["notes"] = (project.get("notes") or "").strip()
                 project["notes"] += ("\n" if project["notes"] else "") + "File: " + str(payload.file.get("name") or "uploaded file")
             quote, items = application.customer_commerce.create_quote_request(user["id"], project)
-            return {"quote": _json(quote), "items": [_json(item) for item in items]}
+            return {"quote": _public_quote(quote), "items": [_public_quote_item(item) for item in items]}
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except (KeyError, ValueError) as exc:
@@ -176,10 +222,9 @@ def register_customer_write_routes(app, get_application, current_user):
         try:
             items = [item.dict() for item in payload.items]
             row, saved_items, subtotal_cents, shipping_cents, tax_cents, total_cents = application.customer_commerce.create_order(user["id"], items, payload.shippingAddress.dict(), payload.notes)
-            order = _json(row)
+            order = _public_order(row)
             order["status"] = "Order received"
-            order.pop("customer_id", None)
-            return {"order": order, "items": [_json(item) for item in saved_items], "totals": {"subtotal": round(subtotal_cents / 100, 2), "shipping": round(shipping_cents / 100, 2), "tax": round(tax_cents / 100, 2), "total": round(total_cents / 100, 2)}}
+            return {"order": order, "items": [_public_order_item(item) for item in saved_items], "totals": {"subtotal": round(subtotal_cents / 100, 2), "shipping": round(shipping_cents / 100, 2), "tax": round(tax_cents / 100, 2), "total": round(total_cents / 100, 2)}}
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except (KeyError, ValueError) as exc:
@@ -189,7 +234,7 @@ def register_customer_write_routes(app, get_application, current_user):
     def create_customer_payment_session(order_id: str, user=Depends(current_user), application=Depends(get_application)):
         try:
             payment = application.payments.create_checkout(user["id"], order_id)
-            return {"payment": _json(payment)}
+            return {"payment": _public_payment(payment), **_public_payment(payment)}
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except KeyError as exc:
@@ -209,20 +254,10 @@ def register_customer_write_routes(app, get_application, current_user):
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+
 def _create_public_quote(application, customer_id, project):
     description_parts=[project["idea"]]
     if project.get("dimensions"):description_parts.append("Dimensions: "+project["dimensions"])
     if project.get("material"):description_parts.append("Material: "+project["material"])
     if project.get("notes"):description_parts.append("Notes: "+project["notes"])
     return application.quotes.save({"customer_id":customer_id,"status":"draft","notes":project.get("notes","")},[{"product_id":None,"description":"\n".join(description_parts),"quantity":project.get("quantity",1),"unit_price_cents":0,"material":project.get("material",""),"color":"","estimated_minutes":0,"estimated_filament_g":0}])
-
-def _json(value):
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, dict):
-        return {str(k): _json(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json(v) for v in value]
-    if hasattr(value, "keys"):
-        return {str(k): _json(value[k]) for k in value.keys()}
-    return str(value)
