@@ -15,11 +15,15 @@ class OrderService:
             else: where.append("o.status=?"); args.append(requested)
         sql=("SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(q.quote_number,'') quote_number,COALESCE(f.status,'') fulfillment_status,COALESCE(f.method,'') fulfillment_method,COALESCE(f.carrier,'') carrier,COALESCE(f.tracking_number,'') tracking_number,CASE WHEN COALESCE(f.status,'') IN ('shipped','delivered','picked_up') THEN f.status ELSE o.status END display_status FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id LEFT JOIN fulfillments f ON f.order_id=o.id WHERE "+" AND ".join(where)+" ORDER BY "+col+" "+direction)
         with self.database.connect() as conn:return conn.execute(sql,args).fetchall()
+    def _items_for_order(self,conn,order_id,quote_id=None):
+        items=conn.execute("SELECT oi.*,p.name product_name,v.name variant_name FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id LEFT JOIN product_variants v ON v.id=oi.variant_id WHERE oi.order_id=? ORDER BY oi.rowid",(order_id,)).fetchall()
+        if items or not quote_id: return items
+        return conn.execute("SELECT qi.*,p.name product_name,'' variant_name FROM quote_items qi LEFT JOIN products p ON p.id=qi.product_id WHERE qi.quote_id=? ORDER BY qi.rowid",(quote_id,)).fetchall()
     def get(self,order_id):
         with self.database.connect() as conn:
             row=conn.execute("SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=?",(order_id,)).fetchone()
             if not row: raise KeyError("Order not found")
-            items=conn.execute("SELECT qi.*,p.name product_name FROM quote_items qi LEFT JOIN products p ON p.id=qi.product_id WHERE qi.quote_id=?",(row["quote_id"],)).fetchall() if row["quote_id"] else []
+            items=self._items_for_order(conn,order_id,row["quote_id"])
         return row,items
     def _user(self,user_id):
         if not user_id: raise PermissionError("Authenticated user is required")
@@ -85,7 +89,7 @@ class OrderService:
         with self.database.connect() as conn:
             order=conn.execute("""SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(c.email,'') customer_email,COALESCE(c.phone,'') customer_phone,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=?""",(order_id,)).fetchone()
             if not order:raise KeyError("Order not found")
-            items=conn.execute("""SELECT qi.*,p.name product_name FROM quote_items qi LEFT JOIN products p ON p.id=qi.product_id WHERE qi.quote_id=?""",(order["quote_id"],)).fetchall() if order["quote_id"] else []
+            items=self._items_for_order(conn,order_id,order["quote_id"])
             jobs=conn.execute("""SELECT j.*,COALESCE(p.name,'Custom Job') product_name,COALESCE(pr.name,'Unassigned') printer_name FROM print_jobs j LEFT JOIN products p ON p.id=j.product_id LEFT JOIN printers pr ON pr.id=j.printer_id WHERE j.order_id=? ORDER BY j.created_at""",(order_id,)).fetchall()
             qc=conn.execute("""SELECT q.*,COALESCE(p.name,'Custom Job') product_name FROM qc_inspections q LEFT JOIN print_jobs j ON j.id=q.print_job_id LEFT JOIN products p ON p.id=j.product_id WHERE q.order_id=? ORDER BY q.created_at""",(order_id,)).fetchall()
             invoices=conn.execute("""SELECT i.*,(i.total_cents-i.paid_cents) balance_cents FROM invoices i WHERE i.order_id=? ORDER BY i.created_at DESC""",(order_id,)).fetchall()
