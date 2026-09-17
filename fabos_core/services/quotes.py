@@ -5,7 +5,15 @@ from datetime import date, timedelta
 
 class QuoteService:
     SORT_COLUMNS={"number":"q.quote_number","customer":"customer_name COLLATE NOCASE","status":"q.status","total":"q.total_cents","expires":"q.expires_at","created":"q.created_at"}
-    def __init__(self,database,pricing=None): self.database=database; self.pricing=pricing
+    def __init__(self,database,pricing=None): self.database=database; self.pricing=pricing; self._ensure_snapshot_schema()
+    def _ensure_snapshot_schema(self):
+        with self.database.connect() as conn:
+            columns={str(row[1]) for row in conn.execute("PRAGMA table_info(quote_items)").fetchall()}
+            if "variant_id" not in columns:
+                conn.execute("ALTER TABLE quote_items ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL")
+            conn.execute("CREATE TABLE IF NOT EXISTS quote_price_snapshots(id TEXT PRIMARY KEY,quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,quote_item_id TEXT NOT NULL,unit_price_cents INTEGER NOT NULL,pricing_mode TEXT NOT NULL DEFAULT 'manual',calculation_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_quote_price_snapshots_quote ON quote_price_snapshots(quote_id,created_at)")
+            conn.commit()
     def list(self,query="",status="All",sort_column="created",descending=True,group="all"):
         col=self.SORT_COLUMNS.get(sort_column,"q.created_at"); direction="DESC" if descending else "ASC"; like="%%%s%%"%query.strip()
         where=["(?='' OR q.quote_number LIKE ? OR COALESCE(c.name,'') LIKE ?)"]; args=[query.strip(),like,like]
