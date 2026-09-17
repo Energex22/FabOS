@@ -142,7 +142,7 @@ class AccountService:
             else:
                 conn.execute(
                     "INSERT INTO employee_profiles(user_id,department,position,employment_status,metadata_json,updated_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)",
-                    (user_id, department, position, employment_status, metadata_json, user_id),
+                    (user_id, department, position, employment_status, metadata_json),
                 )
             conn.execute(
                 "UPDATE users SET account_type='employee',updated_at=CURRENT_TIMESTAMP WHERE id=?",
