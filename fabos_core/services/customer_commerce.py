@@ -123,6 +123,8 @@ class CustomerCommerceService:
                 unit_price_cents = int(variant["price_cents"] or 0)
                 material = material or str(variant["material"] or "")
                 color = color or str(variant["color"] or "")
+            if unit_price_cents <= 0:
+                raise ValueError("Product price is not available for customer ordering")
             subtotal_cents += unit_price_cents * quantity
             resolved_items.append({"product_id": product_id, "description": str(product["name"]), "quantity": quantity, "unit_price_cents": unit_price_cents, "material": material, "color": color, "estimated_minutes": int(product["estimated_minutes"] or 0), "estimated_filament_g": float(product["estimated_filament_g"] or 0)})
         quote_id = self.quotes.save({"customer_id": customer["id"], "status": "approved", "notes": str(notes or "").strip()}, resolved_items)
