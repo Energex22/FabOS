@@ -72,7 +72,9 @@ def _record_refund(application, provider_name, payload):
         original_paid = int(conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents>0", (invoice_id,)).fetchone()[0] or 0)
         already_refunded = int(conn.execute("SELECT COALESCE(-SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents<0", (invoice_id,)).fetchone()[0] or 0)
         remaining = max(0, original_paid - already_refunded)
-        refund_amount = min(amount_cents, remaining)
+        if amount_cents > remaining:
+            return {"recorded": False, "duplicate": False, "reason": "refund_exceeds_recorded_payment", "requested_amount_cents": amount_cents, "remaining_refundable_cents": remaining}
+        refund_amount = amount_cents
         if refund_amount <= 0:
             return {"recorded": False, "duplicate": False, "reason": "refund_exceeds_recorded_payment"}
 
