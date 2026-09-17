@@ -39,7 +39,7 @@ class QuoteService:
         with self.database.connect() as conn:
             linked=conn.execute("SELECT customer_id FROM customer_accounts WHERE user_id=?",(user_id,)).fetchone()
             if not linked: raise PermissionError("Quote access denied")
-            row=conn.execute("SELECT q.*,COALESCE(c.name,'No customer') customer_name FROM quotes q LEFT JOIN customers c ON c.id=q.id WHERE q.id=? AND q.customer_id=?",(quote_id,linked[0])).fetchone()
+            row=conn.execute("SELECT q.*,COALESCE(c.name,'No customer') customer_name FROM quotes q LEFT JOIN customers c ON c.id=q.customer_id WHERE q.id=? AND q.customer_id=?",(quote_id,linked[0])).fetchone()
             if not row: raise KeyError("Quote not found")
             items=conn.execute("SELECT qi.*,p.name product_name FROM quote_items qi LEFT JOIN products p ON p.id=qi.product_id WHERE qi.quote_id=? ORDER BY qi.rowid",(quote_id,)).fetchall()
         return row,items
