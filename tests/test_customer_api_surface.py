@@ -1,5 +1,3 @@
-import os
-
 from fabos_core.api import create_app
 
 
