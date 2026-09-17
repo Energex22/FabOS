@@ -19,6 +19,7 @@ class ShopSettingsService:
         "payment_provider": "stripe", "payment_test_mode": "true", "online_payment_required": "true",
         "notification_order_received": "true", "notification_payment_received": "true", "notification_production_started": "true",
         "notification_qc_required": "true", "notification_shipped": "true", "notification_low_inventory": "true",
+        "console_lock_enabled": "true", "console_idle_timeout_minutes": "15", "console_local_only": "true",
     }
 
     META = {
@@ -54,6 +55,11 @@ class ShopSettingsService:
         "reliability": {
             "backup_enabled": "Enable scheduled backups", "backup_frequency_hours": "Backup interval in hours", "backup_retention": "Backup retention period in days",
         },
+        "security": {
+            "console_lock_enabled": "Require the local FabOS console to lock when inactive",
+            "console_idle_timeout_minutes": "Minutes of console inactivity before automatic lock",
+            "console_local_only": "Reject console logins from Windows Remote Desktop and SSH sessions",
+        },
         "notifications": {
             "notification_order_received": "Notify when an order is received", "notification_payment_received": "Notify when payment is received", "notification_production_started": "Notify when production starts",
             "notification_qc_required": "Notify when QC is required", "notification_shipped": "Notify when an order ships", "notification_low_inventory": "Notify on low inventory",
@@ -73,7 +79,7 @@ class ShopSettingsService:
         "invoice_due_days", "default_tax_percent", "quote_valid_days", "machine_hourly_cost", "default_material_cost_per_g", "labor_hourly_rate",
         "setup_labor_hourly_rate", "post_process_labor_hourly_rate", "qc_labor_hourly_rate", "default_packaging_cost", "overhead_percent", "target_margin_percent",
         "minimum_order_cents", "rush_multiplier", "quantity_discount_percent", "payment_fee_percent", "payment_fee_fixed_cents", "filament_low_threshold_g", "filament_reorder_days", "filament_waste_percent", "backup_retention",
-        "backup_frequency_hours", "custom_upload_max_mb", "default_turnaround_days", "rush_turnaround_days", "shipping_flat_cents",
+        "backup_frequency_hours", "custom_upload_max_mb", "console_idle_timeout_minutes", "default_turnaround_days", "rush_turnaround_days", "shipping_flat_cents",
         "shipping_calculated_base_cents", "shipping_calculated_per_kg_cents", "free_shipping_threshold_cents",
     }
 
