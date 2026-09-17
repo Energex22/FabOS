@@ -82,6 +82,10 @@ class PriceHistoryService:
                     FROM quote_items qi WHERE qi.quote_id=NEW.quote_id;
                 END;
             """)
+            conn.execute("""INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
+                SELECT lower(hex(randomblob(16))),o.id,qi.product_id,qi.variant_id,qi.description,qi.quantity,qi.unit_price_cents,qi.material,qi.color,qi.estimated_minutes,qi.estimated_filament_g
+                FROM orders o JOIN quote_items qi ON qi.quote_id=o.quote_id
+                WHERE o.quote_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id=o.id)""")
             conn.commit()
 
     def product(self, product_id, limit=100):
