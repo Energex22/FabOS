@@ -7,6 +7,9 @@ class PriceHistoryService:
 
     def ensure_schema(self):
         with self.database.connect() as conn:
+            quote_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(quote_items)").fetchall()}
+            if "variant_id" not in quote_columns:
+                conn.execute("ALTER TABLE quote_items ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS product_price_history(
                     id TEXT PRIMARY KEY,
@@ -53,25 +56,29 @@ class PriceHistoryService:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_quote_price_snapshots_quote ON quote_price_snapshots(quote_id,created_at);
-                CREATE TRIGGER IF NOT EXISTS trg_product_price_history
+                DROP TRIGGER IF EXISTS trg_product_price_history;
+                DROP TRIGGER IF EXISTS trg_product_variant_price_history;
+                DROP TRIGGER IF EXISTS trg_order_price_snapshot;
+                CREATE TRIGGER trg_product_price_history
                 AFTER UPDATE OF price_cents ON products
                 WHEN OLD.price_cents <> NEW.price_cents
                 BEGIN
                     INSERT INTO product_price_history(id,product_id,old_price_cents,new_price_cents)
                     VALUES(lower(hex(randomblob(16))),NEW.id,OLD.price_cents,NEW.price_cents);
                 END;
-                CREATE TRIGGER IF NOT EXISTS trg_product_variant_price_history
+                CREATE TRIGGER trg_product_variant_price_history
                 AFTER UPDATE OF price_cents ON product_variants
                 WHEN OLD.price_cents <> NEW.price_cents
                 BEGIN
                     INSERT INTO product_variant_price_history(id,variant_id,old_price_cents,new_price_cents)
                     VALUES(lower(hex(randomblob(16))),NEW.id,OLD.price_cents,NEW.price_cents);
                 END;
-                CREATE TRIGGER IF NOT EXISTS trg_order_price_snapshot
+                CREATE TRIGGER trg_order_price_snapshot
                 AFTER INSERT ON orders
+                WHEN NEW.quote_id IS NOT NULL
                 BEGIN
-                    INSERT INTO order_items(id,order_id,product_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
-                    SELECT lower(hex(randomblob(16))),NEW.id,qi.product_id,qi.description,qi.quantity,qi.unit_price_cents,qi.material,qi.color,qi.estimated_minutes,qi.estimated_filament_g
+                    INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
+                    SELECT lower(hex(randomblob(16))),NEW.id,qi.product_id,qi.variant_id,qi.description,qi.quantity,qi.unit_price_cents,qi.material,qi.color,qi.estimated_minutes,qi.estimated_filament_g
                     FROM quote_items qi WHERE qi.quote_id=NEW.quote_id;
                 END;
             """)
@@ -86,6 +93,11 @@ class PriceHistoryService:
         limit = max(1, min(int(limit or 100), 500))
         with self.database.connect() as conn:
             return conn.execute("SELECT * FROM product_variant_price_history WHERE variant_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?", (variant_id, limit)).fetchall()
+
+    def quote_snapshots(self, quote_id, limit=500):
+        limit = max(1, min(int(limit or 500), 1000))
+        with self.database.connect() as conn:
+            return conn.execute("SELECT * FROM quote_price_snapshots WHERE quote_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?", (quote_id, limit)).fetchall()
 
     def order_items(self, order_id):
         with self.database.connect() as conn:
