@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import os
 import sqlite3
 import time
 import unittest
@@ -8,6 +9,7 @@ import unittest
 from fabos_core.services.payment_api import _record_refund
 from fabos_core.services.payments import (
     PaymentProviderError,
+    StripePaymentProvider,
     _verify_stripe_signature,
     base64_hmac_sha256,
 )
@@ -86,6 +88,36 @@ class PaymentSecurityTests(unittest.TestCase):
         expected = base64_hmac_sha256(secret, message)
         self.assertEqual(expected, base64_hmac_sha256(secret, message))
         self.assertNotEqual(expected, base64_hmac_sha256(secret, message + "x"))
+
+    def test_stripe_webhook_uses_client_reference_as_order_id(self):
+        previous_key = os.environ.get("STRIPE_SECRET_KEY")
+        previous_webhook = os.environ.get("STRIPE_WEBHOOK_SECRET")
+        os.environ["STRIPE_SECRET_KEY"] = "sk_test"
+        os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_test"
+        try:
+            provider = StripePaymentProvider()
+            payload = json.dumps(
+                {
+                    "id": "evt_payment_intent",
+                    "type": "payment_intent.succeeded",
+                    "data": {"object": {"id": "pi_test", "metadata": {}, "client_reference_id": "order-42"}},
+                }
+            )
+            timestamp = str(int(time.time()))
+            digest = hmac.new("whsec_test".encode("utf-8"), f"{timestamp}.{payload}".encode("utf-8"), hashlib.sha256).hexdigest()
+            event = provider.parse_webhook(payload, f"t={timestamp},v1={digest}")
+            self.assertEqual(event["provider_payment_id"], "pi_test")
+            self.assertEqual(event["order_id"], "order-42")
+            self.assertEqual(event["status"], "paid")
+        finally:
+            if previous_key is None:
+                os.environ.pop("STRIPE_SECRET_KEY", None)
+            else:
+                os.environ["STRIPE_SECRET_KEY"] = previous_key
+            if previous_webhook is None:
+                os.environ.pop("STRIPE_WEBHOOK_SECRET", None)
+            else:
+                os.environ["STRIPE_WEBHOOK_SECRET"] = previous_webhook
 
     def test_stripe_refund_is_recorded_as_negative_ledger_entry(self):
         application = _Application()
