@@ -54,8 +54,8 @@ class ProductionService:
                  WHERE j.order_id=o.id AND (? IS NULL OR j.product_id=?)
                    AND j.status IN ('queued','scheduled')) matching_waiting_jobs
                 FROM orders o LEFT JOIN customers c ON c.id=o.customer_id
-                WHERE o.status NOT IN ('completed','cancelled')
-                ORDER BY CASE o.status WHEN 'production' THEN 0 WHEN 'new' THEN 1 ELSE 2 END,
+                WHERE o.status IN ('confirmed','in_production','production')
+                ORDER BY CASE o.status WHEN 'in_production' THEN 0 WHEN 'confirmed' THEN 1 ELSE 2 END,
                          o.created_at DESC""",(product_id,product_id)).fetchall()
 
     def find_attachable_job(self, order_id, product_id):
@@ -111,6 +111,9 @@ class ProductionService:
             order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
             if not order:
                 raise KeyError("Order not found.")
+            order_status = str(order["status"] or "").strip().lower()
+            if order_status not in {"confirmed", "in_production", "production"}:
+                raise ValueError("Order must be confirmed before production jobs can be created.")
             if not order["quote_id"]:
                 raise ValueError("This order has no quote items.")
             items = conn.execute(
@@ -134,8 +137,8 @@ class ProductionService:
                          item["estimated_minutes"] or 0, item["estimated_filament_g"] or 0),
                     )
                     created.append(job_id)
-            if created:
-                conn.execute("UPDATE orders SET status='production' WHERE id=?", (order_id,))
+            if created and order_status == "confirmed":
+                conn.execute("UPDATE orders SET status='in_production' WHERE id=?", (order_id,))
             conn.commit()
         return created
 
@@ -143,7 +146,7 @@ class ProductionService:
         total = 0
         with self.database.connect() as conn:
             orders = conn.execute(
-                "SELECT id FROM orders WHERE status IN ('new','production') ORDER BY created_at"
+                "SELECT id FROM orders WHERE status IN ('confirmed','in_production','production') ORDER BY created_at"
             ).fetchall()
         for order in orders:
             total += len(self.create_jobs_from_order(order["id"]))
