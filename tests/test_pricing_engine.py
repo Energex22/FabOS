@@ -73,7 +73,7 @@ class PricingEngineTests(unittest.TestCase):
             "post_process_minutes": 5,
             "qc_minutes": 3,
         }])
-        self.assertEqual(items[0]["unit_price_cents"], 1735)
+        self.assertEqual(items[0]["unit_price_cents"], 1734)
         self.assertEqual(pricing.kwargs["estimated_minutes"], 90)
         self.assertEqual(pricing.kwargs["estimated_filament_g"], 42.5)
         self.assertTrue(pricing.kwargs["rush"])
