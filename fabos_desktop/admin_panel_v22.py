@@ -7,6 +7,14 @@ from fabos_desktop.system_ui import SystemReliabilityMixin
 
 
 def _open_admin_center(self):
+    token = getattr(self, "_console_session_token", None)
+    user = self.core.auth.authenticate(token) if token else None
+    if not user or str(user["account_type"] or "").lower() != "administrator" or str(user["role"] or "").lower() != "owner":
+        messagebox.showerror("Administration", "Owner authentication is required for the Administration Center.", parent=self)
+        return
+    if self.core.shop_settings.get("console_local_only", "true") and not self.core.console_security.is_local_session():
+        messagebox.showerror("Administration", "The Administration Center requires local physical console access.", parent=self)
+        return
     existing = getattr(self, "_admin_center_window", None)
     try:
         if existing and existing.winfo_exists():
