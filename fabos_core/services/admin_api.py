@@ -148,3 +148,30 @@ def register_admin_routes(app, get_application, administrator_user):
             qc_minutes=payload.qc_minutes,
             overhead_percent=payload.overhead_percent,
         )
+
+    @app.get("/api/v1/admin/products/{product_id}/price-history")
+    def get_product_price_history(product_id: str, limit: int = 100, user=Depends(administrator_user), application=Depends(get_application)):
+        if not application.products.get(product_id):
+            raise HTTPException(status_code=404, detail="Product not found")
+        return {"history": [dict(row) for row in application.price_history.product(product_id, limit)]}
+
+    @app.get("/api/v1/admin/variants/{variant_id}/price-history")
+    def get_variant_price_history(variant_id: str, limit: int = 100, user=Depends(administrator_user), application=Depends(get_application)):
+        with application.database.connect() as conn:
+            if not conn.execute("SELECT 1 FROM product_variants WHERE id=?", (variant_id,)).fetchone():
+                raise HTTPException(status_code=404, detail="Variant not found")
+        return {"history": [dict(row) for row in application.price_history.variant(variant_id, limit)]}
+
+    @app.get("/api/v1/admin/quotes/{quote_id}/price-snapshots")
+    def get_quote_price_snapshots(quote_id: str, limit: int = 500, user=Depends(administrator_user), application=Depends(get_application)):
+        with application.database.connect() as conn:
+            if not conn.execute("SELECT 1 FROM quotes WHERE id=?", (quote_id,)).fetchone():
+                raise HTTPException(status_code=404, detail="Quote not found")
+        return {"snapshots": [dict(row) for row in application.price_history.quote_snapshots(quote_id, limit)]}
+
+    @app.get("/api/v1/admin/orders/{order_id}/price-snapshots")
+    def get_order_price_snapshots(order_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        with application.database.connect() as conn:
+            if not conn.execute("SELECT 1 FROM orders WHERE id=?", (order_id,)).fetchone():
+                raise HTTPException(status_code=404, detail="Order not found")
+        return {"items": [dict(row) for row in application.price_history.order_items(order_id)]}
