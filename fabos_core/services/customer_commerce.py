@@ -174,6 +174,7 @@ class CustomerCommerceService:
         turnaround_days = int(float(self.shop_settings.get("default_turnaround_days", "7") or 7))
         due_at = (date.today() + timedelta(days=max(0, turnaround_days))).isoformat()
         with self.database.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT order_number FROM orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1", (prefix + "%",)).fetchone()
             sequence = int(row[0].split("-")[-1]) + 1 if row else 1
             order_number = prefix + ("%04d" % sequence)
