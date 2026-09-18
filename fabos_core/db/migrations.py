@@ -54,7 +54,11 @@ ALTER TABLE orders ADD COLUMN shipping_cents INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE orders ADD COLUMN shipping_address_json TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE orders ADD COLUMN checkout_notes TEXT NOT NULL DEFAULT '';
 ALTER TABLE orders ADD COLUMN checkout_channel TEXT NOT NULL DEFAULT 'internal';
-CREATE INDEX IF NOT EXISTS idx_orders_checkout_channel ON orders(checkout_channel);""")]
+CREATE INDEX IF NOT EXISTS idx_orders_checkout_channel ON orders(checkout_channel);"""),
+(40,"""ALTER TABLE quote_items ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL;"""),
+(41,"""ALTER TABLE order_items ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL;"""),
+(42,"""ALTER TABLE print_jobs ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;""")
+]
 def migrate(db,backup=None):
  with db.connect() as c:
   c.execute('CREATE TABLE IF NOT EXISTS app_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');done={r[0] for r in c.execute('SELECT version FROM app_migrations')}
