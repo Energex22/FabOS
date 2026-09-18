@@ -6,6 +6,20 @@ from fabos_core.db.migrations import migrate
 
 
 class MigrationRunnerTests(unittest.TestCase):
+    def test_fresh_install_reaches_latest_migration(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(td + "/fabos.db")
+            db.initialize()
+            migrate(db)
+            with db.connect() as c:
+                latest = c.execute("SELECT MAX(version) FROM app_migrations").fetchone()[0]
+                self.assertEqual(latest, 44)
+                self.assertEqual(c.execute("SELECT COUNT(*) FROM app_migrations").fetchone()[0], 44)
+                self.assertIsNotNone(c.execute("SELECT 1 FROM shop_settings WHERE key='shop_name'").fetchone())
+                self.assertIn("variant_id", {row["name"] for row in c.execute("PRAGMA table_info(order_items)")})
+                self.assertIn("variant_id", {row["name"] for row in c.execute("PRAGMA table_info(print_jobs)")})
+                self.assertIn("quantity", {row["name"] for row in c.execute("PRAGMA table_info(print_jobs)")})
+
     def test_partial_duplicate_column_migration_continues_remaining_statements(self):
         with tempfile.TemporaryDirectory() as td:
             db = Database(td + "/fabos.db")
