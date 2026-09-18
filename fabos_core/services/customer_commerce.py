@@ -184,7 +184,7 @@ class CustomerCommerceService:
                 conn.execute(
                     """INSERT INTO order_items
                     (id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
-                    VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                     (str(uuid.uuid4()), order_id, item["product_id"], item["variant_id"],
                      item["description"], item["quantity"], item["unit_price_cents"],
                      item["material"], item["color"], item["estimated_minutes"],
