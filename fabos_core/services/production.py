@@ -2,6 +2,16 @@ import uuid
 from datetime import datetime
 
 class ProductionService:
+    VALID_JOB_STATUSES={"queued","scheduled","printing","paused","completed","failed","cancelled"}
+    JOB_STATUS_TRANSITIONS={
+        "queued":{"queued","scheduled","printing","cancelled"},
+        "scheduled":{"scheduled","printing","paused","cancelled"},
+        "printing":{"printing","paused","completed","failed","cancelled"},
+        "paused":{"paused","printing","completed","failed","cancelled"},
+        "completed":{"completed"},
+        "failed":{"failed"},
+        "cancelled":{"cancelled"},
+    }
     SORT_COLUMNS = {
         "job": "j.created_at",
         "order": "o.order_number",
@@ -185,11 +195,17 @@ class ProductionService:
         return created
 
     def set_status(self, job_id, status):
+        status=str(status or "").strip().lower()
+        if status not in self.VALID_JOB_STATUSES:
+            raise ValueError("Invalid print job status.")
         now = datetime.now().isoformat(timespec="seconds")
         with self.database.connect() as conn:
             row = conn.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise KeyError("Print job not found.")
+            current=str(row["status"] or "queued").strip().lower()
+            if status not in self.JOB_STATUS_TRANSITIONS.get(current,{current}):
+                raise ValueError("Invalid print job status transition.")
             values = {"status": status}
             if status == "printing" and not row["started_at"]:
                 values["started_at"] = now
