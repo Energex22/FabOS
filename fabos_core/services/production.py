@@ -47,23 +47,24 @@ class ProductionService:
         with self.database.connect() as conn:
             return conn.execute(sql, args).fetchall()
 
-    def attachable_orders(self, product_id=None):
+    def attachable_orders(self, product_id=None, variant_id=None):
         with self.database.connect() as conn:
             return conn.execute("""SELECT o.*,COALESCE(c.name,'No customer') customer_name,
                 (SELECT COUNT(*) FROM print_jobs j
                  WHERE j.order_id=o.id AND (? IS NULL OR j.product_id=?)
+                   AND (? IS NULL OR j.variant_id=?)
                    AND j.status IN ('queued','scheduled')) matching_waiting_jobs
                 FROM orders o LEFT JOIN customers c ON c.id=o.customer_id
                 WHERE o.status IN ('confirmed','in_production','production')
                 ORDER BY CASE o.status WHEN 'in_production' THEN 0 WHEN 'confirmed' THEN 1 ELSE 2 END,
-                         o.created_at DESC""",(product_id,product_id)).fetchall()
+                         o.created_at DESC""",(product_id,product_id,variant_id,variant_id)).fetchall()
 
-    def find_attachable_job(self, order_id, product_id):
+    def find_attachable_job(self, order_id, product_id, variant_id=None):
         if not order_id or not product_id:return None
         with self.database.connect() as conn:
             return conn.execute("""SELECT * FROM print_jobs
-                WHERE order_id=? AND product_id=? AND status IN ('queued','scheduled')
-                ORDER BY created_at LIMIT 1""",(order_id,product_id)).fetchone()
+                WHERE order_id=? AND product_id=? AND (? IS NULL OR variant_id=?) AND status IN ('queued','scheduled')
+                ORDER BY created_at LIMIT 1""",(order_id,product_id,variant_id,variant_id)).fetchone()
 
     def job_print_readiness(self,job_id,design_vault):
         job=self.get(job_id)
@@ -174,9 +175,9 @@ class ProductionService:
                 new_id = str(uuid.uuid4())
                 conn.execute(
                     """INSERT INTO print_jobs
-                    (id,order_id,product_id,printer_id,spool_id,status,estimated_minutes,estimated_filament_g,quantity)
-                    VALUES(?,?,?,?,?,?,?,?,1)""",
-                    (new_id, source["order_id"], source["product_id"], None, None, "queued",
+                    (id,order_id,product_id,variant_id,printer_id,spool_id,status,estimated_minutes,estimated_filament_g,quantity)
+                    VALUES(?,?,?,?,?,?,?,?,?,1)""",
+                    (new_id, source["order_id"], source["product_id"], source["variant_id"], None, None, "queued",
                      source["estimated_minutes"] or 0, source["estimated_filament_g"] or 0),
                 )
                 created.append(new_id)
