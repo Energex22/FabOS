@@ -14,7 +14,7 @@ class MigrationRunnerTests(unittest.TestCase):
                 c.execute("CREATE TABLE IF NOT EXISTS app_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
                 for version in range(1, 34):
                     c.execute("INSERT INTO app_migrations(version,name) VALUES(?,?)", (version, "migration_%03d" % version))
-                c.execute("""CREATE TABLE fulfillments(
+                c.execute("""CREATE TABLE shop_settings(\n                    key TEXT PRIMARY KEY,\n                    value TEXT NOT NULL,\n                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n                )""")\n                c.execute("""CREATE TABLE fulfillments(
                     id TEXT PRIMARY KEY,
                     order_id TEXT NOT NULL,
                     method TEXT NOT NULL DEFAULT 'pickup',
