@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_supply_active ON supply_items(active,category,nam
 CREATE TABLE IF NOT EXISTS supply_transactions(id TEXT PRIMARY KEY,supply_id TEXT NOT NULL REFERENCES supply_items(id) ON DELETE CASCADE,quantity REAL NOT NULL,reference_type TEXT,reference_id TEXT,notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_supply_tx_item ON supply_transactions(supply_id,created_at);
 CREATE TABLE IF NOT EXISTS app_runtime_state(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-INSERT OR IGNORE INTO shop_settings(key,value) VALUES('auto_backup_on_shutdown','1'),('crash_recovery_enabled','1'),('diagnostic_log_retention_days','30'),('beta_channel','1');"""),(31,"""ALTER TABLE print_jobs ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;"""),(36,"""ALTER TABLE users ADD COLUMN email TEXT;
+INSERT OR IGNORE INTO shop_settings(key,value) VALUES('auto_backup_on_shutdown','1'),('crash_recovery_enabled','1'),('diagnostic_log_retention_days','30'),('beta_channel','1');"""),(36,"""ALTER TABLE users ADD COLUMN email TEXT;
 ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT 'administrator';
 ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE users ADD COLUMN last_login_at TEXT;
