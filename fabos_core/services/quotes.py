@@ -76,6 +76,7 @@ class QuoteService:
         return quote_id
     def convert_to_order(self,quote_id):
         with self.database.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             q=conn.execute("SELECT * FROM quotes WHERE id=?",(quote_id,)).fetchone()
             if not q:raise KeyError("Quote not found")
             existing=conn.execute("SELECT id FROM orders WHERE quote_id=?",(quote_id,)).fetchone()
