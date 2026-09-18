@@ -137,6 +137,12 @@ class FulfillmentService:
 
     def save(self, order_id, method, status, carrier="", tracking="", weight_oz=None,
              shipping_cost_cents=0, destination="", notes="", length_in=None, width_in=None, height_in=None):
+        method = str(method or "").strip().lower()
+        status = str(status or "").strip().lower()
+        if method not in self.METHODS:
+            raise ValueError("Unsupported fulfillment method")
+        if status not in self.STATUSES:
+            raise ValueError("Unsupported fulfillment status")
         fid = self.ensure(order_id, method)
         now = datetime.now().isoformat(timespec="seconds")
         shipped = now if status == "shipped" else None
