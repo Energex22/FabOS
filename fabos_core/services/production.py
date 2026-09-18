@@ -4,8 +4,8 @@ from datetime import datetime
 class ProductionService:
     VALID_JOB_STATUSES={"queued","scheduled","printing","paused","completed","failed","cancelled"}
     JOB_STATUS_TRANSITIONS={
-        "queued":{"queued","scheduled","printing","cancelled"},
-        "scheduled":{"scheduled","printing","paused","cancelled"},
+        "queued":{"queued","scheduled","printing","completed","failed","cancelled"},
+        "scheduled":{"scheduled","printing","paused","completed","failed","cancelled"},
         "printing":{"printing","paused","completed","failed","cancelled"},
         "paused":{"paused","printing","completed","failed","cancelled"},
         "completed":{"completed"},
