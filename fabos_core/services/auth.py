@@ -55,6 +55,12 @@ class AuthService:
             )
             if cursor.rowcount != 1:
                 raise KeyError("User not found")
+            # A password change invalidates every existing session for the account.
+            # This keeps direct/admin password changes consistent with the reset flow.
+            connection.execute(
+                "UPDATE auth_sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND revoked_at IS NULL",
+                (user_id,),
+            )
             connection.commit()
         return True
 
