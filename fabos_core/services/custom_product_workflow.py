@@ -47,8 +47,10 @@ class CustomProductWorkflowService:
             raise ValueError("A published product needs a commercially cleared license status")
 
         product_id = link["product_id"] or str(uuid.uuid4())
+        existing_product = self.products.get(product_id) if link["product_id"] else None
+        sku = values.get("sku") or (existing_product["sku"] if existing_product else None) or "CUSTOM-%s" % uuid.uuid4().hex[:8].upper()
         product_id = self.products.save({
-            "sku": values.get("sku") or "CUSTOM-%s" % uuid.uuid4().hex[:8].upper(),
+            "sku": sku,
             "name": name,
             "category": values.get("category") or "Custom Designs",
             "description": values.get("description") or "",
