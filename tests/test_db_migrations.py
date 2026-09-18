@@ -14,6 +14,23 @@ class MigrationRunnerTests(unittest.TestCase):
                 c.execute("CREATE TABLE IF NOT EXISTS app_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
                 for version in range(1, 34):
                     c.execute("INSERT INTO app_migrations(version,name) VALUES(?,?)", (version, "migration_%03d" % version))
+                c.execute("""CREATE TABLE fulfillments(
+                    id TEXT PRIMARY KEY,
+                    order_id TEXT NOT NULL,
+                    method TEXT NOT NULL DEFAULT 'pickup',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    carrier TEXT,
+                    tracking_number TEXT,
+                    package_weight_oz REAL,
+                    shipping_cost_cents INTEGER NOT NULL DEFAULT 0,
+                    destination TEXT,
+                    notes TEXT,
+                    shipped_at TEXT,
+                    delivered_at TEXT,
+                    picked_up_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )""")
                 c.execute("ALTER TABLE fulfillments ADD COLUMN package_length_in REAL")
                 c.commit()
             migrate(db)
