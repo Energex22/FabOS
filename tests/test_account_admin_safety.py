@@ -62,11 +62,15 @@ class AccountAdminSafetyTests(unittest.TestCase):
             self.service.set_employee_profile("admin-1")
 
     def test_last_active_administrator_cannot_be_disabled(self):
+        self.db.connection.execute("UPDATE users SET role='administrator' WHERE id='admin-1'")
+        self.db.connection.commit()
         with self.assertRaisesRegex(ValueError, "last active administrator"):
             self.service.update_account("admin-1", active=False)
         self.assertEqual(self.service.get_user("admin-1")["active"], 1)
 
     def test_last_active_administrator_cannot_be_demoted(self):
+        self.db.connection.execute("UPDATE users SET role='administrator' WHERE id='admin-1'")
+        self.db.connection.commit()
         with self.assertRaisesRegex(ValueError, "last active administrator"):
             self.service.update_account("admin-1", account_type="employee")
         self.assertEqual(self.service.get_user("admin-1")["account_type"], "administrator")
