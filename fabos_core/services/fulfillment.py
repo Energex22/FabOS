@@ -147,6 +147,8 @@ class FulfillmentService:
         fid = self.ensure(order_id, method)
         with self.db.connect() as c:
             current = c.execute("SELECT method,status FROM fulfillments WHERE id=?", (fid,)).fetchone()
+            if current and current["method"] != method and str(current["status"] or "pending").lower() != "pending":
+                raise ValueError("Cannot change fulfillment method after fulfillment has started")
         if current and str(current["status"] or "pending").lower() in self.TERMINAL_STATUSES and status != current["status"]:
             raise ValueError("Cannot move a completed fulfillment back to an earlier status")
         now = datetime.now().isoformat(timespec="seconds")
