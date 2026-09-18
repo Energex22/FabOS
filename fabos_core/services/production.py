@@ -123,17 +123,17 @@ class ProductionService:
             ).fetchall()
             for item in items:
                 existing = conn.execute(
-                    "SELECT COUNT(*) FROM print_jobs WHERE order_id=? AND product_id IS ?",
-                    (order_id, item["product_id"]),
+                    "SELECT COUNT(*) FROM print_jobs WHERE order_id=? AND product_id IS ? AND variant_id IS ?",
+                    (order_id, item["product_id"], item["variant_id"]),
                 ).fetchone()[0]
                 needed = max(0, int(item["quantity"] or 1) - int(existing))
                 for _ in range(needed):
                     job_id = str(uuid.uuid4())
                     conn.execute(
                         """INSERT INTO print_jobs
-                        (id,order_id,product_id,status,estimated_minutes,estimated_filament_g)
-                        VALUES (?,?,?,?,?,?)""",
-                        (job_id, order_id, item["product_id"], "queued",
+                        (id,order_id,product_id,variant_id,status,estimated_minutes,estimated_filament_g)
+                        VALUES (?,?,?,?,?,?,?)""",
+                        (job_id, order_id, item["product_id"], item["variant_id"], "queued",
                          item["estimated_minutes"] or 0, item["estimated_filament_g"] or 0),
                     )
                     created.append(job_id)
