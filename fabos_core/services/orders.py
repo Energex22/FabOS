@@ -1,7 +1,7 @@
 class OrderService:
     """Order access and lifecycle boundary."""
     SORT_COLUMNS={"number":"o.order_number","customer":"customer_name COLLATE NOCASE","status":"o.status","due":"o.due_at","total":"o.total_cents","created":"o.created_at"}
-    ORDER_TRANSITIONS={"pending":{"confirmed","cancelled"},"confirmed":{"in_production","cancelled"},"in_production":{"qc","cancelled"},"qc":{"ready","cancelled"},"ready":{"shipped","completed","cancelled"},"shipped":{"completed"},"completed":set(),"cancelled":set()}
+    ORDER_TRANSITIONS={"pending":{"confirmed","cancelled"},"confirmed":{"in_production","cancelled"},"in_production":{"qc","ready","cancelled"},"qc":{"ready","cancelled"},"ready":{"shipped","completed","cancelled"},"shipped":{"completed"},"completed":set(),"cancelled":set()}
     TERMINAL_STATUSES={"completed","cancelled"}
     def __init__(self,database,accounts=None,permissions=None): self.database=database; self.accounts=accounts; self.permissions=permissions; self._ensure_order_item_schema()
     def _ensure_order_item_schema(self):
