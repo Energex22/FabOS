@@ -147,8 +147,17 @@ class PaymentService:
                 conn.commit()
                 return str(existing["id"]),amount_cents,metadata,True
             payment_id=str(uuid.uuid4())
-            conn.execute("INSERT INTO payment_transactions(id,order_id,invoice_id,customer_id,amount_cents,currency,provider,status,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)",(payment_id,order["id"],invoice_id,customer_id,amount_cents,"USD",provider_name,"created",json.dumps(metadata,sort_keys=True)))
-            conn.commit()
+            try:
+                conn.execute("INSERT INTO payment_transactions(id,order_id,invoice_id,customer_id,amount_cents,currency,provider,status,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)",(payment_id,order["id"],invoice_id,customer_id,amount_cents,"USD",provider_name,"created",json.dumps(metadata,sort_keys=True)))
+                conn.commit()
+            except sqlite3.IntegrityError:
+                conn.rollback()
+                existing=conn.execute("SELECT * FROM payment_transactions WHERE order_id=?",(order["id"],)).fetchone()
+                if existing:
+                    status=str(existing["status"] or "").lower()
+                    if status not in {"failed","cancelled"} and not (status=="created" and str(existing["provider"] or "").lower()=="unconfigured"):
+                        return str(existing["id"]),amount_cents,metadata,False
+                raise
             return payment_id,amount_cents,metadata,True
     def _new_transaction(self,order,customer_id,invoice_id,provider_name,channel):
         payment_id,amount_cents,metadata,created=self._prepare_transaction(order,customer_id,invoice_id,provider_name,channel)
