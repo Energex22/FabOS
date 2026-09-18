@@ -1,3 +1,4 @@
+import sqlite3
 """Provider-neutral payment orchestration for FabOS.
 
 FabOS owns the order/payment record while gateway adapters own provider-specific
@@ -213,7 +214,18 @@ class PaymentService:
             with self.database.connect() as conn: exists=conn.execute("SELECT 1 FROM payments WHERE invoice_id=? AND reference=? LIMIT 1",(invoice_id,reference)).fetchone()
         except Exception: exists=None
         if not exists:
-            self.invoices.record_payment(invoice_id,amount,method=row["provider"],reference=reference,notes="Gateway payment reconciled by FabOS")
+            try:
+                self.invoices.record_payment(invoice_id,amount,method=row["provider"],reference=reference,notes="Gateway payment reconciled by FabOS")
+            except sqlite3.IntegrityError:
+                # A second webhook can race the first settlement. The unique
+                # invoice/reference ledger constraint makes the first write authoritative.
+                with self.database.connect() as conn:
+                    duplicate=conn.execute(
+                        "SELECT 1 FROM payments WHERE invoice_id=? AND reference=? LIMIT 1",
+                        (invoice_id,reference),
+                    ).fetchone()
+                if not duplicate:
+                    raise
         with self.database.connect() as conn:
             current=conn.execute("SELECT status FROM orders WHERE id=?",(row["order_id"],)).fetchone()
             if current and str(current["status"] or "").lower()=="pending": conn.execute("UPDATE orders SET status='confirmed' WHERE id=?",(row["order_id"],));conn.commit()
