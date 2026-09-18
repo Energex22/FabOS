@@ -111,6 +111,8 @@ class CustomerCommerceService:
         shipping_address = self._shipping_address(shipping_address)
         if not isinstance(items, list) or not items:
             raise ValueError("At least one order item is required")
+        if len(items) > 100:
+            raise ValueError("An order may contain at most 100 line items")
         resolved_items = []
         subtotal_cents = 0
         for requested in items:
@@ -125,6 +127,8 @@ class CustomerCommerceService:
             quantity = self._positive_quantity(requested.get("quantity", 1))
             variant_id = str(requested.get("variantId") or requested.get("variant_id") or "").strip()
             configuration = requested.get("configuration") or {}
+            if not isinstance(configuration, dict):
+                raise ValueError("Item configuration must be an object")
             material = str(configuration.get("material") or requested.get("material") or "").strip()
             color = str(configuration.get("color") or requested.get("color") or "").strip()
             unit_price_cents = int(product["price_cents"] or 0)
@@ -175,7 +179,17 @@ class CustomerCommerceService:
             order_number = prefix + ("%04d" % sequence)
             conn.execute("""INSERT INTO orders
                 (id,order_number,customer_id,quote_id,status,due_at,total_cents,tax_cents,shipping_cents,shipping_address_json,checkout_notes,checkout_channel)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (order_id, order_number, customer["id"], quote_id, "pending", due_at, total_cents, tax_cents, shipping_cents, json.dumps(shipping_address), str(notes or "").strip(), "customer-web"))
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (order_id, order_number, customer["id"], quote_id, "pending", due_at, total_cents, tax_cents, shipping_cents, json.dumps(shipping_address), str(notes or "").strip(), "website"))
+            for item in resolved_items:
+                conn.execute(
+                    """INSERT INTO order_items
+                    (id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
+                    VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    (str(uuid.uuid4()), order_id, item["product_id"], item["variant_id"],
+                     item["description"], item["quantity"], item["unit_price_cents"],
+                     item["material"], item["color"], item["estimated_minutes"],
+                     item["estimated_filament_g"]),
+                )
             conn.commit()
         row, saved_items = self._order_for_customer(user_id, order_id)
         return row, saved_items, subtotal_cents, shipping_cents, tax_cents, total_cents
