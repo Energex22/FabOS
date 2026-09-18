@@ -49,15 +49,18 @@ class ManufacturingService:
    j=c.execute('SELECT * FROM print_jobs WHERE id=?',(jid,)).fetchone()
    if not j:return
    grams=actual_filament_g if actual_filament_g is not None else j['estimated_filament_g']
+   already_deducted=bool(j['filament_deducted'])
    c.execute("""UPDATE print_jobs SET actual_minutes=COALESCE(?,actual_minutes),
-     actual_filament_g=COALESCE(?,actual_filament_g),filament_deducted=1
+     actual_filament_g=COALESCE(?,actual_filament_g)
      WHERE id=?""",(actual_minutes,grams,jid))
    c.commit()
   try:
    from fabos_core.services.inventory_profit import InventoryProfitService
    inv=InventoryProfitService(self.db)
-   if j['spool_id'] and not j['filament_deducted'] and grams:
+   if j['spool_id'] and not already_deducted and grams:
     inv.record_consumption(j['spool_id'],grams,jid)
+    with self.db.connect() as c:
+     c.execute("UPDATE print_jobs SET filament_deducted=1 WHERE id=?",(jid,));c.commit()
    inv.calculate_job_cost(jid)
   except Exception:
    pass
@@ -73,10 +76,10 @@ class ManufacturingService:
    if not j:raise KeyError('Print job not found')
    nid=str(uuid.uuid4())
    c.execute("""INSERT INTO print_jobs
-    (id,order_id,product_id,printer_id,spool_id,status,gcode_path,octoprint_file,
+    (id,order_id,product_id,variant_id,printer_id,spool_id,status,gcode_path,octoprint_file,
      estimated_minutes,estimated_filament_g,slicer_metadata_json)
     VALUES(?,?,?,?,?,'scheduled',?,?,?,?,?)""",
-    (nid,j['order_id'],j['product_id'],j['printer_id'],j['spool_id'],j['gcode_path'],
+    (nid,j['order_id'],j['product_id'],j['variant_id'],j['printer_id'],j['spool_id'],j['gcode_path'],
      j['octoprint_file'],j['estimated_minutes'],j['estimated_filament_g'],j['slicer_metadata_json']))
    c.commit();return nid
  def parse_gcode_file(self,path):
