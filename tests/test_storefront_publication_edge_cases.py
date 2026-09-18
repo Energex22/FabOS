@@ -80,7 +80,7 @@ class StorefrontPublicationEdgeCaseTests(unittest.TestCase):
         with self.db.connect() as conn:
             conn.executescript("""
                 CREATE TABLE quotes(id TEXT PRIMARY KEY, customer_id TEXT, quote_number TEXT);
-                CREATE TABLE designs(id TEXT PRIMARY KEY, product_id TEXT, name TEXT);
+                CREATE TABLE designs(id TEXT PRIMARY KEY, product_id TEXT, name TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE quote_designs(quote_id TEXT, design_id TEXT);
                 INSERT INTO quotes VALUES('q1','customer-1','Q-1001');
                 INSERT INTO designs VALUES('d1','p1','Customer Design');
