@@ -114,6 +114,19 @@ def _verify_stripe_signature(payload,signature,secret,tolerance=300):
 
 class PaymentService:
     VALID_STATUSES={"created","pending","authorized","paid","failed","cancelled","refunded","partially_refunded","disputed"}
+    # Gateway webhooks are not guaranteed to arrive in chronological order. Keep
+    # terminal/financial states from being overwritten by stale failure events.
+    STATUS_TRANSITIONS={
+        "created":{"created","pending","authorized","paid","failed","cancelled"},
+        "pending":{"pending","authorized","paid","failed","cancelled"},
+        "authorized":{"authorized","paid","failed","cancelled"},
+        "paid":{"paid","partially_refunded","refunded","disputed"},
+        "partially_refunded":{"partially_refunded","refunded","disputed"},
+        "failed":{"failed","created","pending","authorized","paid","cancelled"},
+        "cancelled":{"cancelled","created","pending","authorized","paid"},
+        "refunded":{"refunded"},
+        "disputed":{"disputed","partially_refunded","refunded"},
+    }
     def __init__(self,database,accounts,invoices): self.database=database;self.accounts=accounts;self.invoices=invoices;self._ensure_schema();self.provider=self._build_provider()
     def _ensure_schema(self):
         with self.database.connect() as conn:
