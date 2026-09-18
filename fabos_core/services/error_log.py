@@ -28,8 +28,7 @@ class ErrorLogService:
         record={"time":stamp,"level":level,"message":_redact(str(message)),"detail":_redact(str(detail or "")),
                 "context":_redact(context or {})}
         with self.path.open("a",encoding="utf-8") as f:
-            f.write(json.dumps(record,ensure_ascii=False)+"
-")
+            f.write(json.dumps(record,ensure_ascii=False)+"\\n")
         return record
 
     def info(self,message,detail="",context=None):return self._write("INFO",message,detail,context)
@@ -52,6 +51,4 @@ class ErrorLogService:
     def prune(self,days=30):
         if not self.path.exists():return
         lines=self.path.read_text(encoding="utf-8",errors="ignore").splitlines()
-        if len(lines)>10000:self.path.write_text("
-".join(lines[-10000:])+"
-",encoding="utf-8")
+        if len(lines)>10000:self.path.write_text("\\n".join(lines[-10000:])+"\\n",encoding="utf-8")
