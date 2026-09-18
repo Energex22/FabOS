@@ -80,9 +80,9 @@ def register_admin_routes(app, get_application, administrator_user):
             raise HTTPException(status_code=404, detail="User not found")
         if str(target["role"] or "").lower() == "owner" and str(user["role"] or "").lower() != "owner":
             raise HTTPException(status_code=403, detail="Only the owner can change the owner password")
-        # set_password() revokes all existing sessions as part of the password change.
         application.auth.set_password(user_id, payload.password)
-        return {"updated": True, "sessions_revoked": "all"}
+        revoked = application.auth.revoke_user_sessions(user_id)
+        return {"updated": True, "sessions_revoked": revoked}
 
     @app.post("/api/v1/admin/users/{user_id}/revoke-sessions")
     def revoke_admin_sessions(user_id: str, user=Depends(administrator_user), application=Depends(get_application)):
