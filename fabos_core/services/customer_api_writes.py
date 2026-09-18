@@ -162,6 +162,8 @@ def register_customer_write_routes(app, get_application, current_user):
         # quote requests behind.
         temp_path = None
         size = 0
+        quote_id = None
+        design_id = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
                 temp_path = tmp.name
@@ -196,10 +198,12 @@ def register_customer_write_routes(app, get_application, current_user):
         except HTTPException:
             raise
         except Exception as exc:
-            with application.database.connect() as conn:
-                conn.execute("DELETE FROM quote_designs WHERE quote_id=?",(quote_id,))
-                conn.execute("DELETE FROM designs WHERE id=?",(design_id,))
-                conn.commit()
+            if quote_id:
+                with application.database.connect() as conn:
+                    conn.execute("DELETE FROM quote_designs WHERE quote_id=?", (quote_id,))
+                    if design_id:
+                        conn.execute("DELETE FROM designs WHERE id=?", (design_id,))
+                    conn.commit()
             raise HTTPException(status_code=500, detail="The model could not be stored") from exc
         finally:
             try:
