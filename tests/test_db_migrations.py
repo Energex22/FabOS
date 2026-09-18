@@ -50,7 +50,8 @@ class MigrationRunnerTests(unittest.TestCase):
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )""")
-                c.execute("""CREATE TABLE payments(\n                    id TEXT PRIMARY KEY,\n                    invoice_id TEXT NOT NULL,\n                    amount_cents INTEGER NOT NULL,\n                    method TEXT,\n                    reference TEXT,\n                    notes TEXT,\n                    paid_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n                )""")\n                c.execute("ALTER TABLE fulfillments ADD COLUMN package_length_in REAL")
+                c.execute("""CREATE TABLE payments(\n                    id TEXT PRIMARY KEY,\n                    invoice_id TEXT NOT NULL,\n                    amount_cents INTEGER NOT NULL,\n                    method TEXT,\n                    reference TEXT,\n                    notes TEXT,\n                    paid_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,\n                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\n                )""")
+                c.execute("ALTER TABLE fulfillments ADD COLUMN package_length_in REAL")
                 c.commit()
             migrate(db)
             with db.connect() as c:
