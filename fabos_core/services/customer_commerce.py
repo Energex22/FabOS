@@ -200,5 +200,5 @@ class CustomerCommerceService:
             row = conn.execute("SELECT o.*,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=? AND o.customer_id=?", (order_id, customer["id"])).fetchone()
             if not row:
                 raise KeyError("Order not found")
-            try:\n                items = conn.execute("SELECT oi.*,p.name product_name,v.name variant_name FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id LEFT JOIN product_variants v ON v.id=oi.variant_id WHERE oi.order_id=? ORDER BY oi.rowid", (order_id,)).fetchall()\n            except Exception as exc:\n                if "no such table" not in str(exc).lower():\n                    raise\n                items = conn.execute("SELECT * FROM order_items WHERE order_id=? ORDER BY rowid", (order_id,)).fetchall()
+            items = conn.execute("SELECT oi.*,p.name product_name,v.name variant_name FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id LEFT JOIN product_variants v ON v.id=oi.variant_id WHERE oi.order_id=? ORDER BY oi.rowid", (order_id,)).fetchall()
         return row, items
