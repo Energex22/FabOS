@@ -48,7 +48,7 @@ def register_admin_routes(app, get_application, administrator_user):
             raise HTTPException(status_code=404, detail="User not found")
         summary = application.accounts.account_summary(user_id)
         return {
-            "user": {key: row[key] for key in ("id", "username", "email", "account_type", "active", "created_at", "updated_at", "last_login_at") if key in row.keys()},
+            "user": {key: row[key] for key in ("id", "username", "email", "account_type", "role", "active", "created_at", "updated_at", "last_login_at") if key in row.keys()},
             "customer": summary.get("customer"),
             "employee": summary.get("employee"),
             "permissions": sorted(application.permissions.permissions_for_user(user_id, row["account_type"])),
