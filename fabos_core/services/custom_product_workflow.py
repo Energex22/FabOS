@@ -30,8 +30,9 @@ class CustomProductWorkflowService:
             raise ValueError("Invalid storefront visibility")
 
         with self.database.connect() as conn:
-            link = conn.execute("""SELECT q.id quote_id,q.customer_id,q.quote_number,qd.design_id
+            link = conn.execute("""SELECT q.id quote_id,q.customer_id,q.quote_number,qd.design_id,d.product_id
                 FROM quote_designs qd JOIN quotes q ON q.id=qd.quote_id
+                JOIN designs d ON d.id=qd.design_id
                 WHERE qd.quote_id=?""", (quote_id,)).fetchone()
         if not link:
             raise KeyError("No uploaded design is attached to this quote")
@@ -45,6 +46,7 @@ class CustomProductWorkflowService:
         if visibility == "published" and license_status in {"blocked", "prohibited", "commercially_prohibited", "review_required"}:
             raise ValueError("A published product needs a commercially cleared license status")
 
+        product_id = link["product_id"] or str(uuid.uuid4())
         product_id = self.products.save({
             "sku": values.get("sku") or "CUSTOM-%s" % uuid.uuid4().hex[:8].upper(),
             "name": name,
