@@ -7,6 +7,7 @@ class FulfillmentService:
 
     METHODS = ("pickup", "shipping")
     STATUSES = ("pending", "ready_for_pickup", "shipped", "delivered", "picked_up")
+    TERMINAL_STATUSES = ("delivered", "picked_up")
 
     def __init__(self, db, accounts=None, permissions=None):
         self.db = db
@@ -144,6 +145,10 @@ class FulfillmentService:
         if status not in self.STATUSES:
             raise ValueError("Unsupported fulfillment status")
         fid = self.ensure(order_id, method)
+        with self.db.connect() as c:
+            current = c.execute("SELECT method,status FROM fulfillments WHERE id=?", (fid,)).fetchone()
+        if current and str(current["status"] or "pending").lower() in self.TERMINAL_STATUSES and status != current["status"]:
+            raise ValueError("Cannot move a completed fulfillment back to an earlier status")
         now = datetime.now().isoformat(timespec="seconds")
         shipped = now if status == "shipped" else None
         delivered = now if status == "delivered" else None
