@@ -2,8 +2,6 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-
 from fabos_core.services.customer_commerce import CustomerCommerceService
 
 
@@ -15,6 +13,8 @@ class _Db:
         conn.row_factory = sqlite3.Row
         conn.executescript("""
             CREATE TABLE customers(id TEXT PRIMARY KEY,name TEXT,email TEXT,phone TEXT,notes TEXT);
+            CREATE TABLE products(id TEXT PRIMARY KEY,name TEXT,price_cents INTEGER,estimated_minutes INTEGER,estimated_filament_g REAL);
+            CREATE TABLE product_variants(id TEXT PRIMARY KEY,product_id TEXT,name TEXT,material TEXT,color TEXT,price_cents INTEGER,estimated_minutes INTEGER,estimated_filament_g REAL,active INTEGER);
             CREATE TABLE orders(
                 id TEXT PRIMARY KEY, order_number TEXT UNIQUE, customer_id TEXT, quote_id TEXT,
                 status TEXT, due_at TEXT, total_cents INTEGER, tax_cents INTEGER DEFAULT 0,
@@ -40,6 +40,8 @@ class _Db:
                 unit_price_cents INTEGER, pricing_mode TEXT, calculation_json TEXT
             );
         """)
+        conn.execute("INSERT INTO products VALUES(?,?,?,?,?)", ("product-1", "Cable Dock", 1800, 45, 80))
+        conn.execute("INSERT INTO product_variants VALUES(?,?,?,?,?,?,?,?,?)", ("variant-black", "product-1", "Black PETG", "PETG", "Black", 2000, 50, 85, 1))
         conn.commit()
         conn.close()
 
