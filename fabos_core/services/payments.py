@@ -1,4 +1,3 @@
-import sqlite3
 """Provider-neutral payment orchestration for FabOS.
 
 FabOS owns the order/payment record while gateway adapters own provider-specific
@@ -13,6 +12,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+import sqlite3
 
 
 class PaymentProviderNotConfigured(RuntimeError):
