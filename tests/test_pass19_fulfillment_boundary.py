@@ -85,6 +85,12 @@ class Pass19FulfillmentBoundaryTests(unittest.TestCase):
         self.assertEqual(row["status"], "shipped")
         self.assertEqual(fulfillment["tracking_number"], "TRACK-1")
 
+    def test_invalid_fulfillment_method_and_status_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "method"):
+            self.fulfillment.ensure("order1", "teleport")
+        with self.assertRaisesRegex(ValueError, "status"):
+            self.fulfillment.save("order1", "shipping", "lost")
+
     def test_fulfillment_manage_override_is_enforced(self):
         self.permissions.set_user_permission("employee", "fulfillment.manage", False)
         with self.assertRaises(PermissionError):
