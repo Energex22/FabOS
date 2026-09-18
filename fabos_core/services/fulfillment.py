@@ -6,7 +6,7 @@ class FulfillmentService:
     """Fulfillment business service plus an actor-aware access boundary."""
 
     METHODS = ("pickup", "shipping")
-    STATUSES = ("pending", "shipped", "delivered", "picked_up")
+    STATUSES = ("pending", "ready_for_pickup", "shipped", "delivered", "picked_up")
 
     def __init__(self, db, accounts=None, permissions=None):
         self.db = db
