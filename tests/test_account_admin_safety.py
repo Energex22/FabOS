@@ -53,6 +53,14 @@ class AccountAdminSafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "owner account"):
             self.service.update_account("admin-1", account_type="employee")
 
+    def test_owner_cannot_be_linked_as_customer(self):
+        with self.assertRaisesRegex(ValueError, "owner account"):
+            self.service.link_customer("admin-1", "missing-customer")
+
+    def test_owner_cannot_be_changed_to_employee_profile(self):
+        with self.assertRaisesRegex(ValueError, "owner account"):
+            self.service.set_employee_profile("admin-1")
+
     def test_last_active_administrator_cannot_be_disabled(self):
         with self.assertRaisesRegex(ValueError, "last active administrator"):
             self.service.update_account("admin-1", active=False)
