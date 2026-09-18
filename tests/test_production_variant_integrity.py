@@ -154,7 +154,7 @@ class ProductionVariantIntegrityTests(unittest.TestCase):
                 c.execute("INSERT INTO product_variants(id,product_id,name,price_cents,active) VALUES(?,?,?,?,1)", (variant_id, product_id, "Green", 1200))
                 c.execute("INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,?)", (order_id, "O-REPRINT", "qc", 1200))
                 c.execute("INSERT INTO printers(id,name,status) VALUES(?,?,?)", (printer_id, "Test Printer", "idle"))
-                c.execute("INSERT INTO filament_spools(id,material,color,active) VALUES(?,?,?,1)", (spool_id, "PETG", "Green"))
+                c.execute("INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)", (spool_id, "PETG", "Green", 1000, 1000))
                 c.execute("INSERT INTO print_jobs(id,order_id,product_id,variant_id,printer_id,spool_id,status,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?)",
                           (job_id, order_id, product_id, variant_id, printer_id, spool_id, "failed", 10, 5))
                 c.commit()
