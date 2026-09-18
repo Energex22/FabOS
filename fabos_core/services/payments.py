@@ -158,7 +158,7 @@ class PaymentService:
         if str(order["status"] or "").lower() in {"cancelled","completed"}: raise ValueError("Payment is not available for this order")
         invoice_id,_=self.invoices.create_from_order(order_id)
         provider=self._build_provider("stripe")
-        payment_id,amount_cents,metadata,attempt_ready=self._prepare_transaction(order,customer["id"],invoice_id,provider.name,"customer-web")
+        payment_id,amount_cents,metadata,attempt_ready=self._prepare_transaction(order,customer["id"],invoice_id,provider.name,"website")
         if not attempt_ready: return self.get(payment_id)
         try: result=provider.create_checkout(payment_id=payment_id,amount_cents=amount_cents,currency="USD",metadata=metadata)
         except PaymentProviderNotConfigured:
