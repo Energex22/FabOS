@@ -8,8 +8,11 @@ Administrator routes are separately protected and are not part of the customer U
 import os
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
+from pathlib import Path
+import os
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -86,7 +89,15 @@ def _public_product(row: Any, application: FabOSApplication, storefront: Optiona
             item["name"] = storefront["customer_title"]
         if storefront.get("customer_description"):
             item["description"] = storefront["customer_description"]
-    item["images"] = [_pick(image, ("id", "path", "is_primary", "alt_text")) for image in application.products.images(row["id"])]
+    item["images"] = [
+        {
+            "id": image["id"],
+            "url": "/api/v1/catalog/%s/images/%s" % (row["id"], image["id"]),
+            "is_primary": bool(image["is_primary"]),
+            "alt_text": image["alt_text"],
+        }
+        for image in application.products.images(row["id"])
+    ]
     item["variants"] = [_pick(variant, ("id", "name", "material", "color", "price_cents", "active")) for variant in application.products.variants(row["id"])]
     item["storefront"] = {
         "origin": storefront.get("origin_type", "catalog_import") if storefront else "catalog_import",
@@ -179,6 +190,44 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         if not row or not application.products.is_customer_eligible(product_id):
             raise HTTPException(status_code=404, detail="Product not found")
         return _public_product(row, application, application.products.storefront_state(product_id))
+
+    @app.get("/api/v1/catalog/{product_id}/images/{image_id}")
+    def catalog_product_image(product_id: str, image_id: str, application: FabOSApplication = Depends(get_application)):
+        row = application.products.get(product_id)
+        if not row or not application.products.is_customer_eligible(product_id):
+            raise HTTPException(status_code=404, detail="Product not found")
+        with application.database.connect() as conn:
+            image = conn.execute(
+                "SELECT path FROM product_images WHERE id=? AND product_id=?",
+                (image_id, product_id),
+            ).fetchone()
+        if not image:
+            raise HTTPException(status_code=404, detail="Image not found")
+        raw = str(image["path"] or "").replace("\\", "/").strip()
+        if not raw or raw.lower().startswith(("http://", "https://", "data:")):
+            raise HTTPException(status_code=404, detail="Image file not available")
+        project_root = Path(__file__).resolve().parents[1]
+        data_root = Path(application.settings.data_dir).resolve()
+        candidates = []
+        path = Path(raw)
+        if path.is_absolute():
+            candidates.append(path)
+        else:
+            candidates.extend([project_root / raw, project_root / "data" / raw, data_root / raw])
+            if raw.startswith("Catalog_Images/"):
+                candidates.append(project_root / "data" / "catalog" / raw)
+        allowed_roots = [project_root.resolve(), data_root]
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve()
+                if not resolved.is_file():
+                    continue
+                if not any(os.path.commonpath([str(resolved), str(root)]) == str(root) for root in allowed_roots):
+                    continue
+                return FileResponse(str(resolved))
+            except (OSError, ValueError):
+                continue
+        raise HTTPException(status_code=404, detail="Image file not available")
 
     @app.get("/api/v1/admin/catalog")
     def admin_catalog(q: str = "", category: str = "All", sort: str = "name", desc: bool = False, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
