@@ -85,6 +85,31 @@ class Pass19FulfillmentBoundaryTests(unittest.TestCase):
         self.assertEqual(row["status"], "shipped")
         self.assertEqual(fulfillment["tracking_number"], "TRACK-1")
 
+    def test_invalid_fulfillment_method_and_status_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "method"):
+            self.fulfillment.ensure("order1", "teleport")
+        with self.assertRaisesRegex(ValueError, "status"):
+            self.fulfillment.save("order1", "shipping", "lost")
+
+    def test_completed_fulfillment_cannot_regress(self):
+        self.fulfillment.save_for_user("employee", "order1", "shipping", "delivered", tracking="TRACK-2")
+        with self.assertRaisesRegex(ValueError, "completed fulfillment"):
+            self.fulfillment.save_for_user("employee", "order1", "shipping", "shipped", tracking="TRACK-3")
+
+    def test_pickup_completion_cannot_become_shipping_pending(self):
+        self.fulfillment.save_for_user("employee", "order1", "pickup", "picked_up")
+        with self.assertRaisesRegex(ValueError, "completed fulfillment"):
+            self.fulfillment.save_for_user("employee", "order1", "shipping", "pending")
+
+    def test_fulfillment_method_cannot_change_after_start(self):
+        self.fulfillment.save_for_user("employee", "order1", "shipping", "shipped", tracking="TRACK-4")
+        with self.assertRaisesRegex(ValueError, "method"):
+            self.fulfillment.save_for_user("employee", "order1", "pickup", "shipped")
+
+    def test_fulfillment_method_can_be_set_before_start(self):
+        fid = self.fulfillment.save_for_user("employee", "order1", "shipping", "pending")
+        self.assertEqual(self.fulfillment.save_for_user("employee", "order1", "pickup", "pending"), fid)
+
     def test_fulfillment_manage_override_is_enforced(self):
         self.permissions.set_user_permission("employee", "fulfillment.manage", False)
         with self.assertRaises(PermissionError):

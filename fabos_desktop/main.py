@@ -24,19 +24,19 @@ from fabos_desktop.product_print_ui import ProductPrintMixin
 
 
 COLORS = {
-    "bg": "#0a0b12",
-    "sidebar": "#11121c",
-    "surface": "#151725",
-    "surface_alt": "#1b1d2d",
-    "border": "#292c40",
+    "bg": "#08100d",
+    "sidebar": "#0d1713",
+    "surface": "#12201a",
+    "surface_alt": "#172820",
+    "border": "#294136",
     "text": "#f5f3ff",
-    "muted": "#9a9daf",
-    "purple": "#8b5cf6",
-    "purple_dark": "#6d42d8",
+    "muted": "#91a49b",
+    "green": "#22c55e",
+    "green_dark": "#168a4a",
     "blue": "#38bdf8",
-    "green": "#34d399",
-    "orange": "#fb923c",
-    "red": "#f87171",
+    "mint": "#34d399",
+    "orange": "#f59e0b",
+    "red": "#ef4444",
 }
 
 
@@ -45,7 +45,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
 
     def __init__(self) -> None:
         super().__init__()
-        self.title("WireVault FabOS")
+        self.title("FabVex FabOS")
         self.geometry("1360x820")
         self.minsize(1040, 680)
         self.configure(bg=COLORS["bg"])
@@ -232,7 +232,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             )
             style.map(
                 tree_style,
-                background=[("selected", COLORS["purple_dark"]),
+                background=[("selected", COLORS["green_dark"]),
                             ("!selected", COLORS["surface"])],
                 foreground=[("selected", "#ffffff"),
                             ("!selected", COLORS["text"])],
@@ -247,7 +247,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             )
             style.map(
                 heading_style,
-                background=[("active", COLORS["purple_dark"]),
+                background=[("active", COLORS["green_dark"]),
                             ("!active", COLORS["surface_alt"])],
                 foreground=[("active", "#ffffff"),
                             ("!active", "#ffffff")],
@@ -255,10 +255,10 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         style.configure(
             "Purple.Horizontal.TProgressbar",
             troughcolor=COLORS["surface_alt"],
-            background=COLORS["purple"],
+            background=COLORS["green"],
             bordercolor=COLORS["surface_alt"],
-            lightcolor=COLORS["purple"],
-            darkcolor=COLORS["purple"],
+            lightcolor=COLORS["green"],
+            darkcolor=COLORS["green"],
         )
         # Force readable foregrounds across native ttk widgets on the dark theme.
         style.configure("TCombobox", fieldbackground=COLORS["surface_alt"],
@@ -266,12 +266,12 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                         arrowcolor=COLORS["text"], bordercolor=COLORS["border"])
         style.map("TCombobox", fieldbackground=[("readonly", COLORS["surface_alt"])],
                   foreground=[("readonly", COLORS["text"])],
-                  selectbackground=[("readonly", COLORS["purple_dark"])],
+                  selectbackground=[("readonly", COLORS["green_dark"])],
                   selectforeground=[("readonly", "white")])
         style.configure("TNotebook", background=COLORS["bg"], borderwidth=0)
         style.configure("TNotebook.Tab", background=COLORS["surface_alt"],
                         foreground=COLORS["text"], padding=(14, 8))
-        style.map("TNotebook.Tab", background=[("selected", COLORS["purple_dark"])],
+        style.map("TNotebook.Tab", background=[("selected", COLORS["green_dark"])],
                   foreground=[("selected", "white")])
         style.configure("Vertical.TScrollbar", background=COLORS["surface_alt"],
                         troughcolor=COLORS["surface"], arrowcolor=COLORS["text"])
@@ -279,7 +279,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                         troughcolor=COLORS["surface"], arrowcolor=COLORS["text"])
         self.option_add("*TCombobox*Listbox.background", COLORS["surface_alt"])
         self.option_add("*TCombobox*Listbox.foreground", COLORS["text"])
-        self.option_add("*TCombobox*Listbox.selectBackground", COLORS["purple_dark"])
+        self.option_add("*TCombobox*Listbox.selectBackground", COLORS["green_dark"])
         self.option_add("*TCombobox*Listbox.selectForeground", "white")
 
     def _build_shell(self) -> None:
@@ -290,11 +290,11 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         brand = tk.Frame(self.sidebar, bg=COLORS["sidebar"])
         brand.pack(fill="x", padx=22, pady=(24, 26))
         tk.Label(
-            brand, text="WIREVAULT", bg=COLORS["sidebar"], fg=COLORS["text"],
+            brand, text="FABVEX", bg=COLORS["sidebar"], fg=COLORS["text"],
             font=("Segoe UI", 14, "bold"), anchor="w"
         ).pack(fill="x")
         tk.Label(
-            brand, text="FABRICATION OS", bg=COLORS["sidebar"], fg=COLORS["purple"],
+            brand, text="FABRICATION OS", bg=COLORS["sidebar"], fg=COLORS["green"],
             font=("Segoe UI", 9, "bold"), anchor="w"
         ).pack(fill="x", pady=(3, 0))
 
@@ -353,7 +353,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         search_wrap.pack(side="left", padx=(0, 12), pady=8)
         self.search_var = tk.StringVar()
         search = tk.Entry(search_wrap, textvariable=self.search_var, bg=COLORS["surface"],
-                          fg=COLORS["text"], insertbackground=COLORS["text"], selectbackground=COLORS["purple_dark"], selectforeground="white", bd=0,
+                          fg=COLORS["text"], insertbackground=COLORS["text"], selectbackground=COLORS["green_dark"], selectforeground="white", bd=0,
                           font=("Segoe UI", 10), width=28)
         search.pack(side="left", padx=12, pady=9)
         search.bind("<Return>", lambda _event: self.global_search())
@@ -368,8 +368,8 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         tk.Button(tools, text="🔒  Lock", bg=COLORS["surface_alt"], fg=COLORS["text"], bd=0,
                   activebackground=COLORS["border"], activeforeground="white",
                   font=("Segoe UI",10,"bold"), padx=12,pady=10,command=self._lock_console_now).pack(side="left",pady=8,padx=(0,8))
-        tk.Button(tools, text="+  New", bg=COLORS["purple"], fg="white", bd=0,
-                  activebackground=COLORS["purple_dark"], activeforeground="white",
+        tk.Button(tools, text="+  New", bg=COLORS["green"], fg="white", bd=0,
+                  activebackground=COLORS["green_dark"], activeforeground="white",
                   font=("Segoe UI", 10, "bold"), padx=18, pady=10,
                   command=self.quick_add).pack(side="left", pady=8)
 
@@ -415,9 +415,9 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             selected = page == page_name
             button = tk.Button(
                 tabs, text=page, bd=0, relief="flat",
-                bg=COLORS["purple_dark"] if selected else COLORS["surface_alt"],
+                bg=COLORS["green_dark"] if selected else COLORS["surface_alt"],
                 fg="white" if selected else COLORS["muted"],
-                activebackground=COLORS["purple"] if selected else COLORS["border"],
+                activebackground=COLORS["green"] if selected else COLORS["border"],
                 activeforeground="white",
                 font=("Segoe UI", 9, "bold" if selected else "normal"),
                 padx=16, pady=8,
@@ -445,7 +445,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         info=self.core.diagnostics.version_info()
         metrics=tk.Frame(self.content,bg=COLORS["bg"]);metrics.pack(fill="x",pady=(4,10))
         cards=[
-            ("FabOS",info["fabos_version"],COLORS["purple"],"Application version"),
+            ("FabOS",info["fabos_version"],COLORS["green"],"Application version"),
             ("Schema",info["schema_version"],COLORS["blue"],"Database migration version"),
             ("Python",info["python"],COLORS["green"],"Runtime"),
             ("Log Entries",len(self.core.error_log.recent(500)),COLORS["orange"],"Recent application log"),
@@ -522,7 +522,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         self.page_subtitle.configure(text=subtitles.get(page_name, "FabOS workspace"))
         for name, button in self.nav_buttons.items():
             if name == workspace:
-                button.configure(bg=COLORS["purple_dark"], fg="white", font=("Segoe UI", 10, "bold"))
+                button.configure(bg=COLORS["green_dark"], fg="white", font=("Segoe UI", 10, "bold"))
             else:
                 button.configure(bg=COLORS["sidebar"], fg=COLORS["muted"], font=("Segoe UI", 10))
 
@@ -680,7 +680,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         low_threshold=self.core.shop_settings.get("filament_low_threshold_g","250")
         cards=[
             ("Open Orders",summary.get("orders",0),COLORS["blue"],"Active customer work","Orders"),
-            ("Queued Jobs",summary.get("queued_jobs",0),COLORS["purple"],"Waiting for production","Production"),
+            ("Queued Jobs",summary.get("queued_jobs",0),COLORS["green"],"Waiting for production","Production"),
             ("Needs Attention",sum(1 for x in items if x["severity"] in ("high","medium")),COLORS["orange"],"Action Center items","Dashboard"),
             ("Printers",summary.get("printers",0),COLORS["green"],"Configured machines","Printers"),
             ("Low Filament",summary.get("low_spools",0),COLORS["red"],"Below %sg"%low_threshold,"Filament"),
@@ -773,7 +773,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             temp="%.0f° / %.0f°"%(float(p["nozzle_temp"] or 0),float(p["bed_temp"] or 0))
             leftsec=float(p["print_time_left_seconds"] or 0)
             if leftsec>0:temp+=" • %dh %02dm left"%(int(leftsec)//3600,(int(leftsec)%3600)//60)
-            color=COLORS["green"] if str(p["status"]).lower() in ("idle","online","operational") else (COLORS["purple"] if str(p["status"]).lower()=="printing" else COLORS["orange"])
+            color=COLORS["green"] if str(p["status"]).lower() in ("idle","online","operational") else (COLORS["green"] if str(p["status"]).lower()=="printing" else COLORS["orange"])
             tk.Label(line,text=temp,bg=COLORS["surface_alt"],fg=color,font=("Segoe UI",8,"bold"),padx=8,pady=5).pack(side="right")
 
     def _build_activity(self,parent) -> None:
@@ -793,7 +793,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         for r in rows:
             row=tk.Frame(holder,bg=COLORS["surface"],cursor="hand2");row.pack(fill="x",padx=10,pady=5)
             title=(r["title"] if "title" in r.keys() else str(r["event_type"]).replace("."," ").title())
-            tk.Label(row,text="●",bg=COLORS["surface"],fg=COLORS["purple"]).pack(side="left",padx=(0,7))
+            tk.Label(row,text="●",bg=COLORS["surface"],fg=COLORS["green"]).pack(side="left",padx=(0,7))
             tk.Label(row,text=title,bg=COLORS["surface"],fg=COLORS["text"],font=("Segoe UI",8),anchor="w").pack(side="left",fill="x",expand=True)
             tk.Label(row,text=str(r["created_at"])[:16],bg=COLORS["surface"],fg=COLORS["muted"],font=("Segoe UI",7)).pack(side="right")
 
@@ -1025,7 +1025,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         for index, (label, command) in enumerate(actions):
             button = tk.Button(
                 grid, text=label, command=command, bg=COLORS["surface_alt"], fg=COLORS["text"],
-                activebackground=COLORS["purple_dark"], activeforeground="white",
+                activebackground=COLORS["green_dark"], activeforeground="white",
                 bd=0, relief="flat", font=("Segoe UI", 9, "bold"), pady=13
             )
             button.grid(row=index // 2, column=index % 2, sticky="nsew", padx=5, pady=5)
@@ -1037,8 +1037,8 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
     def _build_module_page(self, page_name: str) -> None:
         toolbar = tk.Frame(self.content, bg=COLORS["bg"])
         toolbar.pack(fill="x", pady=(4, 12))
-        tk.Button(toolbar, text="+ Add Record", bg=COLORS["purple"], fg="white", bd=0,
-                  activebackground=COLORS["purple_dark"], activeforeground="white",
+        tk.Button(toolbar, text="+ Add Record", bg=COLORS["green"], fg="white", bd=0,
+                  activebackground=COLORS["green_dark"], activeforeground="white",
                   font=("Segoe UI", 9, "bold"), padx=16, pady=9,
                   command=lambda: self.publish_test_event(page_name + ".add")).pack(side="left")
         tk.Button(toolbar, text="Refresh", bg=COLORS["surface_alt"], fg=COLORS["text"], bd=0,
@@ -1074,8 +1074,8 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
     def _build_customers_page(self) -> None:
         toolbar = tk.Frame(self.content, bg=COLORS["bg"])
         toolbar.pack(fill="x", pady=(4, 10))
-        tk.Button(toolbar, text="+ Add Customer", bg=COLORS["purple"], fg="white", bd=0,
-                  activebackground=COLORS["purple_dark"], activeforeground="white",
+        tk.Button(toolbar, text="+ Add Customer", bg=COLORS["green"], fg="white", bd=0,
+                  activebackground=COLORS["green_dark"], activeforeground="white",
                   font=("Segoe UI", 9, "bold"), padx=15, pady=9,
                   command=self._add_customer).pack(side="left")
         for label, command in (("Edit", self._edit_customer), ("Details", self._customer_details),
@@ -1092,11 +1092,11 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                  font=("Segoe UI", 9)).pack(side="left")
         self.customer_query = tk.StringVar()
         entry = tk.Entry(row, textvariable=self.customer_query, bg=COLORS["surface_alt"],
-                         fg=COLORS["text"], insertbackground=COLORS["text"], selectbackground=COLORS["purple_dark"], selectforeground="white", relief="flat",
+                         fg=COLORS["text"], insertbackground=COLORS["text"], selectbackground=COLORS["green_dark"], selectforeground="white", relief="flat",
                          width=38, font=("Segoe UI", 9))
         entry.pack(side="left", padx=(8, 14), ipady=6)
         entry.bind("<KeyRelease>", lambda _e: self._refresh_customers())
-        self.customer_count = tk.Label(row, text="", bg=COLORS["surface"], fg=COLORS["purple"],
+        self.customer_count = tk.Label(row, text="", bg=COLORS["surface"], fg=COLORS["green"],
                                        font=("Segoe UI", 9, "bold"))
         self.customer_count.pack(side="right")
 
@@ -1176,12 +1176,12 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                      font=("Segoe UI",9)).pack(fill="x",padx=18,pady=(14,4))
             var=tk.StringVar(value=(record[key] if record and record[key] else "")); fields[key]=var
             tk.Entry(form,textvariable=var,bg=COLORS["surface_alt"],fg=COLORS["text"],
-                     insertbackground=COLORS["text"],selectbackground=COLORS["purple_dark"],
+                     insertbackground=COLORS["text"],selectbackground=COLORS["green_dark"],
                      selectforeground="white",relief="flat",font=("Segoe UI",10)).pack(fill="x",padx=18,ipady=7)
         tk.Label(form,text="Customer Notes / Preferences",bg=COLORS["surface"],fg=COLORS["muted"],
                  anchor="w",font=("Segoe UI",9)).pack(fill="x",padx=18,pady=(14,4))
         notes=tk.Text(form,height=10,bg=COLORS["surface_alt"],fg=COLORS["text"],
-                      insertbackground=COLORS["text"],selectbackground=COLORS["purple_dark"],
+                      insertbackground=COLORS["text"],selectbackground=COLORS["green_dark"],
                       selectforeground="white",relief="flat",wrap="word",font=("Segoe UI",9))
         notes.pack(fill="both",expand=True,padx=18,pady=(0,16))
         if record: notes.insert("1.0",record["notes"] or "")
@@ -1193,7 +1193,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             except Exception as exc:
                 messagebox.showerror("Could not save customer",str(exc),parent=win); return
             win.destroy(); self._refresh_customers()
-        tk.Button(buttons,text="Save Customer",command=save,bg=COLORS["purple"],fg="white",bd=0,
+        tk.Button(buttons,text="Save Customer",command=save,bg=COLORS["green"],fg="white",bd=0,
                   padx=18,pady=10,font=("Segoe UI",9,"bold")).pack(side="right")
         tk.Button(buttons,text="Cancel",command=win.destroy,bg=COLORS["surface_alt"],fg=COLORS["text"],
                   bd=0,padx=18,pady=10).pack(side="right",padx=(0,8))
@@ -1242,8 +1242,8 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
     def _build_products_page(self) -> None:
         toolbar = tk.Frame(self.content, bg=COLORS["bg"])
         toolbar.pack(fill="x", pady=(4, 10))
-        tk.Button(toolbar, text="▶ Print", bg=COLORS["purple"], fg="white", bd=0,
-                  activebackground=COLORS["purple_dark"], activeforeground="white",
+        tk.Button(toolbar, text="▶ Print", bg=COLORS["green"], fg="white", bd=0,
+                  activebackground=COLORS["green_dark"], activeforeground="white",
                   font=("Segoe UI", 9, "bold"), padx=16, pady=9,
                   command=self._print_selected_product).pack(side="left")
         tk.Button(toolbar, text="+ Add Product", bg=COLORS["surface_alt"], fg=COLORS["text"], bd=0,
@@ -1261,7 +1261,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                              activebackground=COLORS["border"], activeforeground="white",
                              bd=0, relief="flat", font=("Segoe UI",9), padx=13, pady=9)
         menu = tk.Menu(more, tearoff=0, bg=COLORS["surface_alt"], fg=COLORS["text"],
-                       activebackground=COLORS["purple_dark"], activeforeground="white")
+                       activebackground=COLORS["green_dark"], activeforeground="white")
         menu.add_command(label="Full Details", command=self._product_details)
         menu.add_command(label="Preview Image", command=self._product_preview)
         menu.add_command(label="Card Gallery", command=self._product_card_gallery)
@@ -1297,7 +1297,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         tk.Label(row, text="Search", bg=COLORS["surface"], fg=COLORS["muted"], font=("Segoe UI", 9)).pack(side="left")
         self.product_query = tk.StringVar()
         entry = tk.Entry(row, textvariable=self.product_query, bg=COLORS["surface_alt"], fg=COLORS["text"],
-                         insertbackground=COLORS["text"], selectbackground=COLORS["purple_dark"], selectforeground="white", relief="flat", width=31, font=("Segoe UI", 9))
+                         insertbackground=COLORS["text"], selectbackground=COLORS["green_dark"], selectforeground="white", relief="flat", width=31, font=("Segoe UI", 9))
         entry.pack(side="left", padx=(7, 16), ipady=6)
         entry.bind("<KeyRelease>", lambda _e: self._refresh_products())
         tk.Label(row, text="Category", bg=COLORS["surface"], fg=COLORS["muted"], font=("Segoe UI", 9)).pack(side="left")
@@ -1310,7 +1310,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         license_box = ttk.Combobox(row, textvariable=self.product_license,
                                    values=["All", "verified", "review_required"], state="readonly", width=17)
         license_box.pack(side="left", padx=(7, 10)); license_box.bind("<<ComboboxSelected>>", lambda _e: self._refresh_products())
-        self.product_count = tk.Label(row, text="", bg=COLORS["surface"], fg=COLORS["purple"], font=("Segoe UI", 9, "bold"))
+        self.product_count = tk.Label(row, text="", bg=COLORS["surface"], fg=COLORS["green"], font=("Segoe UI", 9, "bold"))
         self.product_count.pack(side="right")
 
         split = tk.PanedWindow(self.content, orient="horizontal", bg=COLORS["bg"],
@@ -1364,9 +1364,9 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         for value,button in self.product_tab_buttons.items():
             selected=value==active
             button.configure(
-                bg=COLORS["purple"] if selected else COLORS["surface_alt"],
+                bg=COLORS["green"] if selected else COLORS["surface_alt"],
                 fg="white" if selected else COLORS["text"],
-                activebackground=COLORS["purple_dark"] if selected else COLORS["border"],
+                activebackground=COLORS["green_dark"] if selected else COLORS["border"],
                 activeforeground="white"
             )
 
@@ -1555,8 +1555,8 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             pass
 
         tk.Button(panel, text="▶ Print" if print_status.get('ready') else "Import STL / G-code",
-                  bg=COLORS["purple"], fg="white", bd=0,
-                  activebackground=COLORS["purple_dark"], activeforeground="white",
+                  bg=COLORS["green"], fg="white", bd=0,
+                  activebackground=COLORS["green_dark"], activeforeground="white",
                   padx=12, pady=8,
                   command=self._print_selected_product if print_status.get('ready') else self._import_downloaded_product_model).pack(fill="x", pady=(14, 5))
         tk.Button(panel, text="Import / Replace Print File", bg=COLORS["surface_alt"], fg=COLORS["text"], bd=0,
@@ -1948,7 +1948,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                     shown=True
                 except Exception:pass
             if not shown:
-                tk.Label(card,text="3D",bg=COLORS["surface_alt"],fg=COLORS["purple"],
+                tk.Label(card,text="3D",bg=COLORS["surface_alt"],fg=COLORS["green"],
                          font=("Segoe UI",28,"bold"),height=4).pack(fill="x",padx=10,pady=(10,6))
             tk.Label(card,text=row["name"],bg=COLORS["surface"],fg=COLORS["text"],
                      font=("Segoe UI",11,"bold"),wraplength=260,justify="left").pack(anchor="w",padx=12)
@@ -1962,7 +1962,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             tk.Button(buttons,text="Details",bg=COLORS["surface_alt"],fg=COLORS["text"],bd=0,
                       command=lambda pid=row["id"]:open_product(pid,False)).pack(side="left")
             if info.get("ready"):
-                tk.Button(buttons,text="Print",bg=COLORS["purple"],fg="white",bd=0,
+                tk.Button(buttons,text="Print",bg=COLORS["green"],fg="white",bd=0,
                           command=lambda pid=row["id"]:open_product(pid,True)).pack(side="right")
         if not rows:
             tk.Label(holder,text="No products in this Catalog view.",bg=COLORS["bg"],fg=COLORS["muted"]).pack(padx=20,pady=20)
@@ -1975,7 +1975,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             self.product_table.selection_set(row)
             self._embedded_product_details(row)
         menu = tk.Menu(self, tearoff=0, bg=COLORS["surface_alt"], fg=COLORS["text"],
-                       activebackground=COLORS["purple_dark"], activeforeground="white")
+                       activebackground=COLORS["green_dark"], activeforeground="white")
         menu.add_command(label="Print", command=self._print_selected_product)
         menu.add_command(label="Edit", command=self._edit_product)
         menu.add_command(label="Full Details", command=self._product_details)
@@ -2024,12 +2024,12 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             tk.Label(form, text=label, bg=COLORS["surface"], fg=COLORS["muted"], anchor="w", font=("Segoe UI",9)).pack(fill="x", padx=18, pady=(12,4))
             var = tk.StringVar()
             fields[key] = var
-            tk.Entry(form, textvariable=var, bg=COLORS["surface_alt"], fg=COLORS["text"], insertbackground=COLORS["text"], selectbackground=COLORS["purple_dark"], selectforeground="white", relief="flat", font=("Segoe UI",10)).pack(fill="x", padx=18, ipady=7)
+            tk.Entry(form, textvariable=var, bg=COLORS["surface_alt"], fg=COLORS["text"], insertbackground=COLORS["text"], selectbackground=COLORS["green_dark"], selectforeground="white", relief="flat", font=("Segoe UI",10)).pack(fill="x", padx=18, ipady=7)
         tk.Label(form, text="Commercial License Status", bg=COLORS["surface"], fg=COLORS["muted"], anchor="w", font=("Segoe UI",9)).pack(fill="x", padx=18, pady=(12,4))
         status = tk.StringVar(value="review_required"); fields["license_status"] = status
         ttk.Combobox(form, textvariable=status, values=["verified","review_required"], state="readonly").pack(fill="x", padx=18)
         tk.Label(form, text="Description / Customization / Notes", bg=COLORS["surface"], fg=COLORS["muted"], anchor="w", font=("Segoe UI",9)).pack(fill="x", padx=18, pady=(12,4))
-        description = tk.Text(form, height=7, bg=COLORS["surface_alt"], fg=COLORS["text"], insertbackground=COLORS["text"], selectbackground=COLORS["purple_dark"], selectforeground="white", relief="flat", wrap="word", font=("Segoe UI",9))
+        description = tk.Text(form, height=7, bg=COLORS["surface_alt"], fg=COLORS["text"], insertbackground=COLORS["text"], selectbackground=COLORS["green_dark"], selectforeground="white", relief="flat", wrap="word", font=("Segoe UI",9))
         description.pack(fill="x", padx=18, pady=(0,14))
         if record:
             for key in ("sku","name","category","designer","source_url","license_name","license_status"):
@@ -2049,7 +2049,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             except Exception as exc:
                 messagebox.showerror("Could not save product", str(exc), parent=win); return
             win.destroy(); self._refresh_products()
-        tk.Button(buttons, text="Save Product", command=save, bg=COLORS["purple"], fg="white", bd=0, padx=18, pady=10, font=("Segoe UI",9,"bold")).pack(side="right")
+        tk.Button(buttons, text="Save Product", command=save, bg=COLORS["green"], fg="white", bd=0, padx=18, pady=10, font=("Segoe UI",9,"bold")).pack(side="right")
         tk.Button(buttons, text="Cancel", command=win.destroy, bg=COLORS["surface_alt"], fg=COLORS["text"], bd=0, padx=18, pady=10).pack(side="right", padx=(0,8))
 
     def _resolve_product_image_path(self, image_row):
@@ -2169,7 +2169,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         overview_image.pack(fill="both", expand=True)
         self._render_image_panel(overview_image, self._preferred_product_image(product_id), record["name"], max_size=(350, 420))
         tk.Button(left, text="Manage Images", command=lambda: self._product_image_manager(product_id, record["name"], win),
-                  bg=COLORS["purple"], fg="white", bd=0, padx=14, pady=9,
+                  bg=COLORS["green"], fg="white", bd=0, padx=14, pady=9,
                   font=("Segoe UI", 9, "bold")).pack(fill="x", pady=(10, 0))
 
         right = tk.Frame(overview, bg=COLORS["surface"])
@@ -2204,7 +2204,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         side.pack(side="right", fill="y", padx=(6, 12), pady=(6, 12))
         side.pack_propagate(False)
         rows = list(self.core.products.images(product_id))
-        listbox = tk.Listbox(side, bg=COLORS["surface_alt"], fg=COLORS["text"], selectbackground=COLORS["purple_dark"],
+        listbox = tk.Listbox(side, bg=COLORS["surface_alt"], fg=COLORS["text"], selectbackground=COLORS["green_dark"],
                             selectforeground="white", relief="flat", font=("Segoe UI", 9), exportselection=False)
         listbox.pack(fill="both", expand=True)
         for row in rows:
@@ -2277,7 +2277,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
 
         for text, command in (("Fetch Web Image", fetch_web), ("Add Your Image", add_local), ("Set Primary", set_primary),
                               ("Open Full Size", open_full), ("Remove", remove)):
-            tk.Button(toolbar, text=text, command=command, bg=COLORS["purple"] if text in ("Fetch Web Image", "Add Your Image") else COLORS["surface_alt"],
+            tk.Button(toolbar, text=text, command=command, bg=COLORS["green"] if text in ("Fetch Web Image", "Add Your Image") else COLORS["surface_alt"],
                       fg="white" if text in ("Fetch Web Image", "Add Your Image") else COLORS["text"], bd=0, padx=12, pady=8).pack(side="left", padx=(0, 7))
         listbox.bind("<<ListboxSelect>>", show_selected)
         if rows:
@@ -2438,7 +2438,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         tk.Label(win, text=image_row["attribution"] or "Internal reference image", bg=COLORS["bg"],
                  fg=COLORS["muted"], font=("Segoe UI", 8)).pack(pady=(0, 4))
         tk.Button(win, text="Manage Images", command=lambda: self._product_image_manager(product_id, record["name"], win),
-                  bg=COLORS["purple"], fg="white", bd=0, padx=16, pady=9).pack(pady=(2, 12))
+                  bg=COLORS["green"], fg="white", bd=0, padx=16, pady=9).pack(pady=(2, 12))
 
     def _product_image_manager(self, product_id, product_name, parent_window=None):
         win = tk.Toplevel(parent_window or self)
@@ -2559,7 +2559,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
 
     def quick_add(self) -> None:
         menu=tk.Menu(self,tearoff=0,bg=COLORS["surface_alt"],fg=COLORS["text"],
-                     activebackground=COLORS["purple_dark"],activeforeground="white")
+                     activebackground=COLORS["green_dark"],activeforeground="white")
         menu.add_command(label="New Quote",command=lambda:(self.show_page("Quotes"),self.after(80,lambda:self._quote_editor(None))))
         menu.add_command(label="New Customer",command=lambda:(self.show_page("Customers"),self.after(80,self._add_customer)))
         menu.add_command(label="Add Product",command=lambda:self.show_page("Products"))

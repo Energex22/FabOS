@@ -2,7 +2,6 @@ import os
 import tempfile
 import unittest
 from unittest import mock
-from unittest import mock
 
 from fabos_core.db.database import Database
 from fabos_core.db.migrations import migrate
@@ -47,7 +46,11 @@ class ConsoleSecurityTests(unittest.TestCase):
         self.assertIsNone(self.security.authenticate_owner("admin", "admin-password"))
 
     def test_inactive_owner_cannot_authenticate(self):
-        self.accounts.update_account("owner", active=False)
+        # Bypass account-management policy here: this test verifies that
+        # authentication rejects an already-inactive owner account.
+        with self.db.connect() as connection:
+            connection.execute("UPDATE users SET active=0 WHERE id=?", ("owner",))
+            connection.commit()
         self.assertIsNone(self.security.authenticate_owner("owner", "owner-password"))
 
     def test_ssh_session_is_rejected_when_local_only(self):

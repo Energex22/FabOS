@@ -12,6 +12,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+import sqlite3
 
 
 class PaymentProviderNotConfigured(RuntimeError):
@@ -113,6 +114,19 @@ def _verify_stripe_signature(payload,signature,secret,tolerance=300):
 
 class PaymentService:
     VALID_STATUSES={"created","pending","authorized","paid","failed","cancelled","refunded","partially_refunded","disputed"}
+    # Gateway webhooks are not guaranteed to arrive in chronological order. Keep
+    # terminal/financial states from being overwritten by stale failure events.
+    STATUS_TRANSITIONS={
+        "created":{"created","pending","authorized","paid","failed","cancelled"},
+        "pending":{"pending","authorized","paid","failed","cancelled"},
+        "authorized":{"authorized","paid","failed","cancelled"},
+        "paid":{"paid","partially_refunded","refunded","disputed"},
+        "partially_refunded":{"partially_refunded","refunded","disputed"},
+        "failed":{"failed","created","pending","authorized","paid","cancelled"},
+        "cancelled":{"cancelled","created","pending","authorized","paid"},
+        "refunded":{"refunded"},
+        "disputed":{"disputed","partially_refunded","refunded"},
+    }
     def __init__(self,database,accounts,invoices): self.database=database;self.accounts=accounts;self.invoices=invoices;self._ensure_schema();self.provider=self._build_provider()
     def _ensure_schema(self):
         with self.database.connect() as conn:
@@ -146,8 +160,17 @@ class PaymentService:
                 conn.commit()
                 return str(existing["id"]),amount_cents,metadata,True
             payment_id=str(uuid.uuid4())
-            conn.execute("INSERT INTO payment_transactions(id,order_id,invoice_id,customer_id,amount_cents,currency,provider,status,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)",(payment_id,order["id"],invoice_id,customer_id,amount_cents,"USD",provider_name,"created",json.dumps(metadata,sort_keys=True)))
-            conn.commit()
+            try:
+                conn.execute("INSERT INTO payment_transactions(id,order_id,invoice_id,customer_id,amount_cents,currency,provider,status,metadata_json) VALUES(?,?,?,?,?,?,?,?,?)",(payment_id,order["id"],invoice_id,customer_id,amount_cents,"USD",provider_name,"created",json.dumps(metadata,sort_keys=True)))
+                conn.commit()
+            except sqlite3.IntegrityError:
+                conn.rollback()
+                existing=conn.execute("SELECT * FROM payment_transactions WHERE order_id=?",(order["id"],)).fetchone()
+                if existing:
+                    status=str(existing["status"] or "").lower()
+                    if status not in {"failed","cancelled"} and not (status=="created" and str(existing["provider"] or "").lower()=="unconfigured"):
+                        return str(existing["id"]),amount_cents,metadata,False
+                raise
             return payment_id,amount_cents,metadata,True
     def _new_transaction(self,order,customer_id,invoice_id,provider_name,channel):
         payment_id,amount_cents,metadata,created=self._prepare_transaction(order,customer_id,invoice_id,provider_name,channel)
@@ -158,7 +181,7 @@ class PaymentService:
         if str(order["status"] or "").lower() in {"cancelled","completed"}: raise ValueError("Payment is not available for this order")
         invoice_id,_=self.invoices.create_from_order(order_id)
         provider=self._build_provider("stripe")
-        payment_id,amount_cents,metadata,attempt_ready=self._prepare_transaction(order,customer["id"],invoice_id,provider.name,"customer-web")
+        payment_id,amount_cents,metadata,attempt_ready=self._prepare_transaction(order,customer["id"],invoice_id,provider.name,"website")
         if not attempt_ready: return self.get(payment_id)
         try: result=provider.create_checkout(payment_id=payment_id,amount_cents=amount_cents,currency="USD",metadata=metadata)
         except PaymentProviderNotConfigured:
@@ -183,8 +206,8 @@ class PaymentService:
         provider=self._build_provider(provider_name);event=provider.parse_webhook(payload,signature);event_id=event.get("event_id")
         if not event_id: raise PaymentProviderError("Webhook event has no id")
         with self.database.connect() as conn:
-            if conn.execute("SELECT 1 FROM payment_webhook_events WHERE id=?",(event_id,)).fetchone(): return {"processed":False,"duplicate":True,"event_id":event_id}
-            conn.execute("INSERT INTO payment_webhook_events(id,provider,event_type,payment_id) VALUES(?,?,?,?)",(event_id,provider.name,event.get("event_type"),event.get("payment_id") or event.get("provider_payment_id")));conn.commit()
+            if conn.execute("SELECT 1 FROM payment_webhook_events WHERE id=?",(event_id,)).fetchone():
+                return {"processed":False,"duplicate":True,"event_id":event_id}
         payment_id=event.get("payment_id")
         if not payment_id and event.get("provider_payment_id"):
             with self.database.connect() as conn:
@@ -192,7 +215,14 @@ class PaymentService:
         if not payment_id and event.get("order_id"):
             with self.database.connect() as conn:
                 row=conn.execute("SELECT id FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",(event["order_id"],)).fetchone();payment_id=row["id"] if row else None
-        if payment_id and event.get("status") in self.VALID_STATUSES: self._set_status(payment_id,event["status"],provider_payment_id=event.get("provider_payment_id"))
+        if payment_id and event.get("status") in self.VALID_STATUSES:
+            self._set_status(payment_id,event["status"],provider_payment_id=event.get("provider_payment_id"))
+        try:
+            with self.database.connect() as conn:
+                conn.execute("INSERT INTO payment_webhook_events(id,provider,event_type,payment_id) VALUES(?,?,?,?)",(event_id,provider.name,event.get("event_type"),event.get("payment_id") or event.get("provider_payment_id")))
+                conn.commit()
+        except sqlite3.IntegrityError:
+            return {"processed":False,"duplicate":True,"event_id":event_id}
         return {"processed":True,"duplicate":False,"event_id":event_id,"status":event.get("status")}
     def _update_gateway_fields(self,payment_id,result,status):
         with self.database.connect() as conn: conn.execute("UPDATE payment_transactions SET provider_payment_id=?,checkout_url=?,status=?,metadata_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(result.get("provider_payment_id"),result.get("checkout_url"),status,json.dumps(result.get("metadata") or {},sort_keys=True),payment_id));conn.commit()
@@ -200,6 +230,12 @@ class PaymentService:
         if status not in self.VALID_STATUSES: raise ValueError("Unsupported payment status: %s"%status)
         with self.database.connect() as conn: row=conn.execute("SELECT * FROM payment_transactions WHERE id=?",(payment_id,)).fetchone()
         if not row: raise KeyError("Payment transaction not found")
+        current=str(row["status"] or "created").lower()
+        allowed=self.STATUS_TRANSITIONS.get(current,{current})
+        if status not in allowed:
+            # Ignore stale/out-of-order gateway notifications rather than
+            # allowing a paid/refunded transaction to regress.
+            return
         with self.database.connect() as conn:
             if provider_payment_id: conn.execute("UPDATE payment_transactions SET status=?,provider_payment_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(status,provider_payment_id,payment_id))
             else: conn.execute("UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(status,payment_id))
@@ -213,7 +249,18 @@ class PaymentService:
             with self.database.connect() as conn: exists=conn.execute("SELECT 1 FROM payments WHERE invoice_id=? AND reference=? LIMIT 1",(invoice_id,reference)).fetchone()
         except Exception: exists=None
         if not exists:
-            self.invoices.record_payment(invoice_id,amount,method=row["provider"],reference=reference,notes="Gateway payment reconciled by FabOS")
+            try:
+                self.invoices.record_payment(invoice_id,amount,method=row["provider"],reference=reference,notes="Gateway payment reconciled by FabOS")
+            except sqlite3.IntegrityError:
+                # A second webhook can race the first settlement. The unique
+                # invoice/reference ledger constraint makes the first write authoritative.
+                with self.database.connect() as conn:
+                    duplicate=conn.execute(
+                        "SELECT 1 FROM payments WHERE invoice_id=? AND reference=? LIMIT 1",
+                        (invoice_id,reference),
+                    ).fetchone()
+                if not duplicate:
+                    raise
         with self.database.connect() as conn:
             current=conn.execute("SELECT status FROM orders WHERE id=?",(row["order_id"],)).fetchone()
             if current and str(current["status"] or "").lower()=="pending": conn.execute("UPDATE orders SET status='confirmed' WHERE id=?",(row["order_id"],));conn.commit()

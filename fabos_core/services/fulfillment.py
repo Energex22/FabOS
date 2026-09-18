@@ -5,6 +5,10 @@ from datetime import datetime
 class FulfillmentService:
     """Fulfillment business service plus an actor-aware access boundary."""
 
+    METHODS = ("pickup", "shipping")
+    STATUSES = ("pending", "ready_for_pickup", "shipped", "delivered", "picked_up")
+    TERMINAL_STATUSES = ("delivered", "picked_up")
+
     def __init__(self, db, accounts=None, permissions=None):
         self.db = db
         self.accounts = accounts
@@ -58,6 +62,9 @@ class FulfillmentService:
             ).fetchone())
 
     def ensure(self, order_id, method="pickup"):
+        method = str(method or "").strip().lower()
+        if method not in self.METHODS:
+            raise ValueError("Unsupported fulfillment method")
         with self.db.connect() as c:
             row = c.execute("SELECT * FROM fulfillments WHERE order_id=?", (order_id,)).fetchone()
             if row:
@@ -131,7 +138,20 @@ class FulfillmentService:
 
     def save(self, order_id, method, status, carrier="", tracking="", weight_oz=None,
              shipping_cost_cents=0, destination="", notes="", length_in=None, width_in=None, height_in=None):
+        method = str(method or "").strip().lower()
+        status = str(status or "").strip().lower()
+        if method not in self.METHODS:
+            raise ValueError("Unsupported fulfillment method")
+        if status not in self.STATUSES:
+            raise ValueError("Unsupported fulfillment status")
         fid = self.ensure(order_id, method)
+        with self.db.connect() as c:
+            current = c.execute("SELECT method,status FROM fulfillments WHERE id=?", (fid,)).fetchone()
+        current_status = str(current["status"] or "pending").lower() if current else "pending"
+        if current_status in self.TERMINAL_STATUSES and status != current_status:
+            raise ValueError("Cannot move a completed fulfillment back to an earlier status")
+        if current and current["method"] != method and current_status != "pending":
+            raise ValueError("Cannot change fulfillment method after fulfillment has started")
         now = datetime.now().isoformat(timespec="seconds")
         shipped = now if status == "shipped" else None
         delivered = now if status == "delivered" else None

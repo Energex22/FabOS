@@ -151,25 +151,19 @@ def register_customer_write_routes(app, get_application, current_user):
         application=Depends(get_application),
     ):
         filename = Path(file.filename or "").name
+        if not filename:
+            raise HTTPException(status_code=400, detail="A model filename is required")
         extension = Path(filename).suffix.lower()
         if extension not in ALLOWED_CUSTOM_UPLOAD_EXTENSIONS:
             raise HTTPException(status_code=415, detail="Unsupported 3D model file type")
-        if not filename:
-            raise HTTPException(status_code=400, detail="A model filename is required")
-        existing = application.customers.list(query=email.strip())
-        customer_id = next((str(row["id"]) for row in existing if str(row["email"] or "").lower()==email.strip().lower()), None)
-        if not customer_id:
-            customer_id = application.customers.save({"name":name.strip(),"email":email.strip().lower(),"phone":"","notes":"Public custom-work request"})
-        project = {"idea":idea,"dimensions":dimensions,"material":material,"quantity":quantity,"notes":notes}
-        project["notes"] = (project["notes"] or "").strip()
-        project["notes"] += ("\n" if project["notes"] else "") + "File: " + filename
-        quote_id = _create_public_quote(application, customer_id, project)
-        quote = application.quotes.get(quote_id)[0]
-        design_id = str(uuid.uuid4())
-        version_id = str(uuid.uuid4())
-        safe_name = "Custom Quote " + str(quote["quote_number"])
+
+        # Stage and validate the upload before creating customer/quote records.
+        # This prevents oversized or otherwise rejected files from leaving orphaned
+        # quote requests behind.
         temp_path = None
         size = 0
+        quote_id = None
+        design_id = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
                 temp_path = tmp.name
@@ -181,6 +175,19 @@ def register_customer_write_routes(app, get_application, current_user):
                     if size > MAX_CUSTOM_UPLOAD_BYTES:
                         raise HTTPException(status_code=413, detail="3D model must be 25 MB or smaller")
                     tmp.write(chunk)
+
+            existing = application.customers.list(query=email.strip())
+            customer_id = next((str(row["id"]) for row in existing if str(row["email"] or "").lower()==email.strip().lower()), None)
+            if not customer_id:
+                customer_id = application.customers.save({"name":name.strip(),"email":email.strip().lower(),"phone":"","notes":"Public custom-work request"})
+            project = {"idea":idea,"dimensions":dimensions,"material":material,"quantity":quantity,"notes":notes}
+            project["notes"] = (project["notes"] or "").strip()
+            project["notes"] += ("\n" if project["notes"] else "") + "File: " + filename
+            quote_id = _create_public_quote(application, customer_id, project)
+            quote = application.quotes.get(quote_id)[0]
+            design_id = str(uuid.uuid4())
+            version_id = str(uuid.uuid4())
+            safe_name = "Custom Quote " + str(quote["quote_number"])
             with application.database.connect() as conn:
                 conn.execute("CREATE TABLE IF NOT EXISTS quote_designs(quote_id TEXT PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
                 conn.execute("INSERT INTO designs(id,product_id,name,current_version,notes) VALUES(?,?,?,1,?)",(design_id,None,safe_name,"Customer custom quote %s"%quote["quote_number"]))
@@ -191,10 +198,12 @@ def register_customer_write_routes(app, get_application, current_user):
         except HTTPException:
             raise
         except Exception as exc:
-            with application.database.connect() as conn:
-                conn.execute("DELETE FROM quote_designs WHERE quote_id=?",(quote_id,))
-                conn.execute("DELETE FROM designs WHERE id=?",(design_id,))
-                conn.commit()
+            if quote_id:
+                with application.database.connect() as conn:
+                    conn.execute("DELETE FROM quote_designs WHERE quote_id=?", (quote_id,))
+                    if design_id:
+                        conn.execute("DELETE FROM designs WHERE id=?", (design_id,))
+                    conn.commit()
             raise HTTPException(status_code=500, detail="The model could not be stored") from exc
         finally:
             try:

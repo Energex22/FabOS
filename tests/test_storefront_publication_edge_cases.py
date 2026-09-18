@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from fabos_core.services.products import ProductService
+from fabos_core.services.custom_product_workflow import CustomProductWorkflowService
 
 
 class SqliteTestDatabase:
@@ -54,6 +55,48 @@ class StorefrontPublicationEdgeCaseTests(unittest.TestCase):
 
     def tearDown(self):
         self.db.cleanup()
+
+
+    def test_repeat_custom_promotion_reuses_existing_product_id(self):
+        class ProductsStub:
+            def __init__(self):
+                self.saved = []
+            def get(self, product_id):
+                return {"id": product_id, "sku": "CUSTOM-KEEP"}
+            def save(self, values, product_id=None):
+                self.saved.append((product_id, dict(values)))
+                return product_id or "new-product"
+            def save_storefront(self, product_id, values):
+                return {"visibility": values.get("visibility", "draft")}
+            def is_customer_eligible(self, product_id):
+                return True
+
+        class DesignVaultStub:
+            def get(self, design_id):
+                return {"id": design_id, "name": "Customer Design"}
+            def assets(self, design_id):
+                return [{"id": "asset-1", "original_name": "model.stl"}]
+
+        with self.db.connect() as conn:
+            conn.executescript("""
+                CREATE TABLE quotes(id TEXT PRIMARY KEY, customer_id TEXT, quote_number TEXT);
+                CREATE TABLE designs(id TEXT PRIMARY KEY, product_id TEXT, name TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
+                CREATE TABLE quote_designs(quote_id TEXT, design_id TEXT);
+                INSERT INTO quotes VALUES('q1','customer-1','Q-1001');
+                INSERT INTO designs(id,product_id,name) VALUES('d1','p1','Customer Design');
+                INSERT INTO quote_designs VALUES('q1','d1');
+            """)
+            conn.commit()
+
+        products = ProductsStub()
+        workflow = CustomProductWorkflowService(self.db, products, DesignVaultStub())
+        values = {"name": "Customer Product", "price": 25, "sku": "CUSTOM-KEEP", "license_status": "verified", "visibility": "draft"}
+        first = workflow.promote_quote_design("q1", values)
+        second = workflow.promote_quote_design("q1", values)
+
+        self.assertEqual(first["product_id"], "p1")
+        self.assertEqual(second["product_id"], "p1")
+        self.assertEqual([item[0] for item in products.saved], ["p1", "p1"])
 
     def test_published_product_requires_real_model_and_positive_price(self):
         self.service.save_storefront("p1", {"visibility": "published"})

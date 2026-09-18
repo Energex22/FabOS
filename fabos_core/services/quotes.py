@@ -63,6 +63,8 @@ class QuoteService:
         if not items:raise ValueError("Add at least one quote item.")
         items=self._resolve_items(items); total=sum(int(i["quantity"])*int(i["unit_price_cents"]) for i in items)
         with self.database.connect() as conn:
+            if not quote_id:
+                conn.execute("BEGIN IMMEDIATE")
             if quote_id:
                 conn.execute("UPDATE quotes SET customer_id=?,status=?,total_cents=?,expires_at=?,notes=? WHERE id=?",(data["customer_id"],data.get("status","draft"),total,data.get("expires_at") or None,data.get("notes",""),quote_id)); conn.execute("DELETE FROM quote_items WHERE quote_id=?",(quote_id,))
             else:
@@ -74,6 +76,7 @@ class QuoteService:
         return quote_id
     def convert_to_order(self,quote_id):
         with self.database.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             q=conn.execute("SELECT * FROM quotes WHERE id=?",(quote_id,)).fetchone()
             if not q:raise KeyError("Quote not found")
             existing=conn.execute("SELECT id FROM orders WHERE quote_id=?",(quote_id,)).fetchone()

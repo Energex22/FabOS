@@ -1,3 +1,4 @@
+import sqlite3
 MIGRATIONS=[
 (1,"""CREATE TABLE IF NOT EXISTS app_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);"""),
 (2,"""CREATE TABLE IF NOT EXISTS designs(id TEXT PRIMARY KEY,product_id TEXT REFERENCES products(id) ON DELETE SET NULL,name TEXT NOT NULL,current_version INTEGER NOT NULL DEFAULT 1,notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -32,7 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_supply_active ON supply_items(active,category,nam
 CREATE TABLE IF NOT EXISTS supply_transactions(id TEXT PRIMARY KEY,supply_id TEXT NOT NULL REFERENCES supply_items(id) ON DELETE CASCADE,quantity REAL NOT NULL,reference_type TEXT,reference_id TEXT,notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_supply_tx_item ON supply_transactions(supply_id,created_at);
 CREATE TABLE IF NOT EXISTS app_runtime_state(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-INSERT OR IGNORE INTO shop_settings(key,value) VALUES('auto_backup_on_shutdown','1'),('crash_recovery_enabled','1'),('diagnostic_log_retention_days','30'),('beta_channel','1');"""),(31,"""ALTER TABLE print_jobs ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;"""),(36,"""ALTER TABLE users ADD COLUMN email TEXT;
+INSERT OR IGNORE INTO shop_settings(key,value) VALUES('auto_backup_on_shutdown','1'),('crash_recovery_enabled','1'),('diagnostic_log_retention_days','30'),('beta_channel','1');"""),(36,"""ALTER TABLE users ADD COLUMN email TEXT;
 ALTER TABLE users ADD COLUMN account_type TEXT NOT NULL DEFAULT 'administrator';
 ALTER TABLE users ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE users ADD COLUMN last_login_at TEXT;
@@ -54,7 +55,12 @@ ALTER TABLE orders ADD COLUMN shipping_cents INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE orders ADD COLUMN shipping_address_json TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE orders ADD COLUMN checkout_notes TEXT NOT NULL DEFAULT '';
 ALTER TABLE orders ADD COLUMN checkout_channel TEXT NOT NULL DEFAULT 'internal';
-CREATE INDEX IF NOT EXISTS idx_orders_checkout_channel ON orders(checkout_channel);""")]
+CREATE INDEX IF NOT EXISTS idx_orders_checkout_channel ON orders(checkout_channel);"""),
+(40,"""ALTER TABLE quote_items ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL;"""),
+(41,"""CREATE TABLE IF NOT EXISTS order_items(id TEXT PRIMARY KEY,order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,product_id TEXT REFERENCES products(id),variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL,description TEXT NOT NULL,quantity INTEGER NOT NULL DEFAULT 1,unit_price_cents INTEGER NOT NULL DEFAULT 0,material TEXT,color TEXT,estimated_minutes INTEGER,estimated_filament_g REAL);"""),
+(42,"""ALTER TABLE print_jobs ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1;"""),
+(43,"""ALTER TABLE print_jobs ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL;"""),(44,"""CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_invoice_reference ON payments(invoice_id,reference) WHERE reference IS NOT NULL AND reference<>'';""")
+]
 def migrate(db,backup=None):
  with db.connect() as c:
   c.execute('CREATE TABLE IF NOT EXISTS app_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');done={r[0] for r in c.execute('SELECT version FROM app_migrations')}
@@ -64,7 +70,21 @@ def migrate(db,backup=None):
   except Exception: pass
  for ver,sql in pending:
   with db.connect() as c:
-   try:c.executescript(sql)
-   except Exception as e:
-    if 'duplicate column name' not in str(e).lower():raise
+   statement=""
+   try:
+    for line in sql.splitlines(True):
+     statement += line
+     if sqlite3.complete_statement(statement):
+      statement=statement.strip()
+      if statement:
+       try:
+        c.execute(statement)
+       except sqlite3.OperationalError as e:
+        if 'duplicate column name' not in str(e).lower(): raise
+      statement=""
+    if statement.strip():
+     c.execute(statement)
+   except Exception:
+    c.rollback()
+    raise
    c.execute('INSERT OR IGNORE INTO app_migrations(version,name) VALUES(?,?)',(ver,'migration_%03d'%ver));c.commit()

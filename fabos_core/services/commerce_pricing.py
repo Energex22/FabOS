@@ -21,7 +21,10 @@ class CommercePricingService:
     @staticmethod
     def _quantity(value):
         try:
-            return max(1, int(value))
+            quantity = int(value)
+            if quantity < 1 or quantity > 1000:
+                raise ValueError("Quantity must be between 1 and 1000")
+            return quantity
         except (TypeError, ValueError):
             raise ValueError("Quantity must be a positive integer")
 
@@ -56,16 +59,29 @@ class CommercePricingService:
                 raise ValueError("Cart item product_id is required")
             quantity = self._quantity(item.get("quantity", 1))
             product = self.products.get(product_id)
-            if product is None:
-                raise KeyError("Product not found: %s" % product_id)
-            unit_cents = self._money(product["price_cents"])
+            if product is None or not self.products.is_customer_eligible(product_id):
+                raise KeyError("Product is not available for customer ordering: %s" % product_id)
+            variant_id = item.get("variant_id") or item.get("variantId")
+            source = product
+            name = product["name"]
+            if variant_id:
+                variant_id = str(variant_id)
+                variant = next((candidate for candidate in self.products.variants(product_id) if str(candidate["id"]) == variant_id), None)
+                if not variant or not int(variant["active"]):
+                    raise KeyError("Product variant not found: %s" % variant_id)
+                source = variant
+                name = "%s · %s" % (name, variant["name"])
+            unit_cents = self._money(source["price_cents"])
+            if unit_cents <= 0:
+                raise ValueError("Product price is not available for customer ordering")
             line_cents = unit_cents * quantity
-            weight = self._money(product["estimated_filament_g"] or 0) * quantity
+            weight = max(0.0, float(source.get("estimated_filament_g") or product.get("estimated_filament_g") or 0)) * quantity
             subtotal += line_cents
             total_weight += weight
             normalized.append({
                 "product_id": product_id,
-                "name": product["name"],
+                "variant_id": str(variant_id) if variant_id else None,
+                "name": name,
                 "quantity": quantity,
                 "unit_price_cents": unit_cents,
                 "line_total_cents": line_cents,
