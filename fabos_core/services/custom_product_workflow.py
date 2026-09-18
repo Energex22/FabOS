@@ -61,7 +61,7 @@ class CustomProductWorkflowService:
             "price": price,
             "hours": values.get("hours") or 0,
             "filament": values.get("filament") or 0,
-        })
+        }, product_id=product_id)
         with self.database.connect() as conn:
             conn.execute("UPDATE designs SET product_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (product_id, link["design_id"]))
             conn.commit()
