@@ -101,6 +101,15 @@ class Pass19FulfillmentBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "completed fulfillment"):
             self.fulfillment.save_for_user("employee", "order1", "shipping", "pending")
 
+    def test_fulfillment_method_cannot_change_after_start(self):
+        self.fulfillment.save_for_user("employee", "order1", "shipping", "shipped", tracking="TRACK-4")
+        with self.assertRaisesRegex(ValueError, "method"):
+            self.fulfillment.save_for_user("employee", "order1", "pickup", "shipped")
+
+    def test_fulfillment_method_can_be_set_before_start(self):
+        fid = self.fulfillment.save_for_user("employee", "order1", "shipping", "pending")
+        self.assertEqual(self.fulfillment.save_for_user("employee", "order1", "pickup", "pending"), fid)
+
     def test_fulfillment_manage_override_is_enforced(self):
         self.permissions.set_user_permission("employee", "fulfillment.manage", False)
         with self.assertRaises(PermissionError):
