@@ -83,7 +83,7 @@ class StorefrontPublicationEdgeCaseTests(unittest.TestCase):
                 CREATE TABLE designs(id TEXT PRIMARY KEY, product_id TEXT, name TEXT, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
                 CREATE TABLE quote_designs(quote_id TEXT, design_id TEXT);
                 INSERT INTO quotes VALUES('q1','customer-1','Q-1001');
-                INSERT INTO designs VALUES('d1','p1','Customer Design');
+                INSERT INTO designs(id,product_id,name) VALUES('d1','p1','Customer Design');
                 INSERT INTO quote_designs VALUES('q1','d1');
             """)
             conn.commit()
