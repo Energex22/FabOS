@@ -230,6 +230,12 @@ class PaymentService:
         if status not in self.VALID_STATUSES: raise ValueError("Unsupported payment status: %s"%status)
         with self.database.connect() as conn: row=conn.execute("SELECT * FROM payment_transactions WHERE id=?",(payment_id,)).fetchone()
         if not row: raise KeyError("Payment transaction not found")
+        current=str(row["status"] or "created").lower()
+        allowed=self.STATUS_TRANSITIONS.get(current,{current})
+        if status not in allowed:
+            # Ignore stale/out-of-order gateway notifications rather than
+            # allowing a paid/refunded transaction to regress.
+            return
         with self.database.connect() as conn:
             if provider_payment_id: conn.execute("UPDATE payment_transactions SET status=?,provider_payment_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(status,provider_payment_id,payment_id))
             else: conn.execute("UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(status,payment_id))
