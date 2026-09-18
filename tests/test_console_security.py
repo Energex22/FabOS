@@ -62,6 +62,18 @@ class ConsoleSecurityTests(unittest.TestCase):
         with mock.patch("fabos_core.services.console_security.time.monotonic", return_value=1000.0 + self.security.LOCKOUT_SECONDS + 1):
             self.assertIsNotNone(self.security.authenticate_owner("owner", "owner-password"))
 
+    def test_password_change_revokes_existing_sessions(self):
+        first = self.auth.login("owner", "owner-password")
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(self.auth.authenticate(first["token"]))
+
+        self.auth.set_password("owner", "owner-password-2")
+
+        self.assertIsNone(self.auth.authenticate(first["token"]))
+        second = self.auth.login("owner", "owner-password-2")
+        self.assertIsNotNone(second)
+        self.assertNotEqual(first["token"], second["token"])
+
     def test_console_timeout_is_configurable(self):
         self.assertTrue(self.security.lock_enabled())
         self.assertEqual(self.security.idle_timeout_minutes(), 15)
