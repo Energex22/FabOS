@@ -43,7 +43,7 @@ class Pass20SecurityAndSystemPageTests(unittest.TestCase):
             c.execute("INSERT INTO users(id,username,password_hash,account_type,active) VALUES(?,?,?,?,1)",
                       ("employee", "employee", "x", "employee"))
             c.execute("INSERT INTO users(id,username,password_hash,account_type,active) VALUES(?,?,?,?,1)",
-                      ("customer", "customer", "x", "customer"))
+                      ("customer", "customer", "x", "customer", "customer"))
             c.execute("INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)",
                       ("cust1", "Customer", "c@example.com", "", ""))
             c.execute("INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)",
