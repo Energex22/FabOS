@@ -32,4 +32,24 @@ class InventoryProfitTests(unittest.TestCase):
    self.assertEqual(out["packaging"],50)
    self.assertEqual(out["profit"],1715)
 
+ def test_complete_with_inventory_deducts_once(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   sid=InventoryProfitService(db).add_spool("PLA","Test","Black",1000,2000)
+   jid=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("INSERT INTO print_jobs(id,spool_id,status,estimated_filament_g) VALUES(?,?,?,?)",(jid,sid,"printing",100));c.commit()
+   from fabos_core.services.manufacturing import ManufacturingService
+   svc=ManufacturingService(db)
+   svc.complete_with_inventory(jid,actual_minutes=12,actual_filament_g=100)
+   svc.complete_with_inventory(jid,actual_minutes=12,actual_filament_g=100)
+   with db.connect() as c:
+    spool=c.execute("SELECT remaining_g FROM filament_spools WHERE id=?",(sid,)).fetchone()
+    job=c.execute("SELECT filament_deducted,actual_filament_g FROM print_jobs WHERE id=?",(jid,)).fetchone()
+    consumed=c.execute("SELECT COUNT(*) n FROM inventory_transactions WHERE reference_type='print_job' AND reference_id=? AND transaction_type='consume'",(jid,)).fetchone()
+   self.assertAlmostEqual(spool["remaining_g"],900)
+   self.assertEqual(job["filament_deducted"],1)
+   self.assertEqual(job["actual_filament_g"],100)
+   self.assertEqual(consumed["n"],1)
+
 if __name__=="__main__":unittest.main()
