@@ -84,6 +84,58 @@ class ProductionVariantIntegrityTests(unittest.TestCase):
             self.assertEqual(len(svc.create_jobs_from_order(order_id)), 2)
             self.assertEqual(len(svc.create_jobs_from_order(order_id)), 0)
 
+    def test_additional_copies_preserve_variant(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            product_id = str(uuid.uuid4())
+            variant_id = str(uuid.uuid4())
+            order_id = str(uuid.uuid4())
+            job_id = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute("INSERT INTO products(id,name,price_cents) VALUES(?,?,?)", (product_id, "Test Product", 1000))
+                c.execute("INSERT INTO product_variants(id,product_id,name,price_cents,active) VALUES(?,?,?,?,1)", (variant_id, product_id, "Green", 1200))
+                c.execute("INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,?)", (order_id, "O-COPY", "in_production", 1200))
+                c.execute(
+                    "INSERT INTO print_jobs(id,order_id,product_id,variant_id,status,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?)",
+                    (job_id, order_id, product_id, variant_id, "completed", 10, 5),
+                )
+                c.commit()
+
+            created = ProductionService(db).queue_additional_copies(job_id, 2)
+            self.assertEqual(len(created), 2)
+            with db.connect() as c:
+                rows = c.execute("SELECT variant_id,quantity FROM print_jobs WHERE id IN (?,?)", created).fetchall()
+            self.assertEqual([r["variant_id"] for r in rows], [variant_id, variant_id])
+            self.assertEqual([r["quantity"] for r in rows], [1, 1])
+
+    def test_attachable_job_requires_matching_variant_when_requested(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            product_id = str(uuid.uuid4())
+            variant_a = str(uuid.uuid4())
+            variant_b = str(uuid.uuid4())
+            order_id = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute("INSERT INTO products(id,name,price_cents) VALUES(?,?,?)", (product_id, "Test Product", 1000))
+                c.executemany(
+                    "INSERT INTO product_variants(id,product_id,name,price_cents,active) VALUES(?,?,?,?,1)",
+                    [(variant_a, product_id, "Black", 1100), (variant_b, product_id, "Green", 1200)],
+                )
+                c.execute("INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,?)", (order_id, "O-ATTACH", "in_production", 1100))
+                c.execute(
+                    "INSERT INTO print_jobs(id,order_id,product_id,variant_id,status) VALUES(?,?,?,?,?)",
+                    (str(uuid.uuid4()), order_id, product_id, variant_a, "queued"),
+                )
+                c.commit()
+            svc = ProductionService(db)
+            self.assertIsNotNone(svc.find_attachable_job(order_id, product_id, variant_a))
+            self.assertIsNone(svc.find_attachable_job(order_id, product_id, variant_b))
+            self.assertIsNotNone(svc.find_attachable_job(order_id, product_id))
+
 
 if __name__ == "__main__":
     unittest.main()
