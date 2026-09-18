@@ -97,8 +97,11 @@ class AccountService:
 
     def link_customer(self, user_id, customer_id):
         with self.database.connect() as conn:
-            if not conn.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
+            current = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+            if not current:
                 raise KeyError("User not found")
+            if str(current["role"] or "").lower() == "owner":
+                raise ValueError("Cannot change the owner account through customer linking")
             if not conn.execute("SELECT 1 FROM customers WHERE id=?", (customer_id,)).fetchone():
                 raise KeyError("Customer not found")
             existing_user = conn.execute(
@@ -135,8 +138,11 @@ class AccountService:
             ).fetchone()
 
     def set_employee_profile(self, user_id, department=None, position=None, employment_status="active", metadata_json="{}"):
-        if not self.get_user(user_id):
+        current = self.get_user(user_id)
+        if not current:
             raise KeyError("User not found")
+        if str(current["role"] or "").lower() == "owner":
+            raise ValueError("Cannot change the owner account through employee profile")
         if not employment_status:
             employment_status = "active"
         with self.database.connect() as conn:
