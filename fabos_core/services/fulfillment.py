@@ -5,6 +5,9 @@ from datetime import datetime
 class FulfillmentService:
     """Fulfillment business service plus an actor-aware access boundary."""
 
+    METHODS = ("pickup", "shipping")
+    STATUSES = ("pending", "shipped", "delivered", "picked_up")
+
     def __init__(self, db, accounts=None, permissions=None):
         self.db = db
         self.accounts = accounts
@@ -58,6 +61,9 @@ class FulfillmentService:
             ).fetchone())
 
     def ensure(self, order_id, method="pickup"):
+        method = str(method or "").strip().lower()
+        if method not in self.METHODS:
+            raise ValueError("Unsupported fulfillment method")
         with self.db.connect() as c:
             row = c.execute("SELECT * FROM fulfillments WHERE order_id=?", (order_id,)).fetchone()
             if row:
