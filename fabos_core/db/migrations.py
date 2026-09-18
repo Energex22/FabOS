@@ -1,3 +1,4 @@
+import sqlite3
 MIGRATIONS=[
 (1,"""CREATE TABLE IF NOT EXISTS app_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);"""),
 (2,"""CREATE TABLE IF NOT EXISTS designs(id TEXT PRIMARY KEY,product_id TEXT REFERENCES products(id) ON DELETE SET NULL,name TEXT NOT NULL,current_version INTEGER NOT NULL DEFAULT 1,notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -69,7 +70,21 @@ def migrate(db,backup=None):
   except Exception: pass
  for ver,sql in pending:
   with db.connect() as c:
-   try:c.executescript(sql)
-   except Exception as e:
-    if 'duplicate column name' not in str(e).lower():raise
+   statement=""
+   try:
+    for line in sql.splitlines(True):
+     statement += line
+     if sqlite3.complete_statement(statement):
+      statement=statement.strip()
+      if statement:
+       try:
+        c.execute(statement)
+       except sqlite3.OperationalError as e:
+        if 'duplicate column name' not in str(e).lower(): raise
+      statement=""
+    if statement.strip():
+     c.execute(statement)
+   except Exception:
+    c.rollback()
+    raise
    c.execute('INSERT OR IGNORE INTO app_migrations(version,name) VALUES(?,?)',(ver,'migration_%03d'%ver));c.commit()
