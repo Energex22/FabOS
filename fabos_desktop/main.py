@@ -24,19 +24,19 @@ from fabos_desktop.product_print_ui import ProductPrintMixin
 
 
 COLORS = {
-    "bg": "#0a0b12",
-    "sidebar": "#11121c",
-    "surface": "#151725",
-    "surface_alt": "#1b1d2d",
-    "border": "#292c40",
+    "bg": "#08100d",
+    "sidebar": "#0d1713",
+    "surface": "#12201a",
+    "surface_alt": "#172820",
+    "border": "#294136",
     "text": "#f5f3ff",
-    "muted": "#9a9daf",
-    "purple": "#8b5cf6",
-    "purple_dark": "#6d42d8",
+    "muted": "#91a49b",
+    "green": "#22c55e",
+    "green_dark": "#168a4a",
     "blue": "#38bdf8",
-    "green": "#34d399",
-    "orange": "#fb923c",
-    "red": "#f87171",
+    "mint": "#34d399",
+    "orange": "#f59e0b",
+    "red": "#ef4444",
 }
 
 
@@ -45,7 +45,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
 
     def __init__(self) -> None:
         super().__init__()
-        self.title("WireVault FabOS")
+        self.title("FabVex FabOS")
         self.geometry("1360x820")
         self.minsize(1040, 680)
         self.configure(bg=COLORS["bg"])
@@ -232,7 +232,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             )
             style.map(
                 tree_style,
-                background=[("selected", COLORS["purple_dark"]),
+                background=[("selected", COLORS["green_dark"]),
                             ("!selected", COLORS["surface"])],
                 foreground=[("selected", "#ffffff"),
                             ("!selected", COLORS["text"])],
@@ -255,7 +255,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         style.configure(
             "Purple.Horizontal.TProgressbar",
             troughcolor=COLORS["surface_alt"],
-            background=COLORS["purple"],
+            background=COLORS["green"],
             bordercolor=COLORS["surface_alt"],
             lightcolor=COLORS["purple"],
             darkcolor=COLORS["purple"],
@@ -290,11 +290,11 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         brand = tk.Frame(self.sidebar, bg=COLORS["sidebar"])
         brand.pack(fill="x", padx=22, pady=(24, 26))
         tk.Label(
-            brand, text="WIREVAULT", bg=COLORS["sidebar"], fg=COLORS["text"],
+            brand, text="FABVEX", bg=COLORS["sidebar"], fg=COLORS["text"],
             font=("Segoe UI", 14, "bold"), anchor="w"
         ).pack(fill="x")
         tk.Label(
-            brand, text="FABRICATION OS", bg=COLORS["sidebar"], fg=COLORS["purple"],
+            brand, text="FABRICATION OS", bg=COLORS["sidebar"], fg=COLORS["green"],
             font=("Segoe UI", 9, "bold"), anchor="w"
         ).pack(fill="x", pady=(3, 0))
 
