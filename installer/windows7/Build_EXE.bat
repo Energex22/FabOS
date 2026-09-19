@@ -38,6 +38,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo.
+echo Building a console-debug version for startup diagnostics...
+if exist "dist\WireVault FabOS Debug" rmdir /s /q "dist\WireVault FabOS Debug"
+python -m PyInstaller --noconfirm --clean --onedir --console --name "WireVault FabOS Debug" --add-data "fabos_core\db\schema.sql;fabos_core\db" --add-data "data;data" fabos_desktop\main.py
+if errorlevel 1 (
+  echo ERROR: PyInstaller debug build failed.
+  exit /b 1
+)
+
 set "APP_DIR=%CD%\dist\WireVault FabOS"
 set "APP_EXE=%APP_DIR%\WireVault FabOS.exe"
 set "LEGACY_DIR=%CD%\build\wirevaultfabos"
@@ -82,6 +91,11 @@ if not exist "%LEGACY_DIR%\python311.dll" (
 if not exist "%LEGACY_EXE%" (
   echo ERROR: Legacy-compatible EXE is missing:
   echo   %LEGACY_EXE%
+  exit /b 1
+)
+
+if not exist "%CD%\dist\WireVault FabOS Debug\WireVault FabOS Debug.exe" (
+  echo ERROR: Debug executable is missing.
   exit /b 1
 )
 
