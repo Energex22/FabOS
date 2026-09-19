@@ -32,7 +32,7 @@ if exist "dist\WireVault FabOS" rmdir /s /q "dist\WireVault FabOS"
 
 echo.
 echo Building a self-contained onedir application...
-python -m PyInstaller --noconfirm --clean --onedir --windowed --name "WireVault FabOS" fabos_desktop\main.py
+python -m PyInstaller --noconfirm --clean --onedir --windowed --name "WireVault FabOS" --add-data "fabos_core\db\schema.sql;fabos_core\db" --add-data "data;data" fabos_desktop\main.py
 if errorlevel 1 (
   echo ERROR: PyInstaller failed.
   exit /b 1
