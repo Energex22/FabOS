@@ -40,6 +40,8 @@ if errorlevel 1 (
 
 set "APP_DIR=%CD%\dist\WireVault FabOS"
 set "APP_EXE=%APP_DIR%\WireVault FabOS.exe"
+set "LEGACY_DIR=%CD%\build\wirevaultfabos"
+set "LEGACY_EXE=%LEGACY_DIR%\wirevaultfabos.exe"
 
 echo.
 echo Verifying packaged Python runtime...
@@ -57,14 +59,40 @@ if not exist "%APP_EXE%" (
 )
 
 echo.
-echo BUILD OK
-echo Final application:
-echo   %APP_DIR%
-echo Executable:
-echo   %APP_EXE%
+echo Creating a legacy-compatible EXE location...
+if exist "%LEGACY_DIR%" rmdir /s /q "%LEGACY_DIR%"
+mkdir "%LEGACY_DIR%"
+xcopy "%APP_DIR%\*" "%LEGACY_DIR%\" /E /I /Y >nul
+if errorlevel 1 (
+  echo ERROR: Could not create the legacy-compatible package.
+  exit /b 1
+)
+copy /Y "%APP_EXE%" "%LEGACY_EXE%" >nul
+if errorlevel 1 (
+  echo ERROR: Could not create the legacy EXE name.
+  exit /b 1
+)
+
+if not exist "%LEGACY_DIR%\python311.dll" (
+  echo ERROR: Legacy-compatible package is missing python311.dll:
+  echo   %LEGACY_DIR%\python311.dll
+  exit /b 1
+)
+
+if not exist "%LEGACY_EXE%" (
+  echo ERROR: Legacy-compatible EXE is missing:
+  echo   %LEGACY_EXE%
+  exit /b 1
+)
+
 echo.
-echo IMPORTANT: Launch the EXE from dist\WireVault FabOS.
-echo Do not launch the analysis files under build\.
+echo BUILD OK
+echo Primary application:
+echo   %APP_EXE%
+echo Compatibility application:
+echo   %LEGACY_EXE%
+echo.
+echo Both locations contain the complete packaged runtime.
 echo.
 endlocal
 exit /b 0
