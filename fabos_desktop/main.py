@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 from datetime import datetime
 from pathlib import Path
+import sys
+import traceback
 import webbrowser
 import shutil
 import os
@@ -2605,9 +2607,43 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             except Exception:pass
             self.destroy()
 
+def _startup_log_path() -> Path:
+    if getattr(sys, "frozen", False):
+        root = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "FabOS"
+    else:
+        root = Path.cwd() / "logs"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "startup.log"
+
+
+def _startup_log(message: str) -> None:
+    try:
+        path = _startup_log_path()
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write("[%s] %s\\n" % (datetime.now().isoformat(timespec="seconds"), message))
+    except Exception:
+        pass
+
 
 def main() -> None:
-    FabOSDesktop().mainloop()
+    _startup_log("FabOS startup begin")
+    try:
+        if getattr(sys, "frozen", False):
+            os.chdir(str(Path(sys.executable).resolve().parent))
+            _startup_log("Frozen executable directory: %s" % Path(sys.executable).resolve().parent)
+        _startup_log("Creating FabOSDesktop")
+        app = FabOSDesktop()
+        _startup_log("FabOSDesktop created; entering mainloop")
+        app.mainloop()
+        _startup_log("FabOS mainloop exited")
+    except Exception:
+        details = traceback.format_exc()
+        _startup_log("STARTUP FAILURE\\n" + details)
+        try:
+            messagebox.showerror("FabOS failed to start", details)
+        except Exception:
+            pass
+        raise
 
 
 if __name__ == "__main__":
