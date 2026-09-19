@@ -66,5 +66,5 @@ echo.
 echo IMPORTANT: Launch the EXE from dist\WireVault FabOS.
 echo Do not launch the analysis files under build\.
 echo.
-pause
 endlocal
+exit /b 0
