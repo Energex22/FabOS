@@ -33,6 +33,8 @@ COLORS = {
     "muted": "#91a49b",
     "green": "#22c55e",
     "green_dark": "#168a4a",
+    "purple": "#8b5cf6",
+    "purple_dark": "#6d42d8",
     "blue": "#38bdf8",
     "mint": "#34d399",
     "orange": "#f59e0b",
