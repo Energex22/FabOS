@@ -88,9 +88,6 @@ class FabOSAPI:
             source = str(item.get("source_url") or "").strip()
             if raw.startswith(("http://", "https://", "/")):
                 item["url"] = raw
-            elif source.startswith(("http://", "https://")) and raw.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-                # Only expose a remote source when it is explicitly a public URL.
-                item["url"] = source
             else:
                 continue
             public.append(item)
