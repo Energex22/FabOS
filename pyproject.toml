@@ -10,6 +10,7 @@ dependencies=[
   "fastapi>=0.115,<1",
   "uvicorn>=0.30,<1",
   "python-multipart>=0.0.9,<1",
+  "waitress>=3,<4",
 ]
 
 [tool.setuptools.packages.find]
