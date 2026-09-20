@@ -460,8 +460,9 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         self._button(bar,"Refresh",lambda:self.show_page("Logs & Version")).pack(side="left",padx=7)
 
         card=self._card(self.content,"Application Log");card.pack(fill="both",expand=True)
+        shell=tk.Frame(card,bg=COLORS["surface"]);shell.pack(fill="both",expand=True,padx=12,pady=(0,12))
         cols=("time","level","message","detail")
-        table=ttk.Treeview(card,columns=cols,show="headings",style="Dark.Treeview")
+        table=ttk.Treeview(shell,columns=cols,show="headings",style="Dark.Treeview")
         for col,label,width in [("time","Time",145),("level","Level",75),("message","Message",250),("detail","Details",520)]:
             table.heading(col,text=label);table.column(col,width=width,anchor="w",stretch=(col=="detail"))
         for i,row in enumerate(self.core.error_log.recent(500)):
@@ -469,7 +470,6 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             table.insert("","end",iid="log_%d"%i,values=(row.get("time",""),row.get("level",""),row.get("message",""),detail),
                          tags=(str(row.get("level","")).lower(),))
         table.tag_configure("error",foreground=COLORS["red"]);table.tag_configure("warning",foreground=COLORS["orange"])
-        shell=tk.Frame(card,bg=COLORS["surface"]);shell.pack(fill="both",expand=True,padx=12,pady=(0,12))
         sy=ttk.Scrollbar(shell,orient="vertical",command=table.yview);sx=ttk.Scrollbar(shell,orient="horizontal",command=table.xview)
         table.configure(yscrollcommand=sy.set,xscrollcommand=sx.set)
         table.grid(row=0,column=0,sticky="nsew");sy.grid(row=0,column=1,sticky="ns");sx.grid(row=1,column=0,sticky="ew")
