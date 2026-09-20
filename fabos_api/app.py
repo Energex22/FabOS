@@ -155,6 +155,10 @@ class FabOSAPI:
                                               ip_address=client_ip,
                                               user_agent=(headers or {}).get("User-Agent"))
                 if result:
+                    account = result.get("user", {}).get("user", {}) if isinstance(result.get("user"), dict) else {}
+                    if str(account.get("account_type") or "").lower() != "customer":
+                        self.core.auth.logout(result.get("token", ""))
+                        return self._response(401, {"error": "This sign-in is not available through the customer storefront."})
                     self._clear_auth_attempts(client_ip)
                     return self._response(200, result)
                 return self._response(401, {"error": "Invalid email/username or password"})
