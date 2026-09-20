@@ -47,7 +47,7 @@ def _open_fabvex_storefront(self, product_id=None):
     ready = bool(readiness.get("ready"))
 
     win = tk.Toplevel(self)
-    win.title("Fabvex Storefront — " + str(product.get("name") or "Product"))
+    win.title("Fabvex Storefront — " + str(product["name"] or "Product"))
     win.geometry("650x560")
     win.minsize(560, 500)
     win.configure(bg=self._c("bg"))
@@ -62,7 +62,7 @@ def _open_fabvex_storefront(self, product_id=None):
         font=("Segoe UI", 19, "bold"), anchor="w",
     ).pack(fill="x")
     tk.Label(
-        body, text=str(product.get("name") or "Product"), bg=self._c("bg"), fg=self._c("muted"),
+        body, text=str(product["name"] or "Product"), bg=self._c("bg"), fg=self._c("muted"),
         font=("Segoe UI", 10), anchor="w", wraplength=580,
     ).pack(fill="x", pady=(4, 18))
 
@@ -112,7 +112,7 @@ def _open_fabvex_storefront(self, product_id=None):
                 pass
             messagebox.showinfo(
                 "Fabvex Storefront",
-                "%s is now %s in the Fabvex catalog." % (product.get("name"), str(updated.get("visibility") or new_visibility).upper()),
+                "%s is now %s in the Fabvex catalog." % (product["name"], str(updated.get("visibility") or new_visibility).upper()),
                 parent=win,
             )
             win.destroy()
