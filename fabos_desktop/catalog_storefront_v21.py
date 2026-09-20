@@ -38,6 +38,8 @@ def _open_fabvex_storefront(self, product_id=None):
         )
 
     product = self.core.products.get(product_id)
+    if product is not None:
+        product = dict(product)
     if not product:
         return messagebox.showerror("Fabvex Storefront", "The selected product no longer exists.", parent=self)
 
