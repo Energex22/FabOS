@@ -112,7 +112,9 @@ class FabOSAPI:
                 return self._response(200, {"products": [{**self._public_product(row), "images": self._public_images(self.core.products.images(row["id"]))} for row, _readiness in rows]})
 
             if route == ["api", self.VERSION, "catalog", "categories"] and method == "GET":
-                return self._response(200, {"categories": self.core.products.categories()})
+                rows = self.core.products.customer_catalog()
+                categories = sorted({str(row["category"] or "Other") for row, _readiness in rows if str(row["category"] or "").strip()})
+                return self._response(200, {"categories": categories})
 
             if len(route) == 4 and route[:3] == ["api", self.VERSION, "catalog"] and method == "GET":
                 product = self.core.products.get(route[3])
