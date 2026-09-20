@@ -270,8 +270,13 @@ class ProductService:
         rows = self.list(query=query, category=category, order_by=order_by, descending=descending)
         ready = []
         for row in rows:
+            # The public shop is a projection of the same publication boundary
+            # used by FabOS: the product must be explicitly published and meet
+            # the storefront readiness checks. This prevents draft/review items
+            # from leaking into the customer catalog.
+            state = self.storefront_state(row["id"])
             readiness = self.storefront_publication_readiness(row["id"])
-            if readiness["ready"]:
+            if state and state["visibility"] == "published" and readiness["ready"]:
                 ready.append((row, readiness))
         return ready
 
