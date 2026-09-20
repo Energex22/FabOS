@@ -323,7 +323,7 @@ def create_wsgi_app(core):
         except (ValueError, UnicodeDecodeError):
             body = {}
         headers = {"Authorization": environ.get("HTTP_AUTHORIZATION", ""), "User-Agent": environ.get("HTTP_USER_AGENT", ""),
-                   "X-Forwarded-For": environ.get("REMOTE_ADDR", "")}
+                   "X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR", "")}
         result = api.request(environ.get("REQUEST_METHOD", "GET"), environ.get("PATH_INFO", "/") + (("?" + environ["QUERY_STRING"]) if environ.get("QUERY_STRING") else ""), body, headers)
         payload = json.dumps(result["data"], default=str).encode("utf-8")
         status_text = {200: "OK", 201: "Created", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 500: "Internal Server Error"}.get(result["status"], "OK")
