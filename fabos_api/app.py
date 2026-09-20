@@ -84,12 +84,12 @@ class FabOSAPI:
                 return self._response(200, {"ok": True, "service": "FabOS", "api_version": self.VERSION})
 
             if route == ["api", self.VERSION, "catalog"] and method == "GET":
-                rows = self.core.products.list(
+                rows = self.core.products.customer_catalog(
                     query.get("q", [""])[0], query.get("category", ["All"])[0],
-                    query.get("license", ["All"])[0], query.get("sort", ["name"])[0],
+                    query.get("sort", ["name"])[0],
                     query.get("desc", ["0"])[0] not in ("0", "false", "no"),
                 )
-                return self._response(200, {"products": [self._public_product(row) for row in rows]})
+                return self._response(200, {"products": [self._public_product(row) for row, _readiness in rows]})
 
             if route == ["api", self.VERSION, "catalog", "categories"] and method == "GET":
                 return self._response(200, {"categories": self.core.products.categories()})
