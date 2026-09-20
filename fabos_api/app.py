@@ -68,6 +68,10 @@ class FabOSAPI:
             "name": data.get("name"),
             "category": data.get("category") or "Other",
             "description": data.get("description") or "",
+            "designer": data.get("designer") or "",
+            "source_url": data.get("source_url") or "",
+            "license_name": data.get("license_name") or "",
+            "license_status": data.get("license_status") or "",
             "price": round(float(data.get("price_cents") or 0) / 100.0, 2),
             "estimated_minutes": data.get("estimated_minutes") or 0,
             "estimated_filament_g": data.get("estimated_filament_g") or 0,
@@ -98,9 +102,11 @@ class FabOSAPI:
                 product = self.core.products.get(route[3])
                 if product is None:
                     raise KeyError("Product not found")
-                return self._response(200, {"product": self._public_product(product),
-                                            "images": self.core.products.images(route[3]),
-                                            "variants": self.core.products.variants(route[3])})
+                return self._response(200, {
+                    "product": self._public_product(product),
+                    "images": [dict(row) for row in self.core.products.images(route[3])],
+                    "variants": [dict(row) for row in self.core.products.variants(route[3])],
+                })
 
             if route == ["api", self.VERSION, "auth", "login"] and method == "POST":
                 result = self.core.auth.login(body.get("identifier", ""), body.get("password", ""),
