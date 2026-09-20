@@ -1,6 +1,8 @@
 import base64
 import binascii
 import json
+import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 
@@ -11,6 +13,25 @@ class FabOSAPI:
 
     def __init__(self, core):
         self.core = core
+        self._auth_attempts = {}
+        self._auth_attempts_lock = threading.Lock()
+
+    def _allow_auth_attempt(self, client_ip):
+        now = time.monotonic()
+        key = str(client_ip or "unknown").split(",")[0].strip()
+        with self._auth_attempts_lock:
+            attempts = [stamp for stamp in self._auth_attempts.get(key, []) if now - stamp < 900]
+            if len(attempts) >= 10:
+                self._auth_attempts[key] = attempts
+                return False
+            attempts.append(now)
+            self._auth_attempts[key] = attempts
+            return True
+
+    def _clear_auth_attempts(self, client_ip):
+        key = str(client_ip or "unknown").split(",")[0].strip()
+        with self._auth_attempts_lock:
+            self._auth_attempts.pop(key, None)
 
     @staticmethod
     def _row(value):
@@ -127,10 +148,16 @@ class FabOSAPI:
                 })
 
             if route == ["api", self.VERSION, "auth", "login"] and method == "POST":
+                client_ip = (headers or {}).get("X-Forwarded-For", "")
+                if not self._allow_auth_attempt(client_ip):
+                    return self._response(429, {"error": "Too many sign-in attempts. Please try again later."})
                 result = self.core.auth.login(body.get("identifier", ""), body.get("password", ""),
-                                              ip_address=(headers or {}).get("X-Forwarded-For"),
+                                              ip_address=client_ip,
                                               user_agent=(headers or {}).get("User-Agent"))
-                return self._response(200, result)
+                if result:
+                    self._clear_auth_attempts(client_ip)
+                    return self._response(200, result)
+                return self._response(401, {"error": "Invalid email/username or password"})
 
             if route == ["api", self.VERSION, "auth", "logout"] and method == "POST":
                 token = self._auth_token(headers)
@@ -342,7 +369,7 @@ def create_wsgi_app(core):
                    "X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR", "")}
         result = api.request(environ.get("REQUEST_METHOD", "GET"), environ.get("PATH_INFO", "/") + (("?" + environ["QUERY_STRING"]) if environ.get("QUERY_STRING") else ""), body, headers)
         payload = json.dumps(result["data"], default=str).encode("utf-8")
-        status_text = {200: "OK", 201: "Created", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 500: "Internal Server Error"}.get(result["status"], "OK")
+        status_text = {200: "OK", 201: "Created", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 429: "Too Many Requests", 500: "Internal Server Error"}.get(result["status"], "OK")
         start_response("%d %s" % (result["status"], status_text), [("Content-Type", "application/json; charset=utf-8"), ("Content-Length", str(len(payload)))])
         return [payload]
 
