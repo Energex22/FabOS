@@ -93,7 +93,7 @@ class FabOSAPI:
                     query.get("sort", ["name"])[0],
                     query.get("desc", ["0"])[0] not in ("0", "false", "no"),
                 )
-                return self._response(200, {"products": [self._public_product(row) for row, _readiness in rows]})
+                return self._response(200, {"products": [{**self._public_product(row), "images": [dict(image) for image in self.core.products.images(row["id"])]} for row, _readiness in rows]})
 
             if route == ["api", self.VERSION, "catalog", "categories"] and method == "GET":
                 return self._response(200, {"categories": self.core.products.categories()})
