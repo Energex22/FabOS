@@ -79,6 +79,23 @@ class FabOSAPI:
             "estimated_filament_g": data.get("estimated_filament_g") or 0,
         }
 
+    @staticmethod
+    def _public_images(rows):
+        public = []
+        for row in rows:
+            item = dict(row)
+            raw = str(item.get("path") or "").strip()
+            source = str(item.get("source_url") or "").strip()
+            if raw.startswith(("http://", "https://", "/")):
+                item["url"] = raw
+            elif source.startswith(("http://", "https://")) and raw.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                # Only expose a remote source when it is explicitly a public URL.
+                item["url"] = source
+            else:
+                continue
+            public.append(item)
+        return public
+
     def request(self, method, path, body=None, headers=None):
         method = (method or "GET").upper()
         parsed = urlsplit(path or "/")
@@ -95,7 +112,7 @@ class FabOSAPI:
                     query.get("sort", ["name"])[0],
                     query.get("desc", ["0"])[0] not in ("0", "false", "no"),
                 )
-                return self._response(200, {"products": [{**self._public_product(row), "images": [dict(image) for image in self.core.products.images(row["id"])]} for row, _readiness in rows]})
+                return self._response(200, {"products": [{**self._public_product(row), "images": self._public_images(self.core.products.images(row["id"]))} for row, _readiness in rows]})
 
             if route == ["api", self.VERSION, "catalog", "categories"] and method == "GET":
                 return self._response(200, {"categories": self.core.products.categories()})
@@ -106,7 +123,7 @@ class FabOSAPI:
                     raise KeyError("Product not found")
                 return self._response(200, {
                     "product": self._public_product(product),
-                    "images": [dict(row) for row in self.core.products.images(route[3])],
+                    "images": self._public_images(self.core.products.images(route[3])),
                     "variants": [dict(row) for row in self.core.products.variants(route[3])],
                 })
 
