@@ -176,4 +176,7 @@ class AccountService:
             raise KeyError("User not found")
         customer = self.customer_for_user(user_id)
         employee = self.employee_for_user(user_id)
-        return {"user": user, "customer": customer, "employee": employee}
+        # Account summaries cross the API boundary. Never expose password
+        # hashes or other authentication material to the storefront.
+        public_user = {key: user[key] for key in user.keys() if key not in {"password_hash"}}
+        return {"user": public_user, "customer": customer, "employee": employee}
