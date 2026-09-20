@@ -360,6 +360,11 @@ def create_wsgi_app(core):
 
     def application(environ, start_response):
         length = int(environ.get("CONTENT_LENGTH") or 0)
+        max_body = 36 * 1024 * 1024
+        if length > max_body:
+            payload = json.dumps({"error": "Request body is too large"}).encode("utf-8")
+            start_response("413 Request Entity Too Large", [("Content-Type", "application/json; charset=utf-8"), ("Cache-Control", "no-store"), ("Content-Length", str(len(payload)))])
+            return [payload]
         raw = environ["wsgi.input"].read(length) if length else b""
         try:
             body = json.loads(raw.decode("utf-8")) if raw else {}
@@ -370,7 +375,7 @@ def create_wsgi_app(core):
         result = api.request(environ.get("REQUEST_METHOD", "GET"), environ.get("PATH_INFO", "/") + (("?" + environ["QUERY_STRING"]) if environ.get("QUERY_STRING") else ""), body, headers)
         payload = json.dumps(result["data"], default=str).encode("utf-8")
         status_text = {200: "OK", 201: "Created", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 429: "Too Many Requests", 500: "Internal Server Error"}.get(result["status"], "OK")
-        start_response("%d %s" % (result["status"], status_text), [("Content-Type", "application/json; charset=utf-8"), ("Content-Length", str(len(payload)))])
+        start_response("%d %s" % (result["status"], status_text), [("Content-Type", "application/json; charset=utf-8"), ("Cache-Control", "no-store"), ("Content-Length", str(len(payload)))])
         return [payload]
 
     return application
