@@ -273,7 +273,7 @@ class ProductService:
             return {}
         try:
             from fabos_core.services.design_vault import DesignVaultService
-            return DesignVaultService(self.database).product_print_status_map(ids)
+            return DesignVaultService(self.database, self.database.path.parent).product_print_status_map(ids)
         except Exception:
             return {}
 
