@@ -2091,21 +2091,35 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         return images[0]
 
     def _load_display_photo(self, path, max_size=(760, 500)):
-        """Load and scale common image formats. Pillow is optional but recommended."""
+        """Load a safe thumbnail without allowing one bad image to break the catalog UI."""
+        path = Path(path)
+        if not path.exists() or not path.is_file():
+            return None
         try:
-            from PIL import Image, ImageTk
-            image = Image.open(str(path))
-            image.thumbnail(max_size, Image.LANCZOS)
-            return ImageTk.PhotoImage(image)
+            from PIL import Image, ImageTk, ImageOps
+            # Keep extremely large web images from exhausting memory while still
+            # allowing normal high-resolution product photos.
+            with Image.open(str(path)) as source:
+                source.verify()
+            with Image.open(str(path)) as source:
+                source = ImageOps.exif_transpose(source)
+                if getattr(source, "width", 0) <= 0 or getattr(source, "height", 0) <= 0:
+                    return None
+                source.thumbnail(max_size, Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS)
+                # PhotoImage handles RGB/RGBA consistently across Pillow/Tk builds.
+                if source.mode not in ("RGB", "RGBA"):
+                    source = source.convert("RGBA" if "transparency" in source.info else "RGB")
+                return ImageTk.PhotoImage(source.copy())
         except ImportError:
+            # Pillow is recommended for WEBP/BMP and robust decoding, but keep
+            # PNG/GIF usable on a clean install.
             try:
                 photo = tk.PhotoImage(file=str(path))
-                # Reduce oversized PNG/GIF images with integer subsampling.
                 sx = max(1, int(photo.width() / max_size[0]) + (1 if photo.width() > max_size[0] else 0))
                 sy = max(1, int(photo.height() / max_size[1]) + (1 if photo.height() > max_size[1] else 0))
                 factor = max(sx, sy)
                 return photo.subsample(factor, factor) if factor > 1 else photo
-            except tk.TclError:
+            except (tk.TclError, OSError):
                 return None
         except Exception:
             return None
@@ -2204,9 +2218,16 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         side.pack(side="right", fill="y", padx=(6, 12), pady=(6, 12))
         side.pack_propagate(False)
         rows = list(self.core.products.images(product_id))
-        listbox = tk.Listbox(side, bg=COLORS["surface_alt"], fg=COLORS["text"], selectbackground=COLORS["purple_dark"],
-                            selectforeground="white", relief="flat", font=("Segoe UI", 9), exportselection=False)
-        listbox.pack(fill="both", expand=True)
+        list_shell = tk.Frame(side, bg=COLORS["surface"])
+        list_shell.pack(fill="both", expand=True)
+        listbox = tk.Listbox(list_shell, bg=COLORS["surface_alt"], fg=COLORS["text"],
+                            selectbackground=COLORS["purple_dark"], selectforeground="white",
+                            relief="flat", font=("Segoe UI", 9), exportselection=False,
+                            activestyle="none")
+        list_scroll = ttk.Scrollbar(list_shell, orient="vertical", command=listbox.yview)
+        listbox.configure(yscrollcommand=list_scroll.set)
+        listbox.pack(side="left", fill="both", expand=True)
+        list_scroll.pack(side="right", fill="y")
         for row in rows:
             name = Path(str(row["path"])).name
             flags = []
