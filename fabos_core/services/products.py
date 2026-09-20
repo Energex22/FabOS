@@ -261,21 +261,19 @@ class ProductService:
         return self.storefront_publication_readiness(product_id)["ready"]
 
     def customer_catalog(self, query="", category="All", order_by="name", descending=False):
-        rows = self.list(query=query, category=category, order_by=order_by, descending=descending)
-        if not rows:
-            return []
-        readiness = self._readiness_map([row["id"] for row in rows])
-        return [(row, readiness[row["id"]]) for row in rows if readiness.get(row["id"], {}).get("ready")]
+        """Return products currently ready for the customer shop.
 
-    def _readiness_map(self, product_ids):
-        ids = list(product_ids or [])
-        if not ids:
-            return {}
-        try:
-            from fabos_core.services.design_vault import DesignVaultService
-            return DesignVaultService(self.database, self.database.path.parent).product_print_status_map(ids)
-        except Exception:
-            return {}
+        This uses the same product readiness rules exposed by the FabOS
+        Products/Ready to Print workflow, so the shop does not maintain a
+        second product list.
+        """
+        rows = self.list(query=query, category=category, order_by=order_by, descending=descending)
+        ready = []
+        for row in rows:
+            readiness = self.storefront_publication_readiness(row["id"])
+            if readiness["ready"]:
+                ready.append((row, readiness))
+        return ready
 
     def save_storefront(self, product_id, values):
         self._ensure_storefront_schema()
