@@ -262,12 +262,20 @@ class ProductService:
 
     def customer_catalog(self, query="", category="All", order_by="name", descending=False):
         rows = self.list(query=query, category=category, order_by=order_by, descending=descending)
-        eligible = []
-        for row in rows:
-            state = self.storefront_state(row["id"])
-            if state and self.is_customer_eligible(row["id"]):
-                eligible.append((row, state))
-        return eligible
+        if not rows:
+            return []
+        readiness = self._readiness_map([row["id"] for row in rows])
+        return [(row, readiness[row["id"]]) for row in rows if readiness.get(row["id"], {}).get("ready")]
+
+    def _readiness_map(self, product_ids):
+        ids = list(product_ids or [])
+        if not ids:
+            return {}
+        try:
+            from fabos_core.services.design_vault import DesignVaultService
+            return DesignVaultService(self.database).product_print_status_map(ids)
+        except Exception:
+            return {}
 
     def save_storefront(self, product_id, values):
         self._ensure_storefront_schema()
