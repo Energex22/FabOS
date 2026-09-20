@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 from urllib.parse import parse_qs, urlsplit
 
@@ -194,8 +196,21 @@ class FabOSAPI:
                 return self._response(201, result)
 
             if route == ["api", self.VERSION, "quote-requests"] and method == "POST":
+                file_bytes = None
+                file_base64 = body.get("file_base64") or ""
+                if file_base64:
+                    try:
+                        file_bytes = base64.b64decode(file_base64, validate=True)
+                    except (ValueError, binascii.Error) as exc:
+                        raise ValueError("Reference file payload is invalid") from exc
+                    if len(file_bytes) > 25 * 1024 * 1024:
+                        raise ValueError("Reference file exceeds the 25 MB limit")
                 quote, items = self.core.customer_commerce.create_public_quote_request(
-                    body.get("name", ""), body.get("email", ""), body.get("project") or body
+                    body.get("name", ""),
+                    body.get("email", ""),
+                    body.get("project") or body,
+                    body.get("file_name", ""),
+                    file_bytes,
                 )
                 return self._response(201, {"quote": quote, "items": items, "request_number": quote["quote_number"]})
 
