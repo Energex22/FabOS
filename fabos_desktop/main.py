@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import sys
 import traceback
+import faulthandler
 import webbrowser
 import shutil
 import os
@@ -2627,16 +2628,38 @@ def _startup_log(message: str) -> None:
 
 def main() -> None:
     _startup_log("FabOS startup begin")
+    dump_file = None
     try:
         if getattr(sys, "frozen", False):
             os.chdir(str(Path(sys.executable).resolve().parent))
             _startup_log("Frozen executable directory: %s" % Path(sys.executable).resolve().parent)
+        try:
+            dump_path = _startup_log_path().with_name("startup_hang_trace.log")
+            dump_file = dump_path.open("w", encoding="utf-8")
+            faulthandler.dump_traceback_later(15, file=dump_file, repeat=True)
+            _startup_log("Hang watchdog armed: 15 seconds")
+        except Exception as exc:
+            _startup_log("Could not arm hang watchdog: %s" % exc)
         _startup_log("Creating FabOSDesktop")
         app = FabOSDesktop()
         _startup_log("FabOSDesktop created; entering mainloop")
+        if dump_file is not None:
+            faulthandler.cancel_dump_traceback_later()
+            dump_file.close()
+            dump_file = None
+            _startup_log("Hang watchdog cancelled")
         app.mainloop()
         _startup_log("FabOS mainloop exited")
     except Exception:
+        try:
+            faulthandler.cancel_dump_traceback_later()
+        except Exception:
+            pass
+        if dump_file is not None:
+            try:
+                dump_file.close()
+            except Exception:
+                pass
         details = traceback.format_exc()
         _startup_log("STARTUP FAILURE\\n" + details)
         try:
