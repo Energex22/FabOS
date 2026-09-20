@@ -124,6 +124,81 @@ class FabOSAPI:
                 context = self._context(headers)
                 return self._response(200, {"user": self.core.accounts.account_summary(context["id"])})
 
+            if route == ["api", self.VERSION, "customer", "me"] and method == "GET":
+                context = self._context(headers)
+                return self._response(200, self.core.accounts.account_summary(context["id"]))
+
+            if route == ["api", self.VERSION, "customer", "me"] and method == "PATCH":
+                context = self._context(headers)
+                customer = self.core.accounts.customer_for_user(context["id"])
+                if not customer:
+                    raise PermissionError("Customer account is not linked")
+                allowed = {"name", "email", "phone", "notes"}
+                payload = {key: body.get(key) for key in allowed if key in body}
+                if payload:
+                    self.core.customers.save(payload, customer["id"])
+                return self._response(200, self.core.accounts.account_summary(context["id"]))
+
+            if route == ["api", self.VERSION, "customer", "quotes"] and method == "POST":
+                context = self._context(headers)
+                quote, items = self.core.customer_commerce.create_quote_request(context["id"], body.get("project") or body)
+                return self._response(201, {"quote": quote, "items": items, "quote_number": quote["quote_number"]})
+
+            if route == ["api", self.VERSION, "customer", "quotes"] and method == "GET":
+                context = self._context(headers)
+                return self._response(200, {"quotes": self.core.quotes.list_for_user(context["id"])})
+
+            if len(route) == 5 and route[:4] == ["api", self.VERSION, "customer", "quotes"] and method == "GET":
+                context = self._context(headers)
+                quote, items = self.core.quotes.get_for_user(context["id"], route[4])
+                return self._response(200, {"quote": quote, "items": items})
+
+            if route == ["api", self.VERSION, "customer", "orders"] and method == "POST":
+                context = self._context(headers)
+                payload = body or {}
+                result = self.core.customer_commerce.create_order(
+                    context["id"], payload.get("items") or [],
+                    payload.get("shippingAddress") or payload.get("shipping_address") or {},
+                    payload.get("notes") or ""
+                )
+                order, saved_items, subtotal, shipping, tax, total = result
+                return self._response(201, {
+                    "order": dict(order),
+                    "items": [dict(item) for item in saved_items],
+                    "totals": {
+                        "subtotal": subtotal / 100.0,
+                        "shipping": shipping / 100.0,
+                        "tax": tax / 100.0,
+                        "total": total / 100.0,
+                    },
+                })
+
+            if route == ["api", self.VERSION, "customer", "orders"] and method == "GET":
+                context = self._context(headers)
+                return self._response(200, {"orders": self.core.orders.list_for_user(context["id"])})
+
+            if len(route) == 5 and route[:4] == ["api", self.VERSION, "customer", "orders"] and method == "GET":
+                context = self._context(headers)
+                order, items = self.core.orders.get_for_user(context["id"], route[4])
+                return self._response(200, {"order": order, "items": items})
+
+            if len(route) == 6 and route[:5] == ["api", self.VERSION, "customer", "orders"] and route[5] == "payment-session" and method == "POST":
+                context = self._context(headers)
+                payment = self.core.payments.create_checkout(context["id"], route[4])
+                return self._response(200, {"payment": payment})
+
+            if route == ["api", self.VERSION, "auth", "register"] and method == "POST":
+                result = self.core.customer_commerce.register_customer(
+                    body.get("name", ""), body.get("email", ""), body.get("password", ""), body.get("phone", "")
+                )
+                return self._response(201, result)
+
+            if route == ["api", self.VERSION, "quote-requests"] and method == "POST":
+                quote, items = self.core.customer_commerce.create_public_quote_request(
+                    body.get("name", ""), body.get("email", ""), body.get("project") or body
+                )
+                return self._response(201, {"quote": quote, "items": items, "request_number": quote["quote_number"]})
+
             if route[:3] == ["api", self.VERSION, "products"]:
                 if len(route) == 3 and method == "GET":
                     self._context(headers, "product.read")
@@ -236,7 +311,7 @@ def create_wsgi_app(core):
                    "X-Forwarded-For": environ.get("REMOTE_ADDR", "")}
         result = api.request(environ.get("REQUEST_METHOD", "GET"), environ.get("PATH_INFO", "/") + (("?" + environ["QUERY_STRING"]) if environ.get("QUERY_STRING") else ""), body, headers)
         payload = json.dumps(result["data"], default=str).encode("utf-8")
-        status_text = {200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 500: "Internal Server Error"}.get(result["status"], "OK")
+        status_text = {200: "OK", 201: "Created", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 500: "Internal Server Error"}.get(result["status"], "OK")
         start_response("%d %s" % (result["status"], status_text), [("Content-Type", "application/json; charset=utf-8"), ("Content-Length", str(len(payload)))])
         return [payload]
 
