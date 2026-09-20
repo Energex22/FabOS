@@ -2,6 +2,9 @@
 
 import json
 import uuid
+import hashlib
+import re
+from pathlib import Path
 from datetime import date, timedelta
 
 
@@ -44,7 +47,23 @@ class CustomerCommerceService:
             raise RuntimeError("Customer account could not be authenticated after creation")
         return result
 
-    def create_public_quote_request(self, name, email, project):
+    def _ensure_public_quote_files_schema(self):
+        with self.database.connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS quote_request_files(
+                    id TEXT PRIMARY KEY,
+                    quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+                    original_name TEXT NOT NULL,
+                    stored_path TEXT NOT NULL,
+                    bytes INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_quote_request_files_quote ON quote_request_files(quote_id)")
+            conn.commit()
+
+    def create_public_quote_request(self, name, email, project, file_name="", file_bytes=None):
         """Create a storefront lead/quote without requiring an account."""
         self._require_storefront()
         name = str(name or "").strip()
@@ -78,7 +97,6 @@ class CustomerCommerceService:
                     (customer_id, name, email, str(project.get("phone") or "").strip(), ""),
                 )
                 conn.commit()
-            customer_id = customer_id
         else:
             customer_id = customer["id"]
         quote_id = self.quotes.save(
@@ -94,6 +112,27 @@ class CustomerCommerceService:
                 "estimated_filament_g": 0,
             }],
         )
+        self._ensure_public_quote_files_schema()
+        if file_bytes:
+            allowed = {".stl", ".3mf", ".obj", ".step", ".stp"}
+            original = Path(str(file_name or "reference_model")).name
+            suffix = Path(original).suffix.lower()
+            if suffix not in allowed:
+                raise ValueError("Unsupported reference file type")
+            if len(file_bytes) > 25 * 1024 * 1024:
+                raise ValueError("Reference file exceeds the 25 MB limit")
+            safe = re.sub(r"[^A-Za-z0-9._-]+", "_", original).strip("._") or "reference_model"
+            root = Path(self.database.path).resolve().parent / "Quote Uploads"
+            root.mkdir(parents=True, exist_ok=True)
+            target = root / (quote_id + "_" + safe)
+            target.write_bytes(file_bytes)
+            digest = hashlib.sha256(file_bytes).hexdigest()
+            with self.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO quote_request_files(id,quote_id,original_name,stored_path,bytes,sha256) VALUES(?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), quote_id, original, str(target), len(file_bytes), digest),
+                )
+                conn.commit()
         return self.quotes.get(quote_id)
 
     def _customer(self, user_id):
