@@ -60,7 +60,10 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         self._console_idle_after_id = None
         self._console_locked = False
         self._configure_styles()
-        self.withdraw()
+        # Keep the root window visible while the modal login is created.
+        # A withdrawn Tk root can leave a Toplevel login effectively invisible
+        # on some Windows/PyInstaller combinations.
+        _startup_log("FabOSDesktop core initialized; showing login")
         if not self._console_login():
             self.destroy()
             return
@@ -99,6 +102,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         win.resizable(False, False)
         win.configure(bg=COLORS["bg"])
         win.transient(self)
+        win.attributes("-topmost", True)
         win.grab_set()
         result = {"authenticated": False}
         card = tk.Frame(win, bg=COLORS["surface"], highlightbackground=COLORS["border"], highlightthickness=1)
@@ -130,8 +134,13 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         pass_entry.bind("<Return>", submit)
         user_entry.focus_set()
         self.update_idletasks()
+        win.update_idletasks()
+        win.deiconify()
         win.lift()
+        win.focus_force()
+        _startup_log("Login window displayed; waiting for authentication")
         self.wait_window(win)
+        _startup_log("Login window closed")
         try:
             win.grab_release()
         except Exception:
