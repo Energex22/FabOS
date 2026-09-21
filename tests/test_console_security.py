@@ -61,7 +61,8 @@ class ConsoleSecurityTests(unittest.TestCase):
         for _ in range(self.security.MAX_FAILED_ATTEMPTS):
             self.assertIsNone(self.security.authenticate_owner("owner", "wrong-password"))
         self.assertIsNone(self.security.authenticate_owner("owner", "owner-password"))
-        with mock.patch("fabos_core.services.console_security.time.monotonic", return_value=1000.0 + self.security.LOCKOUT_SECONDS + 1):
+        lockout_expiry = self.security._locked_until
+        with mock.patch("fabos_core.services.console_security.time.monotonic", return_value=lockout_expiry + 1):
             self.assertIsNotNone(self.security.authenticate_owner("owner", "owner-password"))
 
     def test_password_change_revokes_existing_sessions(self):
