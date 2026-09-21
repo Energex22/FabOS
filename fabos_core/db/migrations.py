@@ -49,7 +49,8 @@ CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id,revoked_at);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_expiry ON auth_sessions(expires_at);
 CREATE TABLE IF NOT EXISTS password_reset_tokens(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,token_hash TEXT UNIQUE NOT NULL,expires_at TEXT NOT NULL,used_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id,used_at);"""),(39,"""ALTER TABLE orders ADD COLUMN tax_cents INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id,used_at);"""),
+(39,"""ALTER TABLE orders ADD COLUMN tax_cents INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE orders ADD COLUMN shipping_cents INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE orders ADD COLUMN shipping_address_json TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE orders ADD COLUMN checkout_notes TEXT NOT NULL DEFAULT '';
