@@ -302,8 +302,23 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         if not customer:
             raise HTTPException(status_code=409, detail="Customer account is not linked")
         values = {key: value for key, value in payload.model_dump().items() if value is not None}
+        if "email" in values:
+            email = str(values["email"] or "").strip().lower()
+            if not email or "@" not in email:
+                raise HTTPException(status_code=400, detail="A valid email is required")
+            existing = application.accounts.get_by_email(email)
+            if existing and str(existing["id"]) != str(user["id"]):
+                raise HTTPException(status_code=409, detail="An account with that email already exists")
+            values["email"] = email
+            try:
+                application.accounts.update_account(user["id"], email=email)
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         if values:
-            application.customers.save(values, customer_id=customer["id"])
+            try:
+                application.customers.save(values, customer_id=customer["id"])
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         updated_user = application.accounts.get_user(user["id"])
         return {"user": _user_payload(updated_user), "customer": _customer_payload(application.accounts.customer_for_user(user["id"]))}
 
