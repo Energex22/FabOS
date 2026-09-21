@@ -212,7 +212,7 @@ class PaymentService:
             if not payment_id and event.get("order_id"):
                 with self.database.connect() as conn:
                     row=conn.execute("SELECT id FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",(event["order_id"],)).fetchone();payment_id=row["id"] if row else None
-            if payment_id and event.get("status") in self.VALID_STATUSES:
+            if payment_id and event.get("status") in self.VALID_STATUSES and "refund" not in str(event.get("event_type") or "").lower():
                 with self.database.connect() as conn:
                     payment_row=conn.execute("SELECT id,order_id,invoice_id,amount_cents,provider,provider_payment_id FROM payment_transactions WHERE id=?",(payment_id,)).fetchone()
                 if not payment_row:
