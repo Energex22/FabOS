@@ -14,6 +14,7 @@ import os
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fabos_core.services.rate_limit import RateLimiter
 from pydantic import BaseModel, Field
 
@@ -140,6 +141,10 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     app.state.fabos = fabos
     app.state.auth_rate_limiter = RateLimiter(10, 300)
     app.state.public_rate_limiter = RateLimiter(30, 3600)
+
+    allowed_hosts = [x.strip() for x in os.environ.get("FABOS_ALLOWED_HOSTS", "").split(",") if x.strip()]
+    if allowed_hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
     origins = [x.strip() for x in os.environ.get("FABOS_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if x.strip()]
     app.add_middleware(
