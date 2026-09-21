@@ -187,7 +187,7 @@ class PaymentService:
         with self.database.connect() as conn:
             existing=conn.execute("SELECT 1 FROM payment_webhook_events WHERE id=?",(event_id,)).fetchone()
             if existing: return {"processed":False,"duplicate":True,"event_id":event_id}
-            conn.execute("INSERT INTO payment_webhook_events(id,provider,event_type,payment_id) VALUES(?,?,?,?,?)".replace("?,?,?,?,?","?,?,?,?"),(event_id,provider.name,event.get("event_type"),event.get("payment_id") or event.get("provider_payment_id")));conn.commit()
+            conn.execute("INSERT INTO payment_webhook_events(id,provider,event_type,payment_id) VALUES(?,?,?,?)",(event_id,provider.name,event.get("event_type"),event.get("payment_id") or event.get("provider_payment_id")));conn.commit()
         try:
             payment_id=event.get("payment_id")
             if not payment_id and event.get("provider_payment_id"):
