@@ -49,6 +49,23 @@ class Pass16AuthTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIsNotNone(self.accounts.get_user("u1")["last_login_at"])
 
+    def test_cleanup_expired_records(self):
+        session = self.auth.login("admin1", "correct-password")
+        reset = self.auth.request_password_reset("admin@example.com")
+        with self.db.connect() as connection:
+            connection.execute(
+                "UPDATE auth_sessions SET expires_at=? WHERE token_hash=?",
+                ("2000-01-01T00:00:00", self.auth._token_hash(session["token"])),
+            )
+            connection.execute(
+                "UPDATE password_reset_tokens SET expires_at=? WHERE token_hash=?",
+                ("2000-01-01T00:00:00", self.auth._token_hash(reset["token"])),
+            )
+            connection.commit()
+        counts = self.auth.cleanup_expired()
+        self.assertEqual(counts["sessions"], 1)
+        self.assertEqual(counts["password_resets"], 1)
+
     def test_password_reset_revokes_sessions(self):
         session = self.auth.login("admin1", "correct-password")
         reset = self.auth.request_password_reset("admin@example.com")
