@@ -55,7 +55,8 @@ ALTER TABLE orders ADD COLUMN shipping_cents INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE orders ADD COLUMN shipping_address_json TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE orders ADD COLUMN checkout_notes TEXT NOT NULL DEFAULT '';
 ALTER TABLE orders ADD COLUMN checkout_channel TEXT NOT NULL DEFAULT 'internal';
-CREATE INDEX IF NOT EXISTS idx_orders_checkout_channel ON orders(checkout_channel);""")(37,"""UPDATE users SET role=CASE WHEN account_type='administrator' THEN role ELSE account_type END WHERE lower(COALESCE(role,''))='owner' AND lower(COALESCE(account_type,''))<>'administrator';
+CREATE INDEX IF NOT EXISTS idx_orders_checkout_channel ON orders(checkout_channel);"""),
+(40,"""UPDATE users SET role=CASE WHEN account_type='administrator' THEN role ELSE account_type END WHERE lower(COALESCE(role,''))='owner' AND lower(COALESCE(account_type,''))<>'administrator';
 CREATE TRIGGER IF NOT EXISTS trg_users_default_role_guard AFTER INSERT ON users
 WHEN lower(COALESCE(NEW.role,''))='owner' AND lower(COALESCE(NEW.account_type,''))<>'administrator'
 BEGIN
