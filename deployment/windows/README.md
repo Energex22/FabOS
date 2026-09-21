@@ -39,3 +39,13 @@ Local backups are not a complete disaster-recovery strategy. Periodically copy a
 A backup is not considered verified until a ZIP can be extracted and its `fabos.sqlite3` can be opened by SQLite. Test restores should be performed against a separate temporary FabOS data directory, never over the live database.
 
 Do not commit backup ZIP files to Git.
+
+## Production host protection
+
+Set these environment variables when the API is behind Caddy or another reverse proxy:
+
+- `FABOS_API_HOST=127.0.0.1` so the API is not directly exposed to the network.
+- `FABOS_CORS_ORIGINS=https://your-public-domain` using the exact storefront origin.
+- `FABOS_ALLOWED_HOSTS=your-public-domain` to reject unexpected HTTP Host headers.
+
+If more than one public hostname is intentionally served, list them comma-separated. Do not use a wildcard unless the deployment genuinely requires it.
