@@ -139,6 +139,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     fabos = application or FabOSApplication()
     app.state.fabos = fabos
     app.state.auth_rate_limiter = RateLimiter(10, 300)
+    app.state.public_rate_limiter = RateLimiter(30, 3600)
 
     origins = [x.strip() for x in os.environ.get("FABOS_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if x.strip()]
     app.add_middleware(
