@@ -4,11 +4,40 @@ from typing import Any, Dict, List, Optional
 import os
 import tempfile
 import uuid
+import zipfile
 from fastapi import Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 MAX_CUSTOM_UPLOAD_BYTES = 25 * 1024 * 1024
 ALLOWED_CUSTOM_UPLOAD_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj"}
+MAX_3MF_MEMBERS = 500
+MAX_3MF_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+MAX_3MF_COMPRESSION_RATIO = 100
+
+
+def _validate_3mf(path):
+    """Reject malformed/path-traversal/zip-bomb style 3MF archives before import."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_3MF_MEMBERS:
+                raise ValueError("3MF archive contains too many files")
+            total = 0
+            for member in members:
+                name = str(member.filename or "").replace("\\\\", "/")
+                if not name or name.startswith("/") or any(part == ".." for part in name.split("/")):
+                    raise ValueError("3MF archive contains an unsafe path")
+                if member.is_dir():
+                    continue
+                total += int(member.file_size or 0)
+                if total > MAX_3MF_UNCOMPRESSED_BYTES:
+                    raise ValueError("3MF archive expands beyond the allowed size")
+                compressed = int(member.compress_size or 0)
+                if member.file_size and (compressed == 0 or member.file_size / max(1, compressed) > MAX_3MF_COMPRESSION_RATIO):
+                    raise ValueError("3MF archive compression ratio is unsafe")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Invalid 3MF archive") from exc
+
 
 
 def _json(value):
