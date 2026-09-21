@@ -72,7 +72,7 @@ class StripePaymentProvider(PaymentProvider):
         elif event_type in {"checkout.session.async_payment_failed","payment_intent.payment_failed","charge.failed"}: status="failed"
         elif event_type=="checkout.session.expired": status="cancelled"
         elif event_type in {"charge.refunded","refund.created"}: status="refunded"
-        return {"event_id":str(event.get("id") or ""),"event_type":event_type,"provider_payment_id":str(obj.get("payment_intent") or obj.get("id") or ""),"payment_id":str(metadata.get("payment_id") or ""),"order_id":str(metadata.get("order_id") or obj.get("client_reference_id") or ""),"status":status,"amount_cents":amount_cents}
+        return {"event_id":str(event.get("id") or ""),"event_type":event_type,"provider_payment_id":str(obj.get("payment_intent") or obj.get("id") or ""),"payment_id":str(metadata.get("payment_id") or ""),"order_id":str(metadata.get("order_id") or obj.get("client_reference_id") or ""),"invoice_id":str(metadata.get("invoice_id") or ""),"metadata":metadata,"status":status,"amount_cents":amount_cents}
 
 
 class SquarePaymentProvider(PaymentProvider):
