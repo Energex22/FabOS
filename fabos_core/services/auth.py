@@ -65,6 +65,7 @@ class AuthService:
         return True
 
     def login(self, identifier, password, ip_address=None, user_agent=None):
+        self.cleanup_expired()
         identifier = (identifier or "").strip()
         user = self.accounts.get_by_email(identifier) if "@" in identifier else self.accounts.get_by_username(identifier)
         if not user or not int(user["active"]):
@@ -107,6 +108,22 @@ class AuthService:
 
     def logout(self, token):
         return self.revoke(token)
+
+    def cleanup_expired(self):
+        """Remove expired/revoked authentication records that no longer serve a purpose."""
+        now = datetime.utcnow().isoformat()
+        with self.database.connect() as connection:
+            session_cursor = connection.execute(
+                "DELETE FROM auth_sessions WHERE (expires_at <= ? OR revoked_at IS NOT NULL) AND "
+                "COALESCE(revoked_at, expires_at) <= ?",
+                (now, now),
+            )
+            reset_cursor = connection.execute(
+                "DELETE FROM password_reset_tokens WHERE expires_at <= ? OR used_at IS NOT NULL",
+                (now,),
+            )
+            connection.commit()
+        return {"sessions": session_cursor.rowcount, "password_resets": reset_cursor.rowcount}
 
     def revoke(self, token):
         if not token:
