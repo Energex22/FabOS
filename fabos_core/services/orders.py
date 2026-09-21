@@ -60,6 +60,20 @@ class OrderService:
         customer=self.accounts.customer_for_user(user_id)
         if not customer:return []
         return [row for row in self.list(query,status,sort_column,descending,group) if row["customer_id"]==customer["id"]]
+    @staticmethod
+    def _completion_payment_ready(conn, order_id):
+        order = conn.execute("SELECT total_cents FROM orders WHERE id=?", (order_id,)).fetchone()
+        if not order:
+            raise KeyError("Order not found")
+        total = int(order["total_cents"] or 0)
+        if total <= 0:
+            return True
+        invoice = conn.execute(
+            "SELECT total_cents,paid_cents FROM invoices WHERE order_id=? AND status<>'void' ORDER BY created_at DESC LIMIT 1",
+            (order_id,),
+        ).fetchone()
+        return bool(invoice and int(invoice["paid_cents"] or 0) >= int(invoice["total_cents"] or 0) and int(invoice["total_cents"] or 0) >= total)
+
     def set_status(self,order_id,status,actor_user_id=None):
         self._require(actor_user_id,"order.manage"); requested=(status or "").strip().lower()
         if requested not in self.ORDER_TRANSITIONS:raise ValueError("Unsupported order status")
@@ -71,6 +85,8 @@ class OrderService:
             allowed=self.ORDER_TRANSITIONS.get(current)
             if allowed is None:raise ValueError("Order has unsupported current status: %s"%current)
             if requested not in allowed:raise ValueError("Invalid order transition: %s -> %s"%(current,requested))
+            if requested == "completed" and not self._completion_payment_ready(conn, order_id):
+                raise ValueError("Order cannot be completed until the order total is fully paid")
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
         return self.get(order_id)[0]
     def set_status_internal(self,order_id,status,reason=""):
@@ -83,6 +99,8 @@ class OrderService:
             if current==requested:return self.get(order_id)[0]
             allowed=self.ORDER_TRANSITIONS.get(current)
             if allowed is None or requested not in allowed:raise ValueError("Invalid order transition: %s -> %s"%(current,requested))
+            if requested == "completed" and not self._completion_payment_ready(conn, order_id):
+                raise ValueError("Order cannot be completed until the order total is fully paid")
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
         return self.get(order_id)[0]
     def dossier(self, order_id):
