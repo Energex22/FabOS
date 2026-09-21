@@ -149,6 +149,8 @@ class PaymentService:
             if existing:
                 status=str(existing["status"] or "").lower()
                 if status not in {"failed","cancelled"} and not (status=="created" and str(existing["provider"] or "").lower()=="unconfigured"):
+                    if str(existing["provider"] or "").lower() != str(provider_name or "").lower():
+                        raise ValueError("A payment attempt already exists for this order with another payment provider")
                     return str(existing["id"]),amount_cents,metadata,False
                 conn.execute("UPDATE payment_transactions SET invoice_id=?,customer_id=?,amount_cents=?,currency=?,provider=?,provider_payment_id=NULL,checkout_url=NULL,status='created',metadata_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(invoice_id,customer_id,amount_cents,"USD",provider_name,json.dumps(metadata,sort_keys=True),existing["id"]))
                 conn.commit()
@@ -165,6 +167,10 @@ class PaymentService:
         customer,order=self._customer_for_order(user_id,order_id)
         if str(order["status"] or "").lower() in {"cancelled","completed"}: raise ValueError("Payment is not available for this order")
         invoice_id,_=self.invoices.create_from_order(order_id)
+        with self.database.connect() as conn:
+            invoice=conn.execute("SELECT total_cents,status FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        if not invoice or int(invoice["total_cents"] or 0) != int(order["total_cents"] or 0):
+            raise ValueError("Order total no longer matches its invoice; payment cannot be started")
         provider=self._build_provider("stripe")
         payment_id,amount_cents,metadata,attempt_ready=self._prepare_transaction(order,customer["id"],invoice_id,provider.name,"customer-web")
         if not attempt_ready: return self.get(payment_id)
