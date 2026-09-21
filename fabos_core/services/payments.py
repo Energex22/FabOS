@@ -182,24 +182,48 @@ class PaymentService:
     def handle_webhook(self,payload,signature=None,provider_name=None):
         provider=self._build_provider(provider_name);event=provider.parse_webhook(payload,signature);event_id=event.get("event_id")
         if not event_id: raise PaymentProviderError("Webhook event has no id")
+        # Claim the event before processing so concurrent deliveries cannot settle it twice.
+        # If processing fails, release the claim so the provider can safely retry.
         with self.database.connect() as conn:
-            if conn.execute("SELECT 1 FROM payment_webhook_events WHERE id=?",(event_id,)).fetchone(): return {"processed":False,"duplicate":True,"event_id":event_id}
-            conn.execute("INSERT INTO payment_webhook_events(id,provider,event_type,payment_id) VALUES(?,?,?,?)",(event_id,provider.name,event.get("event_type"),event.get("payment_id") or event.get("provider_payment_id")));conn.commit()
-        payment_id=event.get("payment_id")
-        if not payment_id and event.get("provider_payment_id"):
+            existing=conn.execute("SELECT 1 FROM payment_webhook_events WHERE id=?",(event_id,)).fetchone()
+            if existing: return {"processed":False,"duplicate":True,"event_id":event_id}
+            conn.execute("INSERT INTO payment_webhook_events(id,provider,event_type,payment_id) VALUES(?,?,?,?,?)".replace("?,?,?,?,?","?,?,?,?"),(event_id,provider.name,event.get("event_type"),event.get("payment_id") or event.get("provider_payment_id")));conn.commit()
+        try:
+            payment_id=event.get("payment_id")
+            if not payment_id and event.get("provider_payment_id"):
+                with self.database.connect() as conn:
+                    row=conn.execute("SELECT id FROM payment_transactions WHERE provider_payment_id=? ORDER BY created_at DESC LIMIT 1",(event["provider_payment_id"],)).fetchone();payment_id=row["id"] if row else None
+            if not payment_id and event.get("order_id"):
+                with self.database.connect() as conn:
+                    row=conn.execute("SELECT id FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",(event["order_id"],)).fetchone();payment_id=row["id"] if row else None
+            if payment_id and event.get("status") in self.VALID_STATUSES: self._set_status(payment_id,event["status"],provider_payment_id=event.get("provider_payment_id"))
+            return {"processed":True,"duplicate":False,"event_id":event_id,"status":event.get("status")}
+        except Exception:
             with self.database.connect() as conn:
-                row=conn.execute("SELECT id FROM payment_transactions WHERE provider_payment_id=? ORDER BY created_at DESC LIMIT 1",(event["provider_payment_id"],)).fetchone();payment_id=row["id"] if row else None
-        if not payment_id and event.get("order_id"):
-            with self.database.connect() as conn:
-                row=conn.execute("SELECT id FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",(event["order_id"],)).fetchone();payment_id=row["id"] if row else None
-        if payment_id and event.get("status") in self.VALID_STATUSES: self._set_status(payment_id,event["status"],provider_payment_id=event.get("provider_payment_id"))
-        return {"processed":True,"duplicate":False,"event_id":event_id,"status":event.get("status")}
+                conn.execute("DELETE FROM payment_webhook_events WHERE id=?",(event_id,));conn.commit()
+            raise
     def _update_gateway_fields(self,payment_id,result,status):
         with self.database.connect() as conn: conn.execute("UPDATE payment_transactions SET provider_payment_id=?,checkout_url=?,status=?,metadata_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(result.get("provider_payment_id"),result.get("checkout_url"),status,json.dumps(result.get("metadata") or {},sort_keys=True),payment_id));conn.commit()
     def _set_status(self,payment_id,status,provider_payment_id=None):
         if status not in self.VALID_STATUSES: raise ValueError("Unsupported payment status: %s"%status)
         with self.database.connect() as conn: row=conn.execute("SELECT * FROM payment_transactions WHERE id=?",(payment_id,)).fetchone()
         if not row: raise KeyError("Payment transaction not found")
+        current=str(row["status"] or "created").lower()
+        # Provider webhooks can arrive out of order. Never let a late failure/cancel
+        # overwrite a payment that has already been confirmed paid or refunded.
+        transitions={
+            "created":{"pending","authorized","paid","failed","cancelled"},
+            "pending":{"authorized","paid","failed","cancelled"},
+            "authorized":{"paid","failed","cancelled"},
+            "paid":{"partially_refunded","refunded","disputed"},
+            "partially_refunded":{"refunded","disputed"},
+            "failed":set(),
+            "cancelled":set(),
+            "refunded":set(),
+            "disputed":set(),
+        }
+        if status!=current and status not in transitions.get(current,set()):
+            return
         with self.database.connect() as conn:
             if provider_payment_id: conn.execute("UPDATE payment_transactions SET status=?,provider_payment_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(status,provider_payment_id,payment_id))
             else: conn.execute("UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(status,payment_id))
