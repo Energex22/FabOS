@@ -1,5 +1,12 @@
 # FabOS on Windows
 
+Backup and host-hardening helpers for the FabOS API server.
+
+The Caddy configuration, production launcher scripts, pre-launch checklist, and
+the domain/HTTPS walkthrough live in FabOS-Web under `deployment/windows/`,
+because Caddy's site root is the storefront build:
+https://github.com/Energex22/FabOS-Web/tree/main/deployment/windows
+
 These helpers assume FabOS uses the default persistent data directory:
 
 `%USERPROFILE%\WireVault FabOS Data`
@@ -42,10 +49,33 @@ Do not commit backup ZIP files to Git.
 
 ## Production host protection
 
-Set these environment variables when the API is behind Caddy or another reverse proxy:
+Always set, on every deployment path:
 
 - `FABOS_API_HOST=127.0.0.1` so the API is not directly exposed to the network.
-- `FABOS_CORS_ORIGINS=https://your-public-domain` using the exact storefront origin.
+
+The remaining variables depend on **which server process is running**, because
+the two entry points read different settings. See the table in the repository
+README under "Two API entry points".
+
+When running `python -m fabos_core.cli serve` (FastAPI):
+
 - `FABOS_ALLOWED_HOSTS=your-public-domain` to reject unexpected HTTP Host headers.
+- `FABOS_CORS_ORIGINS=https://your-public-domain` using the exact storefront
+  origin. Only needed when the storefront is served from a different origin than
+  the API. In the standard Caddy deployment the storefront and API share one
+  hostname, requests are same-origin, and CORS does not apply.
+- `FABOS_API_DOCS=false` to keep the generated API documentation private.
 
 If more than one public hostname is intentionally served, list them comma-separated. Do not use a wildcard unless the deployment genuinely requires it.
+
+When running `python -m fabos_api.server` (Waitress, used by
+`Start-FabVex-Production.ps1` in FabOS-Web):
+
+- `FABOS_API_ALLOW_ORIGIN=https://your-public-domain`, or leave it unset for a
+  same-origin deployment where it has no effect.
+- `FABOS_API_THREADS` to size the request thread pool. Defaults to 8.
+
+`FABOS_CORS_ORIGINS`, `FABOS_ALLOWED_HOSTS`, and `FABOS_API_DOCS` are **not read
+by this server** and setting them there does nothing. Host-header filtering on
+this path has to come from Caddy, which only answers for the hostnames in its
+site blocks.

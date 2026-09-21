@@ -1,8 +1,15 @@
-"""Local development server for the FabOS API boundary.
+"""WSGI server for the FabOS API boundary.
 
-This is intentionally a development convenience, not a production deployment
-server. It keeps the existing FabOSApplication and API boundary intact while
-making the API reachable by the separate customer frontend during local work.
+Serves the existing FabOSApplication and API boundary over Waitress. This is
+also the entry point used by the Windows production launcher
+(``Start-FabVex-Production.ps1`` in FabOS-Web), where it binds to 127.0.0.1 and
+sits behind Caddy, which terminates TLS and is the only public entry point.
+
+Do not bind this directly to a public interface. Note that it reads
+``FABOS_API_ALLOW_ORIGIN`` rather than ``FABOS_CORS_ORIGINS`` and does not
+implement ``FABOS_ALLOWED_HOSTS`` or ``FABOS_API_DOCS``; those belong to the
+FastAPI app in ``fabos_core/api.py``. Host filtering on this path comes from
+Caddy.
 """
 import os
 try:

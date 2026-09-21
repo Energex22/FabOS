@@ -14,8 +14,9 @@ This document is the deployment checklist for the current FabOS + FABVEX storefr
 Set these before exposing the customer API publicly:
 
 - FABOS_DATA_DIR — persistent writable application-data directory.
-- FABOS_CORS_ORIGINS — comma-separated production storefront origins only. Do not leave localhost defaults in production.
-- FABOS_API_DOCS — leave unset/false in production unless API documentation is intentionally public.
+- FABOS_CORS_ORIGINS — comma-separated production storefront origins only. Do not leave localhost defaults in production. Applies only when running the FastAPI server (`fabos_core.cli serve`) with the storefront on a separate origin; the standard same-origin Caddy deployment does not use CORS at all.
+- FABOS_API_DOCS — leave unset/false in production unless API documentation is intentionally public. Read only by the FastAPI server.
+- FABOS_API_ALLOW_ORIGIN — the equivalent setting for the Waitress server (`fabos_api.server`), which is what the Windows production launcher runs. It does not read the three variables above.
 - Configure the selected payment provider credentials/secrets using the provider settings already supported by FabOS.
 - Configure the payment webhook endpoint/signature secret in the payment provider and FabOS settings.
 - Configure OctoPrint URLs/API keys only for printers that should be remotely controlled.
@@ -70,7 +71,9 @@ Before live use, intentionally test:
 
 ## Security checks
 
-- Production CORS contains only trusted storefront origins.
+- TLS certificate issued, valid for the public hostname, and renewing automatically.
+- Only ports 80 and 443 are reachable from the internet. Port 8000 is not.
+- Production CORS contains only trusted storefront origins, where CORS applies at all.
 - API documentation is not publicly exposed unless deliberately enabled.
 - Customer endpoints always scope records to the authenticated customer.
 - Internal dossier/admin endpoints are not exposed to customer accounts.
