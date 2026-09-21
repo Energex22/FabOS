@@ -65,8 +65,8 @@ class PaymentSecurityTests(unittest.TestCase):
     def _seed_payment(self, application, amount=5000):
         with application.database.connect() as conn:
             conn.execute(
-                "INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id) VALUES(?,?,?,?)",
-                ("payment-1", "invoice-1", "pi_test", "order-1"),
+                "INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id,provider,amount_cents) VALUES(?,?,?,?,?,?)",
+                ("payment-1", "invoice-1", "pi_test", "order-1", "stripe", amount),
             )
             conn.execute(
                 "INSERT INTO payments(id,invoice_id,amount_cents,method,reference,notes) VALUES(?,?,?,?,?,?)",
