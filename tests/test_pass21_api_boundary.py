@@ -11,11 +11,17 @@ class _Security:
         return {"id": "u1"}
 
 
+def _account_summary(user_id, account_type="customer"):
+    # Mirrors AccountService.account_summary(): the user record is nested under
+    # "user" alongside the linked customer/employee profiles.
+    return {"user": {"id": user_id, "account_type": account_type, "active": 1}, "customer": None, "employee": None}
+
+
 class _Auth:
     def login(self, identifier, password, ip_address=None, user_agent=None):
         if identifier != "customer@example.com" or password != "correct-password":
             raise PermissionError("Invalid credentials")
-        return {"token": "good-token", "expires_at": "2099-01-01T00:00:00", "user": {"id": "u1"}}
+        return {"token": "good-token", "expires_at": "2099-01-01T00:00:00", "user": _account_summary("u1")}
 
     def logout(self, token):
         return token == "good-token"
@@ -23,7 +29,7 @@ class _Auth:
 
 class _Accounts:
     def account_summary(self, user_id):
-        return {"id": user_id, "account_type": "customer", "active": True}
+        return _account_summary(user_id)
 
 
 class _Orders:
@@ -84,7 +90,7 @@ class Pass21APIBoundaryTests(unittest.TestCase):
         self.assertEqual(login["status"], 200)
         me = self.api.request("GET", "/api/v1/me", headers={"Authorization": "Bearer good-token"})
         self.assertEqual(me["status"], 200)
-        self.assertEqual(me["data"]["user"]["id"], "u1")
+        self.assertEqual(me["data"]["user"]["user"]["id"], "u1")
 
     def test_unauthenticated_protected_route_is_rejected(self):
         result = self.api.request("GET", "/api/v1/orders")

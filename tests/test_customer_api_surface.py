@@ -59,7 +59,10 @@ def test_public_product_does_not_expose_model_paths_or_license_fields():
             return [{"id": "v1", "name": "Standard", "material": "PLA", "color": "Black", "price_cents": 1000, "active": 1, "gcode_path": "/srv/gcode/widget.gcode"}]
 
     row = {"id": "p1", "sku": "W-1", "name": "Widget", "description": "A widget", "category": "Tools", "subcategory": "Misc", "active": 1, "price_cents": 1000, "license_status": "approved", "model_path": "/srv/models/widget.stl"}
-    value = _public_product(row, Products(), {"origin_type": "catalog_import", "model_file_count": 1})
+    class Application:
+        products = Products()
+
+    value = _public_product(row, Application(), {"origin_type": "catalog_import", "model_file_count": 1})
     assert value["name"] == "Widget"
     assert value["price"] == 10.0
     assert "model_path" not in value

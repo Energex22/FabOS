@@ -22,8 +22,21 @@ class _Accounts:
 
 
 class _Products:
-    def list(self, *args):
-        return [{"id": "p1", "name": "Widget", "category": "Home", "price_cents": 2450}]
+    _ROWS = [
+        {"id": "p1", "name": "Widget", "category": "Home", "price_cents": 2450},
+        {"id": "p2", "name": "Riser", "category": "Desk", "price_cents": 1800},
+    ]
+
+    def list(self, *args, **kwargs):
+        return list(self._ROWS)
+
+    def customer_catalog(self, query="", category="All", order_by="name", descending=False):
+        # The legacy WSGI surface reads the published/ready projection, not the
+        # raw product list, and expects (row, readiness) pairs.
+        return [(row, {"ready": True}) for row in self._ROWS]
+
+    def images(self, _product_id):
+        return []
 
     def categories(self):
         return ["Home", "Desk"]
@@ -60,7 +73,7 @@ class Pass23SecurityContextCompatibilityTests(unittest.TestCase):
         api = FabOSAPI(_Core())
         result = api.request("GET", "/api/v1/catalog/categories")
         self.assertEqual(result["status"], 200)
-        self.assertEqual(result["data"]["categories"], ["Home", "Desk"])
+        self.assertEqual(result["data"]["categories"], ["Desk", "Home"])
 
 
 if __name__ == "__main__": unittest.main()
