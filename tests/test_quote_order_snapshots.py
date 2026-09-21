@@ -42,6 +42,7 @@ class QuoteOrderSnapshotTests(unittest.TestCase):
         with self.db.connect() as conn:
             item = conn.execute("SELECT product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g FROM order_items WHERE order_id=?", (order_id,)).fetchone()
             quote_status = conn.execute("SELECT status FROM quotes WHERE id=?", (quote_id,)).fetchone()[0]
+            order_status = conn.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()[0]
         self.assertIsNotNone(item)
         self.assertEqual(dict(item), {
             "product_id": "product-1",
@@ -55,6 +56,7 @@ class QuoteOrderSnapshotTests(unittest.TestCase):
             "estimated_filament_g": 140.0,
         })
         self.assertEqual(quote_status, "approved")
+        self.assertEqual(order_status, "pending")
 
     def test_convert_to_order_is_idempotent_without_duplicate_items(self):
         quote_id = self.quotes.save(
