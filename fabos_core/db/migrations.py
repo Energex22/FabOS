@@ -57,8 +57,7 @@ ALTER TABLE orders ADD COLUMN checkout_notes TEXT NOT NULL DEFAULT '';
 ALTER TABLE orders ADD COLUMN checkout_channel TEXT NOT NULL DEFAULT 'internal';
 CREATE INDEX IF NOT EXISTS idx_orders_checkout_channel ON orders(checkout_channel);"""),
 (41,"""CREATE TABLE IF NOT EXISTS order_items(id TEXT PRIMARY KEY,order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,product_id TEXT REFERENCES products(id) ON DELETE SET NULL,variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL,description TEXT NOT NULL,quantity INTEGER NOT NULL DEFAULT 1,unit_price_cents INTEGER NOT NULL DEFAULT 0,material TEXT,color TEXT,estimated_minutes INTEGER,estimated_filament_g REAL);
-CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);
-ALTER TABLE quote_items ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL;"""),(40,"""UPDATE users SET role=CASE WHEN account_type='administrator' THEN role ELSE account_type END WHERE lower(COALESCE(role,''))='owner' AND lower(COALESCE(account_type,''))<>'administrator';
+CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id);"""),(40,"""UPDATE users SET role=CASE WHEN account_type='administrator' THEN role ELSE account_type END WHERE lower(COALESCE(role,''))='owner' AND lower(COALESCE(account_type,''))<>'administrator';
 CREATE TRIGGER IF NOT EXISTS trg_users_default_role_guard AFTER INSERT ON users
 WHEN lower(COALESCE(NEW.role,''))='owner' AND lower(COALESCE(NEW.account_type,''))<>'administrator'
 BEGIN
