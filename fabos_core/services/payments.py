@@ -213,9 +213,19 @@ class PaymentService:
                 with self.database.connect() as conn:
                     row=conn.execute("SELECT id FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",(event["order_id"],)).fetchone();payment_id=row["id"] if row else None
             if payment_id and event.get("status") in self.VALID_STATUSES:
+                with self.database.connect() as conn:
+                    payment_row=conn.execute("SELECT id,order_id,invoice_id,amount_cents,provider,provider_payment_id FROM payment_transactions WHERE id=?",(payment_id,)).fetchone()
+                if not payment_row:
+                    raise PaymentProviderError("Webhook references an unknown FabOS payment")
+                if str(payment_row["provider"] or "").lower() != str(provider.name or "").lower():
+                    raise PaymentProviderError("Webhook provider does not match the FabOS payment provider")
+                event_order_id=str(event.get("order_id") or "").strip()
+                if event_order_id and str(payment_row["order_id"] or "") != event_order_id:
+                    raise PaymentProviderError("Webhook order does not match the FabOS payment order")
+                event_invoice_id=str((event.get("metadata") or {}).get("invoice_id") or "").strip()
+                if event_invoice_id and str(payment_row["invoice_id"] or "") != event_invoice_id:
+                    raise PaymentProviderError("Webhook invoice does not match the FabOS payment invoice")
                 if event.get("status") == "paid":
-                    with self.database.connect() as conn:
-                        payment_row=conn.execute("SELECT amount_cents FROM payment_transactions WHERE id=?",(payment_id,)).fetchone()
                     provider_amount=event.get("amount_cents")
                     if provider_amount is None or int(provider_amount) <= 0:
                         raise PaymentProviderError("Paid webhook is missing a valid amount")
