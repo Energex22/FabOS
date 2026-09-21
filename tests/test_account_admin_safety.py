@@ -76,6 +76,7 @@ class AccountAdminSafetyTests(unittest.TestCase):
             "INSERT INTO users(id,username,email,account_type,active,created_at,updated_at) VALUES(?,?,?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)",
             ("admin-2", "admin2", "admin2@example.com", "administrator"),
         )
+        self.db.connection.execute("UPDATE users SET role='administrator' WHERE id='admin-1'")
         self.db.connection.commit()
 
         updated = self.service.update_account("admin-1", account_type="employee", active=True)
