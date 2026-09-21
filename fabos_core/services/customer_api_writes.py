@@ -210,6 +210,11 @@ def register_customer_write_routes(app, get_application, current_user):
                     if size > MAX_CUSTOM_UPLOAD_BYTES:
                         raise HTTPException(status_code=413, detail="3D model must be 25 MB or smaller")
                     tmp.write(chunk)
+            if extension == ".3mf":
+                try:
+                    _validate_3mf(temp_path)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
             with application.database.connect() as conn:
                 conn.execute("CREATE TABLE IF NOT EXISTS quote_designs(quote_id TEXT PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
                 conn.execute("INSERT INTO designs(id,product_id,name,current_version,notes) VALUES(?,?,?,1,?)",(design_id,None,safe_name,"Customer custom quote %s"%quote["quote_number"]))
