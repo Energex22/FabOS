@@ -76,8 +76,11 @@ class InvoiceService:
    items=c.execute("SELECT * FROM quote_items WHERE quote_id=? ORDER BY rowid",(inv["quote_id"],)).fetchall() if inv["quote_id"] else [];payments=c.execute("SELECT * FROM payments WHERE invoice_id=? ORDER BY paid_at DESC",(iid,)).fetchall();return inv,items,payments
  def update_charges(self,iid,tax_cents=0,shipping_cents=0,discount_cents=0,notes=""):
   with self.db.connect() as c:
-   inv=c.execute("SELECT subtotal_cents FROM invoices WHERE id=?",(iid,)).fetchone()
+   inv=c.execute("SELECT subtotal_cents,status FROM invoices WHERE id=?",(iid,)).fetchone()
    if not inv:raise KeyError("Invoice not found.")
+   active_payment=c.execute("SELECT 1 FROM payment_transactions WHERE invoice_id=? AND status IN ('created','pending','authorized','paid','partially_refunded') LIMIT 1",(iid,)).fetchone()
+   if active_payment:raise ValueError("Invoice charges cannot be changed while a payment attempt is active.")
+   if inv["status"]=="void":raise ValueError("Cannot modify a void invoice.")
    total=max(0,int(inv["subtotal_cents"] or 0)+int(tax_cents)+int(shipping_cents)-int(discount_cents));paid=int(c.execute("SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE invoice_id=?",(iid,)).fetchone()[0]);status="paid" if total>0 and paid>=total else ("partial" if paid>0 else "open")
    c.execute("UPDATE invoices SET tax_cents=?,shipping_cents=?,discount_cents=?,notes=?,total_cents=?,paid_cents=?,status=? WHERE id=?",(int(tax_cents),int(shipping_cents),int(discount_cents),notes,total,paid,status,iid));c.commit()
  def record_payment(self,iid,amount_cents,method="",reference="",notes=""):
