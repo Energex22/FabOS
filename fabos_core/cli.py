@@ -20,7 +20,8 @@ def main():
             raise SystemExit('FABOS_API_PORT must be an integer') from exc
         if not 1 <= port <= 65535:
             raise SystemExit('FABOS_API_PORT must be between 1 and 65535')
-        uvicorn.run(create_app(app),host=host,port=port)
+        trusted_proxies=os.environ.get('FABOS_TRUSTED_PROXIES','127.0.0.1').strip() or '127.0.0.1'
+        uvicorn.run(create_app(app),host=host,port=port,proxy_headers=True,forwarded_allow_ips=trusted_proxies)
     else:
         src=Path(a.path); report={'source':str(src),'files':[str(x) for x in src.rglob('*') if x.is_file()] if src.exists() else [],'status':'inspection_required'}; out=app.settings.data_dir/'import_report.json'; out.write_text(json.dumps(report,indent=2),encoding='utf-8'); print(out)
 if __name__=='__main__': main()
