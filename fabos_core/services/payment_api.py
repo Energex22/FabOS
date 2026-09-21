@@ -69,6 +69,14 @@ def _record_refund(application, provider_name, payload):
         if not transaction:
             return {"recorded": False, "duplicate": False, "reason": "payment_transaction_not_found"}
 
+        transaction_provider = str(transaction["provider"] or "").strip().lower()
+        if transaction_provider != str(provider_name or "").strip().lower():
+            return {"recorded": False, "duplicate": False, "reason": "payment_provider_mismatch"}
+
+        transaction_status = str(transaction["status"] or "").strip().lower()
+        if transaction_status not in {"paid", "partially_refunded"}:
+            return {"recorded": False, "duplicate": False, "reason": "payment_not_refundable"}
+
         invoice_id = transaction["invoice_id"]
         original_paid = int(conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents>0", (invoice_id,)).fetchone()[0] or 0)
         already_refunded = int(conn.execute("SELECT COALESCE(-SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents<0", (invoice_id,)).fetchone()[0] or 0)
