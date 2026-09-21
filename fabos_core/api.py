@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional, Tuple
 from pathlib import Path
 import os
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fabos_core.services.rate_limit import RateLimiter
@@ -268,7 +268,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         return {"product": _json(row), "storefront": state, "customer_eligible": application.products.is_customer_eligible(product_id)}
 
     @app.post("/api/v1/auth/login")
-    def login(payload: LoginRequest, request, application: FabOSApplication = Depends(get_application)):
+    def login(payload: LoginRequest, request: Request, application: FabOSApplication = Depends(get_application)):
         client = request.client.host if request.client else "unknown"
         if not app.state.auth_rate_limiter.allow("login:" + client):
             raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.", headers={"Retry-After": str(app.state.auth_rate_limiter.retry_after("login:" + client))})
