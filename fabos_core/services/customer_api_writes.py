@@ -5,7 +5,7 @@ import os
 import tempfile
 import uuid
 import zipfile
-from fastapi import Depends, File, HTTPException, UploadFile
+from fastapi import Depends, File, HTTPException, UploadFile, Request
 from pydantic import BaseModel, Field
 
 MAX_CUSTOM_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -141,7 +141,10 @@ class CustomProductRequest(BaseModel):
 
 def register_customer_write_routes(app, get_application, current_user):
     @app.post("/api/v1/auth/register")
-    def register_customer(payload: RegistrationRequest, application=Depends(get_application)):
+    def register_customer(payload: RegistrationRequest, request: Request, application=Depends(get_application)):
+        client = request.client.host if request.client else "unknown"
+        if not app.state.public_rate_limiter.allow("register:" + client):
+            raise HTTPException(status_code=429, detail="Too many registration attempts. Try again later.", headers={"Retry-After": str(app.state.public_rate_limiter.retry_after("register:" + client))})
         try:
             result = application.customer_commerce.register_customer(payload.name, payload.email, payload.password, payload.phone)
             summary = result["user"]
@@ -150,7 +153,10 @@ def register_customer_write_routes(app, get_application, current_user):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/v1/quote-requests")
-    def create_public_quote_request(payload: PublicQuoteRequest, application=Depends(get_application)):
+    def create_public_quote_request(payload: PublicQuoteRequest, request: Request, application=Depends(get_application)):
+        client = request.client.host if request.client else "unknown"
+        if not app.state.public_rate_limiter.allow("quote:" + client):
+            raise HTTPException(status_code=429, detail="Too many quote requests. Try again later.", headers={"Retry-After": str(app.state.public_rate_limiter.retry_after("quote:" + client))})
         try:
             project = payload.project.dict()
             file_name = str((payload.file or {}).get("name") or "").strip()
@@ -177,8 +183,12 @@ def register_customer_write_routes(app, get_application, current_user):
         quantity: int = File(default=1, ge=1, le=1000),
         notes: str = File(default="", max_length=4000),
         file: UploadFile = File(...),
+        request: Request,
         application=Depends(get_application),
     ):
+        client = request.client.host if request.client else "unknown"
+        if not app.state.public_rate_limiter.allow("upload:" + client):
+            raise HTTPException(status_code=429, detail="Too many upload requests. Try again later.", headers={"Retry-After": str(app.state.public_rate_limiter.retry_after("upload:" + client))})
         filename = Path(file.filename or "").name
         extension = Path(filename).suffix.lower()
         if extension not in ALLOWED_CUSTOM_UPLOAD_EXTENSIONS:
