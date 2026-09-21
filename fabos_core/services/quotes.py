@@ -79,7 +79,7 @@ class QuoteService:
             existing=conn.execute("SELECT id FROM orders WHERE quote_id=?",(quote_id,)).fetchone()
             if existing:return existing[0]
             prefix="O-"+date.today().strftime("%Y%m")+"-"; row=conn.execute("SELECT order_number FROM orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1",(prefix+"%",)).fetchone(); seq=int(row[0].split("-")[-1])+1 if row else 1; oid=str(uuid.uuid4())
-            conn.execute("INSERT INTO orders(id,order_number,customer_id,quote_id,status,due_at,total_cents) VALUES(?,?,?,?,?,?,?)",(oid,prefix+("%04d"%seq),q["customer_id"],quote_id,"new",(date.today()+timedelta(days=7)).isoformat(),q["total_cents"]));
+            conn.execute("INSERT INTO orders(id,order_number,customer_id,quote_id,status,due_at,total_cents) VALUES(?,?,?,?,?,?,?)",(oid,prefix+("%04d"%seq),q["customer_id"],quote_id,"pending",(date.today()+timedelta(days=7)).isoformat(),q["total_cents"]));
             quote_items=conn.execute("SELECT product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g FROM quote_items WHERE quote_id=? ORDER BY rowid",(quote_id,)).fetchall()
             if not quote_items: raise ValueError("Quote has no items")
             for item in quote_items:
