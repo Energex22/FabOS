@@ -11,10 +11,8 @@ _SENSITIVE_KEYS = {
 }
 _SENSITIVE_TEXT = re.compile(
     r"(Bearer\s+)[A-Za-z0-9._~+/=-]+|"
-    r"(password\s*[=:]\s*)[^\s,;]+|"
-    r"(token\s*[=:]\s*)[^\s,;]+|"
-    r"(secret\s*[=:]\s*)[^\s,;]+|"
-    r"(api[_ -]?key\s*[=:]\s*)[^\s,;]+",
+    r"((?:authorization)[\s=:]+(?:Bearer\s+)?)[^\s,;]+|"
+    r"((?:password|token|secret|api[_ -]?key|cookie|credential)[\s=:]+)[^\s,;]+",
     re.IGNORECASE,
 )
 
@@ -31,7 +29,7 @@ def redact(value):
     if isinstance(value, (list, tuple)):
         return [redact(item) for item in value]
     if isinstance(value, str):
-        return _SENSITIVE_TEXT.sub(lambda m: (m.group(1) if m.group(1) else m.group(0).split("=")[0] + "=") + _REDACTED, value)
+        return _SENSITIVE_TEXT.sub(lambda m: (m.group(1) or m.group(2) or m.group(3)) + _REDACTED, value)
     return value
 
 class DiagnosticsService:
