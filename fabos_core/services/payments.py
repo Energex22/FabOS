@@ -60,16 +60,19 @@ class StripePaymentProvider(PaymentProvider):
         if not self.webhook_secret: raise PaymentProviderNotConfigured("STRIPE_WEBHOOK_SECRET is not configured")
         if not signature: raise PaymentProviderError("Missing Stripe webhook signature")
         _verify_stripe_signature(payload,signature,self.webhook_secret)
-        event=json.loads(payload.decode("utf-8") if isinstance(payload,bytes) else payload);event_type=str(event.get("type") or "");obj=((event.get("data") or {}).get("object") or {});metadata=obj.get("metadata") or {};status=None
+        event=json.loads(payload.decode("utf-8") if isinstance(payload,bytes) else payload);event_type=str(event.get("type") or "");obj=((event.get("data") or {}).get("object") or {});metadata=obj.get("metadata") or {};status=None;amount_cents=None
         if event_type == "checkout.session.completed":
             # Checkout completion is not always the same as funds being settled;
             # async payment methods can complete the session while payment is still processing.
             status = "paid" if str(obj.get("payment_status") or "").lower() == "paid" else "pending"
-        elif event_type in {"checkout.session.async_payment_succeeded","payment_intent.succeeded","charge.succeeded"}: status="paid"
+            amount_cents = int(obj.get("amount_total") or 0)
+        elif event_type in {"checkout.session.async_payment_succeeded","payment_intent.succeeded","charge.succeeded"}:
+            status="paid"
+            amount_cents = int(obj.get("amount_received") or obj.get("amount") or 0)
         elif event_type in {"checkout.session.async_payment_failed","payment_intent.payment_failed","charge.failed"}: status="failed"
         elif event_type=="checkout.session.expired": status="cancelled"
         elif event_type in {"charge.refunded","refund.created"}: status="refunded"
-        return {"event_id":str(event.get("id") or ""),"event_type":event_type,"provider_payment_id":str(obj.get("payment_intent") or obj.get("id") or ""),"payment_id":str(metadata.get("payment_id") or ""),"order_id":str(metadata.get("order_id") or obj.get("client_reference_id") or ""),"status":status}
+        return {"event_id":str(event.get("id") or ""),"event_type":event_type,"provider_payment_id":str(obj.get("payment_intent") or obj.get("id") or ""),"payment_id":str(metadata.get("payment_id") or ""),"order_id":str(metadata.get("order_id") or obj.get("client_reference_id") or ""),"status":status,"amount_cents":amount_cents}
 
 
 class SquarePaymentProvider(PaymentProvider):
@@ -93,10 +96,11 @@ class SquarePaymentProvider(PaymentProvider):
         expected=base64_hmac_sha256(self.webhook_signature_key,self.webhook_url+(payload.decode("utf-8") if isinstance(payload,bytes) else payload))
         if not signature or not hmac.compare_digest(expected,str(signature)): raise PaymentProviderError("Invalid Square webhook signature")
         event=json.loads(payload.decode("utf-8") if isinstance(payload,bytes) else payload);event_type=str(event.get("type") or "");obj=((event.get("data") or {}).get("object") or {});payment=obj.get("payment") or {};status=None
-        if event_type in {"payment.completed","payment.updated"} and str(payment.get("status") or "").upper()=="COMPLETED": status="paid"
+        if event_type in {"payment.completed","payment.updated"} and str(payment.get("status") or "").upper()=="COMPLETED":
+            status="paid";amount_money=payment.get("amount_money") or {};amount_cents=int(amount_money.get("amount") or 0)
         elif event_type=="payment.failed": status="failed"
         elif event_type in {"refund.created","refund.updated"} and str(payment.get("status") or "").upper()=="REFUNDED": status="refunded"
-        return {"event_id":str(event.get("event_id") or ""),"event_type":event_type,"provider_payment_id":str(payment.get("id") or ""),"payment_id":"","order_id":str(payment.get("reference_id") or ""),"status":status}
+        return {"event_id":str(event.get("event_id") or ""),"event_type":event_type,"provider_payment_id":str(payment.get("id") or ""),"payment_id":"","order_id":str(payment.get("reference_id") or ""),"status":status,"amount_cents":amount_cents}
 
 
 def base64_hmac_sha256(secret,message): return base64.b64encode(hmac.new(secret.encode("utf-8"),message.encode("utf-8"),hashlib.sha256).digest()).decode("ascii")
@@ -200,7 +204,16 @@ class PaymentService:
             if not payment_id and event.get("order_id"):
                 with self.database.connect() as conn:
                     row=conn.execute("SELECT id FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",(event["order_id"],)).fetchone();payment_id=row["id"] if row else None
-            if payment_id and event.get("status") in self.VALID_STATUSES: self._set_status(payment_id,event["status"],provider_payment_id=event.get("provider_payment_id"))
+            if payment_id and event.get("status") in self.VALID_STATUSES:
+                if event.get("status") == "paid":
+                    with self.database.connect() as conn:
+                        payment_row=conn.execute("SELECT amount_cents FROM payment_transactions WHERE id=?",(payment_id,)).fetchone()
+                    provider_amount=event.get("amount_cents")
+                    if provider_amount is None or int(provider_amount) <= 0:
+                        raise PaymentProviderError("Paid webhook is missing a valid amount")
+                    if not payment_row or int(payment_row["amount_cents"] or 0) != int(provider_amount):
+                        raise PaymentProviderError("Paid webhook amount does not match the FabOS payment amount")
+                self._set_status(payment_id,event["status"],provider_payment_id=event.get("provider_payment_id"))
             return {"processed":True,"duplicate":False,"event_id":event_id,"status":event.get("status")}
         except Exception:
             with self.database.connect() as conn:
