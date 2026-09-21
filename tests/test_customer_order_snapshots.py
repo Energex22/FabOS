@@ -40,7 +40,7 @@ class CustomerOrderSnapshotTests(unittest.TestCase):
         result = self.commerce.register_customer("Test Customer", "order@example.com", "password123")
         self.user_id = result["user"]["user"]["id"]
         with self.db.connect() as conn:
-            conn.execute("INSERT INTO products(id,sku,name,description,category,price_cents) VALUES(?,?,?,?,?,?,?)", ("product-1","TEST-001","Test Part","Test","Test",2500))
+            conn.execute("INSERT INTO products(id,sku,name,description,category,price_cents) VALUES(?,?,?,?,?,?)", ("product-1","TEST-001","Test Part","Test","Test",2500))
             conn.execute("INSERT INTO product_variants(id,product_id,name,material,color,price_cents,estimated_minutes,estimated_filament_g,active) VALUES(?,?,?,?,?,?,?,?,?)", ("variant-1","product-1","PETG Black","PETG","Black",3000,35,140,1))
             conn.commit()
 
