@@ -28,6 +28,8 @@ class _Database:
                 order_id TEXT,
                 status TEXT DEFAULT 'paid',
                 updated_at TEXT,
+                provider TEXT,
+                amount_cents INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE payments(
