@@ -14,6 +14,7 @@ import os
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fabos_core.services.rate_limit import RateLimiter
 from pydantic import BaseModel, Field
 
 from fabos_core.application import FabOSApplication
@@ -137,6 +138,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     )
     fabos = application or FabOSApplication()
     app.state.fabos = fabos
+    app.state.auth_rate_limiter = RateLimiter(10, 300)
 
     origins = [x.strip() for x in os.environ.get("FABOS_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if x.strip()]
     app.add_middleware(
@@ -266,7 +268,10 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         return {"product": _json(row), "storefront": state, "customer_eligible": application.products.is_customer_eligible(product_id)}
 
     @app.post("/api/v1/auth/login")
-    def login(payload: LoginRequest, application: FabOSApplication = Depends(get_application)):
+    def login(payload: LoginRequest, request, application: FabOSApplication = Depends(get_application)):
+        client = request.client.host if request.client else "unknown"
+        if not app.state.auth_rate_limiter.allow("login:" + client):
+            raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.", headers={"Retry-After": str(app.state.auth_rate_limiter.retry_after("login:" + client))})
         result = application.auth.login(payload.identifier, payload.password)
         if not result:
             raise HTTPException(status_code=401, detail="Invalid credentials")
