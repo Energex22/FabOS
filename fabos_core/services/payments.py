@@ -61,8 +61,12 @@ class StripePaymentProvider(PaymentProvider):
         if not signature: raise PaymentProviderError("Missing Stripe webhook signature")
         _verify_stripe_signature(payload,signature,self.webhook_secret)
         event=json.loads(payload.decode("utf-8") if isinstance(payload,bytes) else payload);event_type=str(event.get("type") or "");obj=((event.get("data") or {}).get("object") or {});metadata=obj.get("metadata") or {};status=None
-        if event_type in {"checkout.session.completed","payment_intent.succeeded","charge.succeeded"}: status="paid"
-        elif event_type in {"payment_intent.payment_failed","charge.failed"}: status="failed"
+        if event_type == "checkout.session.completed":
+            # Checkout completion is not always the same as funds being settled;
+            # async payment methods can complete the session while payment is still processing.
+            status = "paid" if str(obj.get("payment_status") or "").lower() == "paid" else "pending"
+        elif event_type in {"checkout.session.async_payment_succeeded","payment_intent.succeeded","charge.succeeded"}: status="paid"
+        elif event_type in {"checkout.session.async_payment_failed","payment_intent.payment_failed","charge.failed"}: status="failed"
         elif event_type=="checkout.session.expired": status="cancelled"
         elif event_type in {"charge.refunded","refund.created"}: status="refunded"
         return {"event_id":str(event.get("id") or ""),"event_type":event_type,"provider_payment_id":str(obj.get("payment_intent") or obj.get("id") or ""),"payment_id":str(metadata.get("payment_id") or ""),"order_id":str(metadata.get("order_id") or obj.get("client_reference_id") or ""),"status":status}
