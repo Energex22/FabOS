@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+<title>FabVex FVX mark</title><desc>Geometric FabVex fabrication monogram.</desc>
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22c55e"/><stop offset=".55" stop-color="#34d399"/><stop offset="1" stop-color="#38bdf8"/></linearGradient></defs>
+<rect width="256" height="256" rx="44" fill="#0b1010"/>
+<path d="M55 54h91v28H88v32h51v27H88v61H55V54Z" fill="url(#g)"/>
+<path d="M143 54h36l20 45 20-45h36l-39 84v44h-34v-44l-39-84Z" fill="#ef4444"/>
+</svg>

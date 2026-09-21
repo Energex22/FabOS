@@ -20,6 +20,7 @@ class InvoiceService:
   return prefix+("%04d"%n)
  def create_from_order(self,order_id,due_days=None):
   with self.db.connect() as c:
+   c.execute("BEGIN IMMEDIATE")
    existing=c.execute("SELECT id FROM invoices WHERE order_id=? AND status<>'void' ORDER BY created_at DESC LIMIT 1",(order_id,)).fetchone()
    if existing:return existing["id"],False
    order=c.execute("SELECT * FROM orders WHERE id=?",(order_id,)).fetchone()

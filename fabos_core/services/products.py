@@ -261,13 +261,24 @@ class ProductService:
         return self.storefront_publication_readiness(product_id)["ready"]
 
     def customer_catalog(self, query="", category="All", order_by="name", descending=False):
+        """Return products currently ready for the customer shop.
+
+        This uses the same product readiness rules exposed by the FabOS
+        Products/Ready to Print workflow, so the shop does not maintain a
+        second product list.
+        """
         rows = self.list(query=query, category=category, order_by=order_by, descending=descending)
-        eligible = []
+        ready = []
         for row in rows:
+            # The public shop is a projection of the same publication boundary
+            # used by FabOS: the product must be explicitly published and meet
+            # the storefront readiness checks. This prevents draft/review items
+            # from leaking into the customer catalog.
             state = self.storefront_state(row["id"])
-            if state and self.is_customer_eligible(row["id"]):
-                eligible.append((row, state))
-        return eligible
+            readiness = self.storefront_publication_readiness(row["id"])
+            if state and state["visibility"] == "published" and readiness["ready"]:
+                ready.append((row, readiness))
+        return ready
 
     def save_storefront(self, product_id, values):
         self._ensure_storefront_schema()

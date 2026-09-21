@@ -36,22 +36,43 @@ class CheckoutService:
         estimate = pricing.estimate(items, shipping_mode)
         clean_items = []
         for item in items or []:
-            product = self.products.get(item.get("product_id"))
-            if product is None:
-                raise ValueError("Product not found")
+            product_id = str(item.get("product_id") or item.get("productId") or "").strip()
+            product = self.products.get(product_id)
+            if product is None or not self.products.is_customer_eligible(product_id):
+                raise ValueError("Product is not available for customer ordering")
             quantity = int(item.get("quantity", 0))
-            if quantity <= 0:
-                raise ValueError("Quantity must be positive")
+            if quantity <= 0 or quantity > 1000:
+                raise ValueError("Quantity must be between 1 and 1000")
+            variant_id = str(item.get("variant_id") or item.get("variantId") or "").strip()
             row = dict(product)
+            unit_price = int(row.get("price_cents") or 0)
+            material = row.get("material") or ""
+            color = row.get("color") or ""
+            minutes = int(row.get("estimated_minutes") or 0)
+            filament = float(row.get("estimated_filament_g") or 0)
+            description = row.get("name") or "Product"
+            if variant_id:
+                variant = next((candidate for candidate in self.products.variants(product_id) if str(candidate["id"]) == variant_id), None)
+                if not variant or not int(variant["active"]):
+                    raise ValueError("Product variant not found")
+                unit_price = int(variant["price_cents"] or 0)
+                material = variant["material"] or material
+                color = variant["color"] or color
+                minutes = int(variant["estimated_minutes"] or minutes)
+                filament = float(variant["estimated_filament_g"] or filament)
+                description += " · " + str(variant["name"])
+            if unit_price <= 0:
+                raise ValueError("Product price is not available for customer ordering")
             clean_items.append({
                 "product_id": row["id"],
-                "description": row.get("name") or "Product",
+                "variant_id": variant_id or None,
+                "description": description,
                 "quantity": quantity,
-                "unit_price_cents": int(row.get("price_cents") or 0),
-                "material": row.get("material") or "",
-                "color": row.get("color") or "",
-                "estimated_minutes": int(row.get("estimated_minutes") or 0),
-                "estimated_filament_g": float(row.get("estimated_filament_g") or 0),
+                "unit_price_cents": unit_price,
+                "material": material,
+                "color": color,
+                "estimated_minutes": minutes,
+                "estimated_filament_g": filament,
             })
 
         with self.database.connect() as conn:
@@ -78,8 +99,8 @@ class CheckoutService:
             )
             for item in clean_items:
                 conn.execute(
-                    "INSERT INTO quote_items(id,quote_id,product_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), quote_id, item["product_id"], item["description"], item["quantity"],
+                    "INSERT INTO quote_items(id,quote_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), quote_id, item["product_id"], item["variant_id"], item["description"], item["quantity"],
                      item["unit_price_cents"], item["material"], item["color"], item["estimated_minutes"],
                      item["estimated_filament_g"]),
                 )
@@ -90,6 +111,13 @@ class CheckoutService:
                  estimate["tax_cents"], estimate["shipping_cents"], json.dumps(shipping_address, sort_keys=True),
                  notes or "", "website"),
             )
+            for item in clean_items:
+                conn.execute(
+                    "INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), order_id, item["product_id"], item["variant_id"], item["description"],
+                     item["quantity"], item["unit_price_cents"], item["material"], item["color"],
+                     item["estimated_minutes"], item["estimated_filament_g"]),
+                )
             conn.commit()
         return {
             "id": order_id,

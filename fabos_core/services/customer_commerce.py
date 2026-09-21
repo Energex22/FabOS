@@ -2,6 +2,9 @@
 
 import json
 import uuid
+import hashlib
+import re
+from pathlib import Path
 from datetime import date, timedelta
 
 
@@ -43,6 +46,94 @@ class CustomerCommerceService:
         if not result:
             raise RuntimeError("Customer account could not be authenticated after creation")
         return result
+
+    def _ensure_public_quote_files_schema(self):
+        with self.database.connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS quote_request_files(
+                    id TEXT PRIMARY KEY,
+                    quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+                    original_name TEXT NOT NULL,
+                    stored_path TEXT NOT NULL,
+                    bytes INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_quote_request_files_quote ON quote_request_files(quote_id)")
+            conn.commit()
+
+    def create_public_quote_request(self, name, email, project, file_name="", file_bytes=None):
+        """Create a storefront lead/quote without requiring an account."""
+        self._require_storefront()
+        name = str(name or "").strip()
+        email = str(email or "").strip().lower()
+        if not name:
+            raise ValueError("Name is required")
+        if not email or "@" not in email:
+            raise ValueError("A valid email is required")
+        project = project if isinstance(project, dict) else {}
+        idea = str(project.get("idea") or "").strip()
+        if not idea:
+            raise ValueError("Project idea is required")
+        quantity = self._positive_quantity(project.get("quantity", 1))
+        dimensions = str(project.get("dimensions") or "").strip()
+        material = str(project.get("material") or "").strip()
+        notes = str(project.get("notes") or "").strip()
+        description_parts = [idea]
+        if dimensions:
+            description_parts.append("Dimensions: " + dimensions)
+        if material:
+            description_parts.append("Material: " + material)
+        if notes:
+            description_parts.append("Notes: " + notes)
+        with self.database.connect() as conn:
+            customer = conn.execute("SELECT * FROM customers WHERE lower(email)=?", (email,)).fetchone()
+        if customer is None:
+            customer_id = str(uuid.uuid4())
+            with self.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)",
+                    (customer_id, name, email, str(project.get("phone") or "").strip(), ""),
+                )
+                conn.commit()
+        else:
+            customer_id = customer["id"]
+        quote_id = self.quotes.save(
+            {"customer_id": customer_id, "status": "draft", "notes": notes},
+            [{
+                "product_id": None,
+                "description": "\n".join(description_parts),
+                "quantity": quantity,
+                "unit_price_cents": 0,
+                "material": material,
+                "color": "",
+                "estimated_minutes": 0,
+                "estimated_filament_g": 0,
+            }],
+        )
+        self._ensure_public_quote_files_schema()
+        if file_bytes:
+            allowed = {".stl", ".3mf", ".obj", ".step", ".stp"}
+            original = Path(str(file_name or "reference_model")).name
+            suffix = Path(original).suffix.lower()
+            if suffix not in allowed:
+                raise ValueError("Unsupported reference file type")
+            if len(file_bytes) > 25 * 1024 * 1024:
+                raise ValueError("Reference file exceeds the 25 MB limit")
+            safe = re.sub(r"[^A-Za-z0-9._-]+", "_", original).strip("._") or "reference_model"
+            root = Path(self.database.path).resolve().parent / "Quote Uploads"
+            root.mkdir(parents=True, exist_ok=True)
+            target = root / (quote_id + "_" + safe)
+            target.write_bytes(file_bytes)
+            digest = hashlib.sha256(file_bytes).hexdigest()
+            with self.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO quote_request_files(id,quote_id,original_name,stored_path,bytes,sha256) VALUES(?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), quote_id, original, str(target), len(file_bytes), digest),
+                )
+                conn.commit()
+        return self.quotes.get(quote_id)
 
     def _customer(self, user_id):
         user = self.accounts.get_user(user_id)
@@ -111,6 +202,8 @@ class CustomerCommerceService:
         shipping_address = self._shipping_address(shipping_address)
         if not isinstance(items, list) or not items:
             raise ValueError("At least one order item is required")
+        if len(items) > 100:
+            raise ValueError("An order may contain at most 100 line items")
         resolved_items = []
         subtotal_cents = 0
         for requested in items:
@@ -172,12 +265,13 @@ class CustomerCommerceService:
         turnaround_days = int(float(self.shop_settings.get("default_turnaround_days", "7") or 7))
         due_at = (date.today() + timedelta(days=max(0, turnaround_days))).isoformat()
         with self.database.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT order_number FROM orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1", (prefix + "%",)).fetchone()
             sequence = int(row[0].split("-")[-1]) + 1 if row else 1
             order_number = prefix + ("%04d" % sequence)
             conn.execute("""INSERT INTO orders
                 (id,order_number,customer_id,quote_id,status,due_at,total_cents,tax_cents,shipping_cents,shipping_address_json,checkout_notes,checkout_channel)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (order_id, order_number, customer["id"], quote_id, "pending", due_at, total_cents, tax_cents, shipping_cents, json.dumps(shipping_address), str(notes or "").strip(), "customer-web"))
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (order_id, order_number, customer["id"], quote_id, "pending", due_at, total_cents, tax_cents, shipping_cents, json.dumps(shipping_address), str(notes or "").strip(), "website"))
             for item in resolved_items:
                 conn.execute(
                     """INSERT INTO order_items

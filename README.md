@@ -28,8 +28,7 @@ submitted totals are not authoritative. Internal production jobs, printer data,
 QC records, invoices, audit records, and the internal order dossier are not
 exposed by the customer API.
 
-Binary custom-work file upload remains a separate future boundary; the current
-quote endpoint accepts file metadata only.
+Custom-work file upload is now supported through the dedicated multipart quote-request endpoint. STL, 3MF, OBJ, STEP/STP files up to 25 MB are staged, validated, imported into Design Vault, and linked to the quote without exposing internal filesystem paths. Online payment sessions and provider webhooks are also wired through the backend payment boundary.
 
 See `docs/CUSTOMER_API_CONTRACT.md` for the route and data contract.
 

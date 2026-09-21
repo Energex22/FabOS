@@ -2,7 +2,7 @@ name: FabOS backend build
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/extra-testing-fabvex]
   pull_request:
     branches: [main]
 
@@ -20,3 +20,5 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install .
       - name: Compile Python sources
         run: python -m compileall -q fabos_core fabos_sdk
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -p 'test_*.py'

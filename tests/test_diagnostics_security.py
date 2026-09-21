@@ -42,7 +42,7 @@ class DiagnosticsSecurityTests(unittest.TestCase):
         original = Settings.log_dir
         try:
             Settings.log_dir = os.path.dirname(log_path)
-            with open(log_path, "w", encoding="utf-8") as handle:
+            with open(os.path.join(Settings.log_dir, "fabos.log"), "w", encoding="utf-8") as handle:
                 handle.write(json.dumps({"message": "ok", "token": "do-not-export"}) + "\n")
             app.shop_settings = type("ShopSettings", (), {"snapshot": lambda self: {"shop_name": "Fabvex", "api_secret": "hidden"}})()
             app.printer_automation = type("Printers", (), {"list": lambda self: [{"name": "Printer", "api_key_ref": "hidden-key"}]})()

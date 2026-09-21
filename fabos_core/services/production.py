@@ -2,6 +2,16 @@ import uuid
 from datetime import datetime
 
 class ProductionService:
+    VALID_JOB_STATUSES={"queued","scheduled","printing","paused","completed","failed","cancelled"}
+    JOB_STATUS_TRANSITIONS={
+        "queued":{"queued","scheduled","printing","completed","failed","cancelled"},
+        "scheduled":{"scheduled","printing","paused","completed","failed","cancelled"},
+        "printing":{"printing","paused","completed","failed","cancelled"},
+        "paused":{"paused","printing","completed","failed","cancelled"},
+        "completed":{"completed"},
+        "failed":{"failed"},
+        "cancelled":{"cancelled"},
+    }
     SORT_COLUMNS = {
         "job": "j.created_at",
         "order": "o.order_number",
@@ -47,23 +57,24 @@ class ProductionService:
         with self.database.connect() as conn:
             return conn.execute(sql, args).fetchall()
 
-    def attachable_orders(self, product_id=None):
+    def attachable_orders(self, product_id=None, variant_id=None):
         with self.database.connect() as conn:
             return conn.execute("""SELECT o.*,COALESCE(c.name,'No customer') customer_name,
                 (SELECT COUNT(*) FROM print_jobs j
                  WHERE j.order_id=o.id AND (? IS NULL OR j.product_id=?)
+                   AND (? IS NULL OR j.variant_id=?)
                    AND j.status IN ('queued','scheduled')) matching_waiting_jobs
                 FROM orders o LEFT JOIN customers c ON c.id=o.customer_id
                 WHERE o.status IN ('confirmed','in_production','production')
                 ORDER BY CASE o.status WHEN 'in_production' THEN 0 WHEN 'confirmed' THEN 1 ELSE 2 END,
-                         o.created_at DESC""",(product_id,product_id)).fetchall()
+                         o.created_at DESC""",(product_id,product_id,variant_id,variant_id)).fetchall()
 
-    def find_attachable_job(self, order_id, product_id):
+    def find_attachable_job(self, order_id, product_id, variant_id=None):
         if not order_id or not product_id:return None
         with self.database.connect() as conn:
             return conn.execute("""SELECT * FROM print_jobs
-                WHERE order_id=? AND product_id=? AND status IN ('queued','scheduled')
-                ORDER BY created_at LIMIT 1""",(order_id,product_id)).fetchone()
+                WHERE order_id=? AND product_id=? AND (? IS NULL OR variant_id=?) AND status IN ('queued','scheduled')
+                ORDER BY created_at LIMIT 1""",(order_id,product_id,variant_id,variant_id)).fetchone()
 
     def job_print_readiness(self,job_id,design_vault):
         job=self.get(job_id)
@@ -123,17 +134,17 @@ class ProductionService:
             ).fetchall()
             for item in items:
                 existing = conn.execute(
-                    "SELECT COUNT(*) FROM print_jobs WHERE order_id=? AND product_id IS ?",
-                    (order_id, item["product_id"]),
+                    "SELECT COUNT(*) FROM print_jobs WHERE order_id=? AND product_id IS ? AND variant_id IS ?",
+                    (order_id, item["product_id"], item["variant_id"]),
                 ).fetchone()[0]
                 needed = max(0, int(item["quantity"] or 1) - int(existing))
                 for _ in range(needed):
                     job_id = str(uuid.uuid4())
                     conn.execute(
                         """INSERT INTO print_jobs
-                        (id,order_id,product_id,status,estimated_minutes,estimated_filament_g)
-                        VALUES (?,?,?,?,?,?)""",
-                        (job_id, order_id, item["product_id"], "queued",
+                        (id,order_id,product_id,variant_id,status,estimated_minutes,estimated_filament_g)
+                        VALUES (?,?,?,?,?,?,?)""",
+                        (job_id, order_id, item["product_id"], item["variant_id"], "queued",
                          item["estimated_minutes"] or 0, item["estimated_filament_g"] or 0),
                     )
                     created.append(job_id)
@@ -174,9 +185,9 @@ class ProductionService:
                 new_id = str(uuid.uuid4())
                 conn.execute(
                     """INSERT INTO print_jobs
-                    (id,order_id,product_id,printer_id,spool_id,status,estimated_minutes,estimated_filament_g,quantity)
-                    VALUES(?,?,?,?,?,?,?,?,1)""",
-                    (new_id, source["order_id"], source["product_id"], None, None, "queued",
+                    (id,order_id,product_id,variant_id,printer_id,spool_id,status,estimated_minutes,estimated_filament_g,quantity)
+                    VALUES(?,?,?,?,?,?,?,?,?,1)""",
+                    (new_id, source["order_id"], source["product_id"], source["variant_id"], None, None, "queued",
                      source["estimated_minutes"] or 0, source["estimated_filament_g"] or 0),
                 )
                 created.append(new_id)
@@ -184,11 +195,17 @@ class ProductionService:
         return created
 
     def set_status(self, job_id, status):
+        status=str(status or "").strip().lower()
+        if status not in self.VALID_JOB_STATUSES:
+            raise ValueError("Invalid print job status.")
         now = datetime.now().isoformat(timespec="seconds")
         with self.database.connect() as conn:
             row = conn.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise KeyError("Print job not found.")
+            current=str(row["status"] or "queued").strip().lower()
+            if status not in self.JOB_STATUS_TRANSITIONS.get(current,{current}):
+                raise ValueError("Invalid print job status transition.")
             values = {"status": status}
             if status == "printing" and not row["started_at"]:
                 values["started_at"] = now

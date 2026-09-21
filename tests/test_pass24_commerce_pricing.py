@@ -4,6 +4,12 @@ from fabos_core.services.commerce_pricing import CommercePricingService
 
 
 class StubProducts:
+    def is_customer_eligible(self, product_id):
+        return product_id in {"p1"}
+
+    def variants(self, product_id):
+        return []
+
     def get(self, product_id):
         rows = {
             "p1": {"id": "p1", "name": "Test Part", "price_cents": 1250, "estimated_filament_g": 100},

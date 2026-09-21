@@ -1,4 +1,8 @@
+import base64
+import binascii
 import json
+import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 
@@ -9,6 +13,25 @@ class FabOSAPI:
 
     def __init__(self, core):
         self.core = core
+        self._auth_attempts = {}
+        self._auth_attempts_lock = threading.Lock()
+
+    def _allow_auth_attempt(self, client_ip):
+        now = time.monotonic()
+        key = str(client_ip or "unknown").split(",")[0].strip()
+        with self._auth_attempts_lock:
+            attempts = [stamp for stamp in self._auth_attempts.get(key, []) if now - stamp < 900]
+            if len(attempts) >= 10:
+                self._auth_attempts[key] = attempts
+                return False
+            attempts.append(now)
+            self._auth_attempts[key] = attempts
+            return True
+
+    def _clear_auth_attempts(self, client_ip):
+        key = str(client_ip or "unknown").split(",")[0].strip()
+        with self._auth_attempts_lock:
+            self._auth_attempts.pop(key, None)
 
     @staticmethod
     def _row(value):
@@ -68,10 +91,28 @@ class FabOSAPI:
             "name": data.get("name"),
             "category": data.get("category") or "Other",
             "description": data.get("description") or "",
+            "designer": data.get("designer") or "",
+            "source_url": data.get("source_url") or "",
+            "license_name": data.get("license_name") or "",
+            "license_status": data.get("license_status") or "",
             "price": round(float(data.get("price_cents") or 0) / 100.0, 2),
             "estimated_minutes": data.get("estimated_minutes") or 0,
             "estimated_filament_g": data.get("estimated_filament_g") or 0,
         }
+
+    @staticmethod
+    def _public_images(rows):
+        public = []
+        for row in rows:
+            item = dict(row)
+            raw = str(item.get("path") or "").strip()
+            source = str(item.get("source_url") or "").strip()
+            if raw.startswith(("http://", "https://", "/")):
+                item["url"] = raw
+            else:
+                continue
+            public.append(item)
+        return public
 
     def request(self, method, path, body=None, headers=None):
         method = (method or "GET").upper()
@@ -84,29 +125,43 @@ class FabOSAPI:
                 return self._response(200, {"ok": True, "service": "FabOS", "api_version": self.VERSION})
 
             if route == ["api", self.VERSION, "catalog"] and method == "GET":
-                rows = self.core.products.list(
+                rows = self.core.products.customer_catalog(
                     query.get("q", [""])[0], query.get("category", ["All"])[0],
-                    query.get("license", ["All"])[0], query.get("sort", ["name"])[0],
+                    query.get("sort", ["name"])[0],
                     query.get("desc", ["0"])[0] not in ("0", "false", "no"),
                 )
-                return self._response(200, {"products": [self._public_product(row) for row in rows]})
+                return self._response(200, {"products": [{**self._public_product(row), "images": self._public_images(self.core.products.images(row["id"]))} for row, _readiness in rows]})
 
             if route == ["api", self.VERSION, "catalog", "categories"] and method == "GET":
-                return self._response(200, {"categories": self.core.products.categories()})
+                rows = self.core.products.customer_catalog()
+                categories = sorted({str(row["category"] or "Other") for row, _readiness in rows if str(row["category"] or "").strip()})
+                return self._response(200, {"categories": categories})
 
             if len(route) == 4 and route[:3] == ["api", self.VERSION, "catalog"] and method == "GET":
                 product = self.core.products.get(route[3])
                 if product is None:
                     raise KeyError("Product not found")
-                return self._response(200, {"product": self._public_product(product),
-                                            "images": self.core.products.images(route[3]),
-                                            "variants": self.core.products.variants(route[3])})
+                return self._response(200, {
+                    "product": self._public_product(product),
+                    "images": self._public_images(self.core.products.images(route[3])),
+                    "variants": [dict(row) for row in self.core.products.variants(route[3])],
+                })
 
             if route == ["api", self.VERSION, "auth", "login"] and method == "POST":
+                client_ip = (headers or {}).get("X-Forwarded-For", "")
+                if not self._allow_auth_attempt(client_ip):
+                    return self._response(429, {"error": "Too many sign-in attempts. Please try again later."})
                 result = self.core.auth.login(body.get("identifier", ""), body.get("password", ""),
-                                              ip_address=(headers or {}).get("X-Forwarded-For"),
+                                              ip_address=client_ip,
                                               user_agent=(headers or {}).get("User-Agent"))
-                return self._response(200, result)
+                if result:
+                    account = result.get("user", {}).get("user", {}) if isinstance(result.get("user"), dict) else {}
+                    if str(account.get("account_type") or "").lower() != "customer":
+                        self.core.auth.logout(result.get("token", ""))
+                        return self._response(401, {"error": "This sign-in is not available through the customer storefront."})
+                    self._clear_auth_attempts(client_ip)
+                    return self._response(200, result)
+                return self._response(401, {"error": "Invalid email/username or password"})
 
             if route == ["api", self.VERSION, "auth", "logout"] and method == "POST":
                 token = self._auth_token(headers)
@@ -117,6 +172,94 @@ class FabOSAPI:
             if route == ["api", self.VERSION, "me"] and method == "GET":
                 context = self._context(headers)
                 return self._response(200, {"user": self.core.accounts.account_summary(context["id"])})
+
+            if route == ["api", self.VERSION, "customer", "me"] and method == "GET":
+                context = self._context(headers)
+                return self._response(200, self.core.accounts.account_summary(context["id"]))
+
+            if route == ["api", self.VERSION, "customer", "me"] and method == "PATCH":
+                context = self._context(headers)
+                customer = self.core.accounts.customer_for_user(context["id"])
+                if not customer:
+                    raise PermissionError("Customer account is not linked")
+                allowed = {"name", "email", "phone", "notes"}
+                payload = {key: body.get(key) for key in allowed if key in body}
+                if payload:
+                    self.core.customers.save(payload, customer["id"])
+                return self._response(200, self.core.accounts.account_summary(context["id"]))
+
+            if route == ["api", self.VERSION, "customer", "quotes"] and method == "POST":
+                context = self._context(headers)
+                quote, items = self.core.customer_commerce.create_quote_request(context["id"], body.get("project") or body)
+                return self._response(201, {"quote": quote, "items": items, "quote_number": quote["quote_number"]})
+
+            if route == ["api", self.VERSION, "customer", "quotes"] and method == "GET":
+                context = self._context(headers)
+                return self._response(200, {"quotes": self.core.quotes.list_for_user(context["id"])})
+
+            if len(route) == 5 and route[:4] == ["api", self.VERSION, "customer", "quotes"] and method == "GET":
+                context = self._context(headers)
+                quote, items = self.core.quotes.get_for_user(context["id"], route[4])
+                return self._response(200, {"quote": quote, "items": items})
+
+            if route == ["api", self.VERSION, "customer", "orders"] and method == "POST":
+                context = self._context(headers)
+                payload = body or {}
+                result = self.core.customer_commerce.create_order(
+                    context["id"], payload.get("items") or [],
+                    payload.get("shippingAddress") or payload.get("shipping_address") or {},
+                    payload.get("notes") or ""
+                )
+                order, saved_items, subtotal, shipping, tax, total = result
+                return self._response(201, {
+                    "order": dict(order),
+                    "items": [dict(item) for item in saved_items],
+                    "totals": {
+                        "subtotal": subtotal / 100.0,
+                        "shipping": shipping / 100.0,
+                        "tax": tax / 100.0,
+                        "total": total / 100.0,
+                    },
+                })
+
+            if route == ["api", self.VERSION, "customer", "orders"] and method == "GET":
+                context = self._context(headers)
+                return self._response(200, {"orders": self.core.orders.list_for_user(context["id"])})
+
+            if len(route) == 5 and route[:4] == ["api", self.VERSION, "customer", "orders"] and method == "GET":
+                context = self._context(headers)
+                order, items = self.core.orders.get_for_user(context["id"], route[4])
+                return self._response(200, {"order": order, "items": items})
+
+            if len(route) == 6 and route[:5] == ["api", self.VERSION, "customer", "orders"] and route[5] == "payment-session" and method == "POST":
+                context = self._context(headers)
+                payment = self.core.payments.create_checkout(context["id"], route[4])
+                return self._response(200, {"payment": payment})
+
+            if route == ["api", self.VERSION, "auth", "register"] and method == "POST":
+                result = self.core.customer_commerce.register_customer(
+                    body.get("name", ""), body.get("email", ""), body.get("password", ""), body.get("phone", "")
+                )
+                return self._response(201, result)
+
+            if route == ["api", self.VERSION, "quote-requests"] and method == "POST":
+                file_bytes = None
+                file_base64 = body.get("file_base64") or ""
+                if file_base64:
+                    try:
+                        file_bytes = base64.b64decode(file_base64, validate=True)
+                    except (ValueError, binascii.Error) as exc:
+                        raise ValueError("Reference file payload is invalid") from exc
+                    if len(file_bytes) > 25 * 1024 * 1024:
+                        raise ValueError("Reference file exceeds the 25 MB limit")
+                quote, items = self.core.customer_commerce.create_public_quote_request(
+                    body.get("name", ""),
+                    body.get("email", ""),
+                    body.get("project") or body,
+                    body.get("file_name", ""),
+                    file_bytes,
+                )
+                return self._response(201, {"quote": quote, "items": items, "request_number": quote["quote_number"]})
 
             if route[:3] == ["api", self.VERSION, "products"]:
                 if len(route) == 3 and method == "GET":
@@ -221,17 +364,22 @@ def create_wsgi_app(core):
 
     def application(environ, start_response):
         length = int(environ.get("CONTENT_LENGTH") or 0)
+        max_body = 36 * 1024 * 1024
+        if length > max_body:
+            payload = json.dumps({"error": "Request body is too large"}).encode("utf-8")
+            start_response("413 Request Entity Too Large", [("Content-Type", "application/json; charset=utf-8"), ("Cache-Control", "no-store"), ("Content-Length", str(len(payload)))])
+            return [payload]
         raw = environ["wsgi.input"].read(length) if length else b""
         try:
             body = json.loads(raw.decode("utf-8")) if raw else {}
         except (ValueError, UnicodeDecodeError):
             body = {}
         headers = {"Authorization": environ.get("HTTP_AUTHORIZATION", ""), "User-Agent": environ.get("HTTP_USER_AGENT", ""),
-                   "X-Forwarded-For": environ.get("REMOTE_ADDR", "")}
+                   "X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR", "")}
         result = api.request(environ.get("REQUEST_METHOD", "GET"), environ.get("PATH_INFO", "/") + (("?" + environ["QUERY_STRING"]) if environ.get("QUERY_STRING") else ""), body, headers)
         payload = json.dumps(result["data"], default=str).encode("utf-8")
-        status_text = {200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 500: "Internal Server Error"}.get(result["status"], "OK")
-        start_response("%d %s" % (result["status"], status_text), [("Content-Type", "application/json; charset=utf-8"), ("Content-Length", str(len(payload)))])
+        status_text = {200: "OK", 201: "Created", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 429: "Too Many Requests", 500: "Internal Server Error"}.get(result["status"], "OK")
+        start_response("%d %s" % (result["status"], status_text), [("Content-Type", "application/json; charset=utf-8"), ("Cache-Control", "no-store"), ("Content-Length", str(len(payload)))])
         return [payload]
 
     return application

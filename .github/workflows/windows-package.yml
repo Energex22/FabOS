@@ -1,0 +1,66 @@
+name: FabOS Windows package
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  package-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install FabOS
+        shell: cmd
+        run: python -m pip install --upgrade pip && python -m pip install .
+
+      - name: Install PyInstaller
+        shell: cmd
+        run: python -m pip install "pyinstaller==5.13.2"
+
+      - name: Build Windows application
+        shell: cmd
+        run: installer\windows7\Build_EXE.bat
+
+      - name: Verify packaged runtime
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:GITHUB_WORKSPACE "dist\WireVault FabOS"
+          $exe = Join-Path $app "WireVault FabOS.exe"
+          $pythonDll = Join-Path $app "python311.dll"
+          if (-not (Test-Path $exe)) { throw "Missing packaged executable: $exe" }
+          if (-not (Test-Path $pythonDll)) { throw "Missing packaged Python runtime: $pythonDll" }
+          Write-Host "Packaged executable: $exe"
+          Write-Host "Packaged Python runtime: $pythonDll"
+
+      - name: Smoke test packaged application startup
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:GITHUB_WORKSPACE "dist\WireVault FabOS"
+          $exe = Join-Path $app "WireVault FabOS.exe"
+          $p = Start-Process -FilePath $exe -WorkingDirectory $app -PassThru
+          Start-Sleep -Seconds 5
+          if ($p.HasExited) {
+            throw "FabOS exited during startup smoke test with exit code $($p.ExitCode)."
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "FabOS startup smoke test passed (PID $($p.Id))."
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: WireVault-FabOS-Windows
+          path: dist/WireVault FabOS/
+          if-no-files-found: error

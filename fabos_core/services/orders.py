@@ -1,7 +1,7 @@
 class OrderService:
     """Order access and lifecycle boundary."""
     SORT_COLUMNS={"number":"o.order_number","customer":"customer_name COLLATE NOCASE","status":"o.status","due":"o.due_at","total":"o.total_cents","created":"o.created_at"}
-    ORDER_TRANSITIONS={"pending":{"confirmed","cancelled"},"confirmed":{"in_production","cancelled"},"in_production":{"ready","cancelled"},"ready":{"shipped","completed","cancelled"},"shipped":{"completed"},"completed":set(),"cancelled":set()}
+    ORDER_TRANSITIONS={"pending":{"confirmed","cancelled"},"confirmed":{"in_production","cancelled"},"in_production":{"qc","ready","cancelled"},"qc":{"ready","cancelled"},"ready":{"shipped","completed","cancelled"},"shipped":{"completed"},"completed":set(),"cancelled":set()}
     TERMINAL_STATUSES={"completed","cancelled"}
     def __init__(self,database,accounts=None,permissions=None): self.database=database; self.accounts=accounts; self.permissions=permissions; self._ensure_order_item_schema()
     def _ensure_order_item_schema(self):
@@ -23,7 +23,7 @@ class OrderService:
     def _items_for_order(self,conn,order_id,quote_id=None):
         items=conn.execute("SELECT oi.*,p.name product_name,v.name variant_name FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id LEFT JOIN product_variants v ON v.id=oi.variant_id WHERE oi.order_id=? ORDER BY oi.rowid",(order_id,)).fetchall()
         if items or not quote_id:return items
-        return conn.execute("SELECT qi.*,p.name product_name,'' variant_name FROM quote_items qi LEFT JOIN products p ON p.id=qi.product_id WHERE qi.quote_id=? ORDER BY qi.rowid",(quote_id,)).fetchall()
+        return conn.execute("SELECT qi.*,p.name product_name,v.name variant_name FROM quote_items qi LEFT JOIN products p ON p.id=qi.product_id LEFT JOIN product_variants v ON v.id=qi.variant_id WHERE qi.quote_id=? ORDER BY qi.rowid",(quote_id,)).fetchall()
     def get(self,order_id):
         with self.database.connect() as conn:
             row=conn.execute("SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=?",(order_id,)).fetchone()
@@ -108,7 +108,7 @@ class OrderService:
             order=conn.execute("SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(c.email,'') customer_email,COALESCE(c.phone,'') customer_phone,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=?",(order_id,)).fetchone()
             if not order:raise KeyError("Order not found")
             items=self._items_for_order(conn,order_id,order["quote_id"])
-            jobs=conn.execute("SELECT j.*,COALESCE(p.name,'Custom Job') product_name,COALESCE(pr.name,'Unassigned') printer_name FROM print_jobs j LEFT JOIN products p ON p.id=j.product_id LEFT JOIN printers pr ON pr.id=j.printer_id WHERE j.order_id=? ORDER BY j.created_at",(order_id,)).fetchall()
+            jobs=conn.execute("SELECT j.*,COALESCE(p.name,'Custom Job') product_name,COALESCE(v.name,'') variant_name,COALESCE(pr.name,'Unassigned') printer_name FROM print_jobs j LEFT JOIN products p ON p.id=j.product_id LEFT JOIN product_variants v ON v.id=j.variant_id LEFT JOIN printers pr ON pr.id=j.printer_id WHERE j.order_id=? ORDER BY j.created_at",(order_id,)).fetchall()
             qc=conn.execute("SELECT q.*,COALESCE(p.name,'Custom Job') product_name FROM qc_inspections q LEFT JOIN print_jobs j ON j.id=q.print_job_id LEFT JOIN products p ON p.id=j.product_id WHERE q.order_id=? ORDER BY q.created_at",(order_id,)).fetchall()
             invoices=conn.execute("SELECT i.*,(i.total_cents-i.paid_cents) balance_cents FROM invoices i WHERE i.order_id=? ORDER BY i.created_at DESC",(order_id,)).fetchall()
             payments=conn.execute("SELECT p.*,i.invoice_number FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.order_id=? ORDER BY p.paid_at DESC",(order_id,)).fetchall()
