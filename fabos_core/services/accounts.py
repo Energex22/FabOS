@@ -72,6 +72,15 @@ class AccountService:
             resulting_type = account_type if account_type is not None else current_type
             resulting_active = bool(active) if active is not None else current_active
             current_role = str(current["role"] or "").lower() if "role" in current.keys() else ""
+            if current_type == "administrator" and current_active and (
+                resulting_type != "administrator" or not resulting_active
+            ):
+                other_admin = conn.execute(
+                    "SELECT 1 FROM users WHERE account_type='administrator' AND active=1 AND id<>? LIMIT 1",
+                    (user_id,),
+                ).fetchone()
+                if not other_admin:
+                    raise ValueError("Cannot disable or demote the last active administrator")
             if current_role == "owner" and (
                 resulting_type != "administrator" or not resulting_active
             ):
