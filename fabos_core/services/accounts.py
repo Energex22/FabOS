@@ -89,15 +89,6 @@ class AccountService:
                 # The owner role is intentionally not editable through the generic
                 # account service; owner status is a protected security boundary.
                 raise ValueError("Cannot change the owner account through account management")
-            if current_type == "administrator" and current_active and (
-                resulting_type != "administrator" or not resulting_active
-            ):
-                other_admin = conn.execute(
-                    "SELECT 1 FROM users WHERE account_type='administrator' AND active=1 AND id<>? LIMIT 1",
-                    (user_id,),
-                ).fetchone()
-                if not other_admin:
-                    raise ValueError("Cannot disable or demote the last active administrator")
             cur = conn.execute("UPDATE users SET " + ",".join(changes) + " WHERE id=?", args)
             if cur.rowcount != 1:
                 raise KeyError("User not found")
