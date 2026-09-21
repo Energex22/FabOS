@@ -4,8 +4,8 @@ import json,traceback,re
 
 _REDACTED = "***REDACTED***"
 _SENSITIVE_TEXT = re.compile(
-    r"(Bearer\\s+)[A-Za-z0-9._~+/=-]+|"
-    r"((?:password|token|secret|api[_ -]?key|authorization|cookie|credential)[\\s=:]+)[^\\s,;]+",
+    r"(Bearer\s+)[A-Za-z0-9._~+/=-]+|"
+    r"((?:password|token|secret|api[_ -]?key|authorization|cookie|credential)[\s=:]+)[^\s,;]+",
     re.IGNORECASE,
 )
 
