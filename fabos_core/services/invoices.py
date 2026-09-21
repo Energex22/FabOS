@@ -78,8 +78,10 @@ class InvoiceService:
   with self.db.connect() as c:
    inv=c.execute("SELECT subtotal_cents,status FROM invoices WHERE id=?",(iid,)).fetchone()
    if not inv:raise KeyError("Invoice not found.")
-   active_payment=c.execute("SELECT 1 FROM payment_transactions WHERE invoice_id=? AND status IN ('created','pending','authorized','paid','partially_refunded') LIMIT 1",(iid,)).fetchone()
-   if active_payment:raise ValueError("Invoice charges cannot be changed while a payment attempt is active.")
+   payment_table=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payment_transactions'").fetchone()
+   if payment_table:
+    active_payment=c.execute("SELECT 1 FROM payment_transactions WHERE invoice_id=? AND status IN ('created','pending','authorized','paid','partially_refunded') LIMIT 1",(iid,)).fetchone()
+    if active_payment:raise ValueError("Invoice charges cannot be changed while a payment attempt is active.")
    if inv["status"]=="void":raise ValueError("Cannot modify a void invoice.")
    total=max(0,int(inv["subtotal_cents"] or 0)+int(tax_cents)+int(shipping_cents)-int(discount_cents));paid=int(c.execute("SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE invoice_id=?",(iid,)).fetchone()[0]);status="paid" if total>0 and paid>=total else ("partial" if paid>0 else "open")
    c.execute("UPDATE invoices SET tax_cents=?,shipping_cents=?,discount_cents=?,notes=?,total_cents=?,paid_cents=?,status=? WHERE id=?",(int(tax_cents),int(shipping_cents),int(discount_cents),notes,total,paid,status,iid));c.commit()
