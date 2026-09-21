@@ -5,7 +5,8 @@ import json,traceback,re
 _REDACTED = "***REDACTED***"
 _SENSITIVE_TEXT = re.compile(
     r"(Bearer\s+)[A-Za-z0-9._~+/=-]+|"
-    r"((?:password|token|secret|api[_ -]?key|authorization|cookie|credential)[\s=:]+)[^\s,;]+",
+    r"((?:authorization)[\s=:]+(?:Bearer\s+)?)[^\s,;]+|"
+    r"((?:password|token|secret|api[_ -]?key|cookie|credential)[\s=:]+)[^\s,;]+",
     re.IGNORECASE,
 )
 
@@ -15,7 +16,7 @@ def _redact(value):
     if isinstance(value, (list, tuple)):
         return [_redact(v) for v in value]
     if isinstance(value, str):
-        return _SENSITIVE_TEXT.sub(lambda m: (m.group(1) or m.group(2)) + _REDACTED, value)
+        return _SENSITIVE_TEXT.sub(lambda m: (m.group(1) or m.group(2) or m.group(3)) + _REDACTED, value)
     return value
 
 class ErrorLogService:
