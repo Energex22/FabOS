@@ -474,8 +474,9 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         self._button(bar,"Refresh",lambda:self.show_page("Logs & Version")).pack(side="left",padx=7)
 
         card=self._card(self.content,"Application Log");card.pack(fill="both",expand=True)
+        shell=tk.Frame(card,bg=COLORS["surface"]);shell.pack(fill="both",expand=True,padx=12,pady=(0,12))
         cols=("time","level","message","detail")
-        table=ttk.Treeview(card,columns=cols,show="headings",style="Dark.Treeview")
+        table=ttk.Treeview(shell,columns=cols,show="headings",style="Dark.Treeview")
         for col,label,width in [("time","Time",145),("level","Level",75),("message","Message",250),("detail","Details",520)]:
             table.heading(col,text=label);table.column(col,width=width,anchor="w",stretch=(col=="detail"))
         for i,row in enumerate(self.core.error_log.recent(500)):
@@ -483,7 +484,6 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             table.insert("","end",iid="log_%d"%i,values=(row.get("time",""),row.get("level",""),row.get("message",""),detail),
                          tags=(str(row.get("level","")).lower(),))
         table.tag_configure("error",foreground=COLORS["red"]);table.tag_configure("warning",foreground=COLORS["orange"])
-        shell=tk.Frame(card,bg=COLORS["surface"]);shell.pack(fill="both",expand=True,padx=12,pady=(0,12))
         sy=ttk.Scrollbar(shell,orient="vertical",command=table.yview);sx=ttk.Scrollbar(shell,orient="horizontal",command=table.xview)
         table.configure(yscrollcommand=sy.set,xscrollcommand=sx.set)
         table.grid(row=0,column=0,sticky="nsew");sy.grid(row=0,column=1,sticky="ns");sx.grid(row=1,column=0,sticky="ew")
@@ -2105,21 +2105,35 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         return images[0]
 
     def _load_display_photo(self, path, max_size=(760, 500)):
-        """Load and scale common image formats. Pillow is optional but recommended."""
+        """Load a safe thumbnail without allowing one bad image to break the catalog UI."""
+        path = Path(path)
+        if not path.exists() or not path.is_file():
+            return None
         try:
-            from PIL import Image, ImageTk
-            image = Image.open(str(path))
-            image.thumbnail(max_size, Image.LANCZOS)
-            return ImageTk.PhotoImage(image)
+            from PIL import Image, ImageTk, ImageOps
+            # Keep extremely large web images from exhausting memory while still
+            # allowing normal high-resolution product photos.
+            with Image.open(str(path)) as source:
+                source.verify()
+            with Image.open(str(path)) as source:
+                source = ImageOps.exif_transpose(source)
+                if getattr(source, "width", 0) <= 0 or getattr(source, "height", 0) <= 0:
+                    return None
+                source.thumbnail(max_size, Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS)
+                # PhotoImage handles RGB/RGBA consistently across Pillow/Tk builds.
+                if source.mode not in ("RGB", "RGBA"):
+                    source = source.convert("RGBA" if "transparency" in source.info else "RGB")
+                return ImageTk.PhotoImage(source.copy())
         except ImportError:
+            # Pillow is recommended for WEBP/BMP and robust decoding, but keep
+            # PNG/GIF usable on a clean install.
             try:
                 photo = tk.PhotoImage(file=str(path))
-                # Reduce oversized PNG/GIF images with integer subsampling.
                 sx = max(1, int(photo.width() / max_size[0]) + (1 if photo.width() > max_size[0] else 0))
                 sy = max(1, int(photo.height() / max_size[1]) + (1 if photo.height() > max_size[1] else 0))
                 factor = max(sx, sy)
                 return photo.subsample(factor, factor) if factor > 1 else photo
-            except tk.TclError:
+            except (tk.TclError, OSError):
                 return None
         except Exception:
             return None
@@ -2218,9 +2232,16 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         side.pack(side="right", fill="y", padx=(6, 12), pady=(6, 12))
         side.pack_propagate(False)
         rows = list(self.core.products.images(product_id))
-        listbox = tk.Listbox(side, bg=COLORS["surface_alt"], fg=COLORS["text"], selectbackground=COLORS["green_dark"],
-                            selectforeground="white", relief="flat", font=("Segoe UI", 9), exportselection=False)
-        listbox.pack(fill="both", expand=True)
+        list_shell = tk.Frame(side, bg=COLORS["surface"])
+        list_shell.pack(fill="both", expand=True)
+        listbox = tk.Listbox(list_shell, bg=COLORS["surface_alt"], fg=COLORS["text"],
+                            selectbackground=COLORS["green_dark"], selectforeground="white",
+                            relief="flat", font=("Segoe UI", 9), exportselection=False,
+                            activestyle="none")
+        list_scroll = ttk.Scrollbar(list_shell, orient="vertical", command=listbox.yview)
+        listbox.configure(yscrollcommand=list_scroll.set)
+        listbox.pack(side="left", fill="both", expand=True)
+        list_scroll.pack(side="right", fill="y")
         for row in rows:
             name = Path(str(row["path"])).name
             flags = []
