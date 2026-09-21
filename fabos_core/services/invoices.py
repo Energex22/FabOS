@@ -24,7 +24,17 @@ class InvoiceService:
    if existing:return existing["id"],False
    order=c.execute("SELECT * FROM orders WHERE id=?",(order_id,)).fetchone()
    if not order:raise KeyError("Order not found.")
-   iid=str(uuid.uuid4());subtotal=int(order["total_cents"] or 0)
+   iid=str(uuid.uuid4());order_total=int(order["total_cents"] or 0)
+   if order_total <= 0: raise ValueError("Cannot create an invoice for a zero-value order.")
+   # The order total is already the authoritative, server-calculated checkout total.
+   # Never re-apply the current shop tax setting here: doing so would double-tax
+   # customer-web orders and could change an invoice after checkout.
+   order_tax=int(order["tax_cents"] or 0) if "tax_cents" in order.keys() else 0
+   order_shipping=int(order["shipping_cents"] or 0) if "shipping_cents" in order.keys() else 0
+   subtotal=max(0,order_total-order_tax-order_shipping)
+   if due_days is None:due_days=int(float(self._setting(c,"invoice_due_days","14") or 14))
+   due=(datetime.now()+timedelta(days=int(due_days))).date().isoformat()
+   c.execute("""INSERT INTO invoices(id,invoice_number,order_id,status,total_cents,paid_cents,due_at,subtotal_cents,tax_cents,shipping_cents,discount_cents) VALUES(?,?,?,'open',?,0,?,?,?,?,0)""",(iid,self._next_number(c),order_id,order_total,due,subtotal,order_tax,order_shipping));c.commit();return iid,True
    if due_days is None:due_days=int(float(self._setting(c,"invoice_due_days","14") or 14))
    tax_pct=float(self._setting(c,"default_tax_percent","0") or 0);tax=round(subtotal*tax_pct/100.0);total=subtotal+tax;due=(datetime.now()+timedelta(days=int(due_days))).date().isoformat()
    c.execute("""INSERT INTO invoices(id,invoice_number,order_id,status,total_cents,paid_cents,due_at,subtotal_cents,tax_cents,shipping_cents,discount_cents) VALUES(?,?,?,'open',?,0,?,?,?,?,0)""",(iid,self._next_number(c),order_id,total,due,subtotal,tax,0));c.commit();return iid,True
