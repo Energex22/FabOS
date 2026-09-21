@@ -54,7 +54,12 @@ ALTER TABLE orders ADD COLUMN shipping_cents INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE orders ADD COLUMN shipping_address_json TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE orders ADD COLUMN checkout_notes TEXT NOT NULL DEFAULT '';
 ALTER TABLE orders ADD COLUMN checkout_channel TEXT NOT NULL DEFAULT 'internal';
-CREATE INDEX IF NOT EXISTS idx_orders_checkout_channel ON orders(checkout_channel);""")]
+CREATE INDEX IF NOT EXISTS idx_orders_checkout_channel ON orders(checkout_channel);""")(37,"""UPDATE users SET role=CASE WHEN account_type='administrator' THEN role ELSE account_type END WHERE lower(COALESCE(role,''))='owner' AND lower(COALESCE(account_type,''))<>'administrator';
+CREATE TRIGGER IF NOT EXISTS trg_users_default_role_guard AFTER INSERT ON users
+WHEN lower(COALESCE(NEW.role,''))='owner' AND lower(COALESCE(NEW.account_type,''))<>'administrator'
+BEGIN
+    UPDATE users SET role=NEW.account_type,updated_at=CURRENT_TIMESTAMP WHERE id=NEW.id;
+END;"""),]
 def migrate(db,backup=None):
  with db.connect() as c:
   c.execute('CREATE TABLE IF NOT EXISTS app_migrations(version INTEGER PRIMARY KEY,name TEXT NOT NULL,applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');done={r[0] for r in c.execute('SELECT version FROM app_migrations')}
