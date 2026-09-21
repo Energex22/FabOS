@@ -15,7 +15,7 @@ class SettingsCenterTests(unittest.TestCase):
    settings.update({"invoice_prefix":"WV","invoice_due_days":"30","default_tax_percent":"10","shop_name":"WireVault Prints"})
    oid=str(uuid.uuid4())
    with db.connect() as c:
-    c.execute("INSERT INTO orders(id,order_number,total_cents,status) VALUES(?,?,?,?)",(oid,"O-SET",1000,"ready"));c.commit()
+    c.execute("INSERT INTO orders(id,order_number,total_cents,tax_cents,shipping_cents,status) VALUES(?,?,?,?,?,?)",(oid,"O-SET",1100,100,0,"ready"));c.commit()
    invoices=InvoiceService(db,Path(td))
    iid,_=invoices.create_from_order(oid)
    inv,_,_=invoices.get(iid)
