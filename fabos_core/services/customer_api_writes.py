@@ -175,6 +175,7 @@ def register_customer_write_routes(app, get_application, current_user):
 
     @app.post("/api/v1/quote-requests/upload")
     async def create_public_quote_request_with_file(
+        request: Request,
         name: str = File(..., min_length=1, max_length=200),
         email: str = File(..., min_length=3, max_length=320),
         idea: str = File(..., min_length=1, max_length=4000),
@@ -183,7 +184,6 @@ def register_customer_write_routes(app, get_application, current_user):
         quantity: int = File(default=1, ge=1, le=1000),
         notes: str = File(default="", max_length=4000),
         file: UploadFile = File(...),
-        request: Request,
         application=Depends(get_application),
     ):
         client = request.client.host if request.client else "unknown"
