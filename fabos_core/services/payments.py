@@ -172,6 +172,8 @@ class PaymentService:
         if not invoice or int(invoice["total_cents"] or 0) != int(order["total_cents"] or 0):
             raise ValueError("Order total no longer matches its invoice; payment cannot be started")
         provider=self._build_provider("stripe")
+        if int(order["total_cents"] or 0) <= 0:
+            raise ValueError("A zero-value order does not require a payment checkout")
         payment_id,amount_cents,metadata,attempt_ready=self._prepare_transaction(order,customer["id"],invoice_id,provider.name,"customer-web")
         if not attempt_ready: return self.get(payment_id)
         try: result=provider.create_checkout(payment_id=payment_id,amount_cents=amount_cents,currency="USD",metadata=metadata)
