@@ -107,6 +107,34 @@ class PaymentRetryRefundTests(unittest.TestCase):
         self.assertTrue(result["recorded"])
         self.assertEqual(result["status"], "partially_refunded")
 
+    def test_refund_rejects_provider_mismatch(self):
+        application = _Application()
+        with application.database.connect() as conn:
+            conn.execute("INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id,provider) VALUES(?,?,?,?,?)",
+                         ("payment-1", "invoice-1", "pi_shared", "order-1", "square"))
+            conn.execute("INSERT INTO payments VALUES(?,?,?,?,?,?)",
+                         ("ledger-1", "invoice-1", 5000, "square", "pi_shared", "Gateway payment reconciled by FabOS"))
+            conn.commit()
+        payload = '{"id":"evt_refund_mismatch","type":"refund.created","data":{"object":{"id":"re_mismatch","amount":1000,"payment_intent":"pi_shared"}}}'
+        result = _record_refund(application, "stripe", payload)
+        self.assertFalse(result["recorded"])
+        self.assertEqual(result["reason"], "payment_provider_mismatch")
+        with application.database.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM payments WHERE amount_cents<0").fetchone()[0], 0)
+
+    def test_refund_rejects_non_refundable_payment_state(self):
+        application = _Application()
+        with application.database.connect() as conn:
+            conn.execute("INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id,status) VALUES(?,?,?,?,?)",
+                         ("payment-1", "invoice-1", "pi_failed", "order-1", "failed"))
+            conn.execute("INSERT INTO payments VALUES(?,?,?,?,?,?)",
+                         ("ledger-1", "invoice-1", 5000, "stripe", "pi_failed", "Gateway payment reconciled by FabOS"))
+            conn.commit()
+        payload = '{"id":"evt_refund_failed","type":"refund.created","data":{"object":{"id":"re_failed","amount":1000,"payment_intent":"pi_failed"}}}'
+        result = _record_refund(application, "stripe", payload)
+        self.assertFalse(result["recorded"])
+        self.assertEqual(result["reason"], "payment_not_refundable")
+
     def test_full_refund_sets_refunded(self):
         application = _Application()
         with application.database.connect() as conn:
