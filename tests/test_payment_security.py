@@ -133,6 +133,32 @@ class PaymentSecurityTests(unittest.TestCase):
             else:
                 os.environ["STRIPE_WEBHOOK_SECRET"] = previous_webhook
 
+    def test_stripe_paid_webhook_parses_gateway_amount(self):
+        previous_key = os.environ.get("STRIPE_SECRET_KEY")
+        previous_webhook = os.environ.get("STRIPE_WEBHOOK_SECRET")
+        os.environ["STRIPE_SECRET_KEY"] = "sk_test"
+        os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_test"
+        try:
+            provider = StripePaymentProvider()
+            payload = json.dumps({
+                "id": "evt_amount",
+                "type": "payment_intent.succeeded",
+                "data": {"object": {"id": "pi_amount", "amount_received": 5000, "metadata": {"payment_id": "payment-1"}}},
+            })
+            timestamp = str(int(time.time()))
+            digest = hmac.new("whsec_test".encode("utf-8"), f"{timestamp}.{payload}".encode("utf-8"), hashlib.sha256).hexdigest()
+            event = provider.parse_webhook(payload, f"t={timestamp},v1={digest}")
+            self.assertEqual(event["amount_cents"], 5000)
+        finally:
+            if previous_key is None:
+                os.environ.pop("STRIPE_SECRET_KEY", None)
+            else:
+                os.environ["STRIPE_SECRET_KEY"] = previous_key
+            if previous_webhook is None:
+                os.environ.pop("STRIPE_WEBHOOK_SECRET", None)
+            else:
+                os.environ["STRIPE_WEBHOOK_SECRET"] = previous_webhook
+
     def test_stripe_refund_is_recorded_as_negative_ledger_entry(self):
         application = _Application()
         self._seed_payment(application)
