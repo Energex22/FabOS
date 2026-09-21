@@ -38,8 +38,7 @@ class DiagnosticsSecurityTests(unittest.TestCase):
             settings = Settings()
 
         app = App()
-        fd, log_path = tempfile.mkstemp(suffix=".log")
-        os.close(fd)
+        log_path = os.path.join(tempfile.gettempdir(), "fabos-test-diagnostics-fabos.log")
         original = Settings.log_dir
         try:
             Settings.log_dir = os.path.dirname(log_path)
