@@ -235,5 +235,22 @@ class PaymentSecurityTests(unittest.TestCase):
         self.assertEqual(count, 1)
 
 
+
+    def test_payment_record_carries_provider_and_order_identity(self):
+        application = _Application()
+        with application.database.connect() as conn:
+            conn.execute(
+                "INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id,provider,amount_cents) VALUES(?,?,?,?,?,?)",
+                ("payment-identity", "invoice-1", "pi_identity", "order-1", "stripe", 5000),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT order_id,provider,amount_cents FROM payment_transactions WHERE id=?",
+                ("payment-identity",),
+            ).fetchone()
+        self.assertEqual(row["order_id"], "order-1")
+        self.assertEqual(row["provider"], "stripe")
+        self.assertEqual(row["amount_cents"], 5000)
+
 if __name__ == "__main__":
     unittest.main()
