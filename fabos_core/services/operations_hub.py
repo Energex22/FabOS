@@ -213,6 +213,15 @@ class OperationsHubService:
               AND EXISTS(SELECT 1 FROM qc_inspections q WHERE q.order_id=orders.id)
               AND NOT EXISTS(SELECT 1 FROM qc_inspections q WHERE q.order_id=orders.id AND q.status<>'passed')""")
 
+            # Every QC-passed order is ready for fulfillment. Create the pending
+            # fulfillment record once so the next operational step is explicit,
+            # while leaving the pickup/shipping choice editable by staff/customer.
+            c.execute("""INSERT INTO fulfillments(id,order_id,method,status)
+              SELECT lower(hex(randomblob(16))),o.id,'pickup','pending'
+              FROM orders o
+              WHERE o.status='ready'
+                AND NOT EXISTS(SELECT 1 FROM fulfillments f WHERE f.order_id=o.id)""")
+
             # Delivered/picked-up + fully-paid becomes Completed, even if the app was
             # closed when one of those two conditions changed.
             c.execute("""UPDATE orders SET status='completed'
