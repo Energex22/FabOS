@@ -54,6 +54,7 @@ def run(host=None, port=None):
     port = int(port or os.environ.get("FABOS_API_PORT", "8000"))
     core = FabOSApplication()
     application = _application_with_cors(core)
+    core.production_automation.start_worker()
     print("FabOS API development server: http://%s:%d" % (host, port))
     print("Health check: http://%s:%d/api/v1/health" % (host, port))
     if serve is None:
