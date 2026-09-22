@@ -31,6 +31,83 @@ def register_admin_routes(app, get_application, administrator_user):
         qc_minutes: float = Field(default=0, ge=0)
         overhead_percent: Optional[float] = Field(default=None, ge=0, le=100)
 
+    def operations_user(user=Depends(app.state.current_user), application=Depends(get_application)):
+        account_type = str(user["account_type"] or "").lower()
+        if account_type not in ("employee", "administrator"):
+            raise HTTPException(status_code=403, detail="Team account required")
+        if not application.permissions.has_permission(account_type, "production.read", user_id=user["id"]):
+            raise HTTPException(status_code=403, detail="Operations access denied")
+        return user
+
+    @app.get("/api/v1/admin/operations/dashboard")
+    def operations_dashboard(user=Depends(operations_user), application=Depends(get_application)):
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        today = now.date().isoformat()
+        month_start = (now.date() - timedelta(days=29)).isoformat()
+        with application.database.connect() as conn:
+            def scalar(sql, args=()):
+                return conn.execute(sql, args).fetchone()[0] or 0
+
+            orders_today = int(scalar("SELECT COUNT(*) FROM orders WHERE date(created_at)=date(?) AND status NOT IN ('cancelled')", (today,)))
+            sales_today = int(scalar("SELECT COALESCE(SUM(total_cents),0) FROM orders WHERE date(created_at)=date(?) AND status NOT IN ('cancelled')", (today,)))
+            sales_30d = int(scalar("SELECT COALESCE(SUM(total_cents),0) FROM orders WHERE date(created_at)>=date(?) AND status NOT IN ('cancelled')", (month_start,)))
+            active_orders = int(scalar("SELECT COUNT(*) FROM orders WHERE status NOT IN ('completed','cancelled','shipped')"))
+            active_jobs = int(scalar("SELECT COUNT(*) FROM print_jobs WHERE status IN ('queued','scheduled','printing','paused')"))
+            printing_jobs = int(scalar("SELECT COUNT(*) FROM print_jobs WHERE status IN ('printing','paused')"))
+            failed_jobs = int(scalar("SELECT COUNT(*) FROM print_jobs WHERE status='failed'"))
+            printer_total = int(scalar("SELECT COUNT(*) FROM printers"))
+            printer_online = int(scalar("SELECT COUNT(*) FROM printers WHERE lower(COALESCE(status,'')) NOT IN ('offline','error')"))
+            low_filament_threshold = float(application.shop_settings.get("filament_low_threshold_g", "250") or 250)
+            low_filament = int(scalar("SELECT COUNT(*) FROM filament_spools WHERE active=1 AND remaining_g<?", (low_filament_threshold,)))
+            low_supplies = int(scalar("SELECT COUNT(*) FROM supply_items WHERE active=1 AND quantity<=low_threshold"))
+            open_quotes = int(scalar("SELECT COUNT(*) FROM quotes WHERE status IN ('draft','sent')"))
+            unpaid = int(scalar("SELECT COUNT(*) FROM invoices WHERE status IN ('open','partial')"))
+            overdue = int(scalar("SELECT COUNT(*) FROM orders WHERE status NOT IN ('completed','cancelled','shipped') AND due_at IS NOT NULL AND due_at<?", (today,)))
+            pending_qc = int(scalar("SELECT COUNT(*) FROM qc_inspections WHERE status='pending'"))
+
+            recent_orders = [dict(row) for row in conn.execute("""
+                SELECT o.id,o.order_number,o.status,o.total_cents,o.due_at,o.created_at,COALESCE(c.name,'No customer') customer_name
+                FROM orders o LEFT JOIN customers c ON c.id=o.customer_id
+                ORDER BY o.created_at DESC LIMIT 8""").fetchall()]
+            jobs = [dict(row) for row in conn.execute("""
+                SELECT j.id,j.status,j.estimated_minutes,j.print_time_left_seconds,COALESCE(p.name,'Custom Job') product_name,
+                       COALESCE(pr.name,'Unassigned') printer_name,COALESCE(o.order_number,'Personal') order_number,
+                       COALESCE(fs.material || ' ' || COALESCE(fs.color,''),'No spool') spool_name
+                FROM print_jobs j LEFT JOIN products p ON p.id=j.product_id LEFT JOIN printers pr ON pr.id=j.printer_id
+                LEFT JOIN orders o ON o.id=j.order_id LEFT JOIN filament_spools fs ON fs.id=j.spool_id
+                WHERE j.status IN ('queued','scheduled','printing','paused','failed')
+                ORDER BY CASE j.status WHEN 'failed' THEN 0 WHEN 'printing' THEN 1 WHEN 'paused' THEN 2 ELSE 3 END,j.created_at LIMIT 12""").fetchall()]
+            printers = [dict(row) for row in conn.execute("""
+                SELECT id,name,model,status,connection_mode,simulation_progress,nozzle_temp,bed_temp,
+                       print_time_seconds,print_time_left_seconds,octoprint_state_text,octoprint_current_file,last_seen_at,total_hours
+                FROM printers ORDER BY name""").fetchall()]
+            low_spools = [dict(row) for row in conn.execute("""
+                SELECT id,material,brand,color,remaining_g,initial_g,cost_cents,location
+                FROM filament_spools WHERE active=1 AND remaining_g<? ORDER BY remaining_g LIMIT 10""",(low_filament_threshold,)).fetchall()]
+            maintenance = [dict(row) for row in conn.execute("""
+                SELECT p.id,p.name,p.total_hours,COALESCE(MAX(m.printer_hours),0) last_service_hours,
+                       p.total_hours-COALESCE(MAX(m.printer_hours),0) hours_since_service
+                FROM printers p LEFT JOIN maintenance_records m ON m.printer_id=p.id
+                GROUP BY p.id ORDER BY hours_since_service DESC""").fetchall()]
+
+        action_items=[]
+        try:
+            action_items=[dict(item) for item in application.operations.action_items()[:20]]
+        except Exception:
+            pass
+        return {
+            "generated_at": now.isoformat(timespec="seconds"),
+            "viewer": {"id": user["id"], "account_type": user["account_type"], "role": user["role"]},
+            "business": {"orders_today": orders_today, "sales_today_cents": sales_today, "sales_30d_cents": sales_30d, "active_orders": active_orders, "open_quotes": open_quotes, "unpaid_invoices": unpaid, "overdue_orders": overdue, "pending_qc": pending_qc},
+            "production": {"active_jobs": active_jobs, "printing_jobs": printing_jobs, "failed_jobs": failed_jobs, "jobs": jobs},
+            "printers": {"total": printer_total, "online": printer_online, "items": printers},
+            "inventory": {"low_filament": low_filament, "low_supplies": low_supplies, "filament_threshold_g": low_filament_threshold, "spools": low_spools},
+            "maintenance": {"items": maintenance},
+            "recent_orders": recent_orders,
+            "action_items": action_items,
+        }
+
     @app.get("/api/v1/admin/users")
     def list_admin_users(user=Depends(administrator_user), application=Depends(get_application)):
         rows = application.accounts.list_users()
