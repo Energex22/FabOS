@@ -20,6 +20,7 @@ class ShopSettingsService:
         "notification_order_received": "true", "notification_payment_received": "true", "notification_production_started": "true",
         "notification_qc_required": "true", "notification_shipped": "true", "notification_low_inventory": "true",
         "console_lock_enabled": "true", "console_idle_timeout_minutes": "15", "console_local_only": "true",
+        "production_automation_enabled": "true", "production_auto_assign": "true", "production_auto_start": "false", "production_automation_interval_seconds": "10",
     }
 
     META = {
@@ -64,6 +65,12 @@ class ShopSettingsService:
             "notification_order_received": "Notify when an order is received", "notification_payment_received": "Notify when payment is received", "notification_production_started": "Notify when production starts",
             "notification_qc_required": "Notify when QC is required", "notification_shipped": "Notify when an order ships", "notification_low_inventory": "Notify on low inventory",
         },
+        "automation": {
+            "production_automation_enabled": "Run the production automation worker continuously",
+            "production_auto_assign": "Automatically assign compatible printers and filament to queued jobs",
+            "production_auto_start": "Automatically start eligible prints (keep off for physical printers until explicitly enabled)",
+            "production_automation_interval_seconds": "Automation check interval in seconds",
+        },
         "production": {
             "default_slicer": "Default slicer", "cura_engine_path": "Cura engine executable", "cura_petg_profile_path": "PETG Cura profile", "cura_fdmprinter_path": "Cura printer definition", "cura_fdmextruder_path": "Cura extruder definition",
         },
@@ -80,7 +87,7 @@ class ShopSettingsService:
         "setup_labor_hourly_rate", "post_process_labor_hourly_rate", "qc_labor_hourly_rate", "default_packaging_cost", "overhead_percent", "target_margin_percent",
         "minimum_order_cents", "rush_multiplier", "quantity_discount_percent", "payment_fee_percent", "payment_fee_fixed_cents", "filament_low_threshold_g", "filament_reorder_days", "filament_waste_percent", "backup_retention",
         "backup_frequency_hours", "custom_upload_max_mb", "console_idle_timeout_minutes", "default_turnaround_days", "rush_turnaround_days", "shipping_flat_cents",
-        "shipping_calculated_base_cents", "shipping_calculated_per_kg_cents", "free_shipping_threshold_cents",
+        "shipping_calculated_base_cents", "shipping_calculated_per_kg_cents", "free_shipping_threshold_cents", "production_automation_interval_seconds",
     }
 
     def __init__(self, db):
