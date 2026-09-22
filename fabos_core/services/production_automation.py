@@ -119,13 +119,30 @@ class ProductionAutomationService:
             started = 0
             with self.db.connect() as c:
                 jobs = c.execute(
-                    """SELECT j.*, COALESCE(qi.material,'') material, COALESCE(qi.color,'') color,
+                    """SELECT j.*,
+                              COALESCE((
+                                  SELECT qi.material
+                                  FROM quote_items qi
+                                  WHERE qi.quote_id=o.quote_id
+                                    AND qi.product_id=j.product_id
+                                    AND (qi.variant_id=j.variant_id
+                                         OR (qi.variant_id IS NULL AND j.variant_id IS NULL))
+                                  ORDER BY qi.rowid
+                                  LIMIT 1
+                              ),'') material,
+                              COALESCE((
+                                  SELECT qi.color
+                                  FROM quote_items qi
+                                  WHERE qi.quote_id=o.quote_id
+                                    AND qi.product_id=j.product_id
+                                    AND (qi.variant_id=j.variant_id
+                                         OR (qi.variant_id IS NULL AND j.variant_id IS NULL))
+                                  ORDER BY qi.rowid
+                                  LIMIT 1
+                              ),'') color,
                               COALESCE(p.name,'Custom Job') product_name
                        FROM print_jobs j
                        LEFT JOIN orders o ON o.id=j.order_id
-                       LEFT JOIN quote_items qi ON qi.quote_id=o.quote_id
-                         AND qi.product_id=j.product_id
-                         AND (qi.variant_id=j.variant_id OR (qi.variant_id IS NULL AND j.variant_id IS NULL))
                        LEFT JOIN products p ON p.id=j.product_id
                        WHERE j.status IN ('queued','scheduled')
                        ORDER BY CASE WHEN o.due_at IS NULL THEN 1 ELSE 0 END,
