@@ -247,6 +247,13 @@ class OperationsHubService:
               WHERE o.status='ready'
                 AND NOT EXISTS(SELECT 1 FROM fulfillments f WHERE f.order_id=o.id)""")
 
+            # A default pickup fulfillment can become ready as soon as the order
+            # reaches ready. Shipping remains pending until staff selects/configures
+            # the shipping method and package details.
+            c.execute("""UPDATE fulfillments SET status='ready_for_pickup',updated_at=CURRENT_TIMESTAMP
+              WHERE status='pending' AND method='pickup'
+                AND EXISTS(SELECT 1 FROM orders o WHERE o.id=fulfillments.order_id AND o.status='ready')""")
+
             # Delivered/picked-up + fully-paid becomes Completed, even if the app was
             # closed when one of those two conditions changed.
             c.execute("""UPDATE orders SET status='completed'
