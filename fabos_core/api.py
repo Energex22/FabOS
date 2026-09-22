@@ -359,7 +359,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         order["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
         return {"order": order, "items": [_order_item_payload(item) for item in items]}
 
-    register_admin_routes(app, get_application, administrator_user)
+    register_admin_routes(app, get_application, administrator_user, current_user)
     register_customer_write_routes(app, get_application, customer_user)
     register_payment_routes(app, get_application, administrator_user)
     return app
