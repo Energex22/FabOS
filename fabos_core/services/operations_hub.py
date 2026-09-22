@@ -203,7 +203,7 @@ class OperationsHubService:
                    '%s • %s'%(q['quote_number'],q['customer_name']),'Quotes',q['id']))
 
             # If every production job on an active order is complete/cancelled, move to QC.
-            c.execute("""UPDATE orders SET status='qc' WHERE status='production'
+            c.execute("""UPDATE orders SET status='qc' WHERE status IN ('in_production','production')
               AND EXISTS(SELECT 1 FROM print_jobs j WHERE j.order_id=orders.id)
               AND NOT EXISTS(SELECT 1 FROM print_jobs j WHERE j.order_id=orders.id
                              AND j.status NOT IN ('completed','cancelled'))""")
