@@ -195,6 +195,16 @@ class FabOSAPI:
                     return self._response(200, result)
                 return self._response(401, {"error": "Invalid email/username or password"})
 
+            if route == ["api", self.VERSION, "auth", "team-login"] and method == "POST":
+                result = self.core.auth.login(body.get("identifier", ""), body.get("password", ""))
+                if not result:
+                    return self._response(401, {"error": "Invalid credentials"})
+                account = result.get("user", {}).get("user", {}) if isinstance(result.get("user"), dict) else {}
+                if str(account.get("account_type") or "").lower() not in {"employee", "administrator"}:
+                    self.core.auth.logout(result.get("token", ""))
+                    return self._response(403, {"error": "A team or administrator account is required"})
+                return self._response(200, result)
+
             if route == ["api", self.VERSION, "auth", "logout"] and method == "POST":
                 token = self._auth_token(headers)
                 if not token:
