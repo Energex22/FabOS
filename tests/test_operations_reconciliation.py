@@ -10,6 +10,36 @@ from fabos_core.services.operations_hub import OperationsHubService
 
 
 class OperationsReconciliationTests(unittest.TestCase):
+    def test_qc_rework_queues_one_replacement_job(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            oid, jid, qid = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute("INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",
+                          (oid, "O-REWORK", "qc"))
+                c.execute("INSERT INTO print_jobs(id,order_id,status,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?)",
+                          (jid, oid, "completed", 42, 18))
+                c.execute("INSERT INTO qc_inspections(id,order_id,print_job_id,status,checklist_json) VALUES(?,?,?,?,?)",
+                          (qid, oid, jid, "rework", "[]"))
+                c.commit()
+            hub = OperationsHubService(SimpleNamespace(database=db))
+            hub.reconcile_workflows()
+            with db.connect() as c:
+                rows = c.execute(
+                    "SELECT id,status,printer_id,spool_id FROM print_jobs WHERE order_id=? ORDER BY created_at",
+                    (oid,),
+                ).fetchall()
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(rows[1]["status"], "queued")
+                self.assertIsNone(rows[1]["printer_id"])
+                self.assertIsNone(rows[1]["spool_id"])
+                self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0], "in_production")
+            hub.reconcile_workflows()
+            with db.connect() as c:
+                self.assertEqual(c.execute("SELECT COUNT(*) FROM print_jobs WHERE order_id=?", (oid,)).fetchone()[0], 2)
+
     def test_in_production_order_advances_to_qc_then_ready(self):
         with tempfile.TemporaryDirectory() as td:
             db = Database(Path(td) / "fabos.sqlite3")

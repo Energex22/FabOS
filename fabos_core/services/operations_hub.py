@@ -208,6 +208,31 @@ class OperationsHubService:
               AND NOT EXISTS(SELECT 1 FROM print_jobs j WHERE j.order_id=orders.id
                              AND j.status NOT IN ('completed','cancelled'))""")
 
+            # A failed QC inspection sends the order back through production. If no
+            # active replacement job exists for that inspection, queue exactly one new
+            # job with resources cleared so the normal production automation can assign
+            # a suitable printer and spool.
+            rework_rows=c.execute("""SELECT q.id qc_id,j.id job_id,j.order_id,j.product_id,j.variant_id,
+                    j.estimated_minutes,j.estimated_filament_g
+              FROM qc_inspections q JOIN print_jobs j ON j.id=q.print_job_id
+              WHERE q.status='rework' AND j.order_id IS NOT NULL
+                AND NOT EXISTS(SELECT 1 FROM print_jobs r
+                               WHERE r.order_id=j.order_id AND r.product_id IS j.product_id
+                                 AND r.variant_id IS j.variant_id
+                                 AND r.id<>j.id AND r.status IN ('queued','scheduled','printing','paused'))""").fetchall()
+            for r in rework_rows:
+                new_id=str(uuid.uuid4())
+                c.execute("""INSERT INTO print_jobs
+                    (id,order_id,product_id,variant_id,printer_id,spool_id,status,estimated_minutes,estimated_filament_g)
+                    VALUES(?,?,?,?,NULL,NULL,'queued',?,?)""",
+                    (new_id,r['order_id'],r['product_id'],r['variant_id'],r['estimated_minutes'] or 0,r['estimated_filament_g'] or 0))
+                c.execute("UPDATE orders SET status='in_production' WHERE id=?",(r['order_id'],))
+                try:
+                    c.execute("""INSERT INTO activity_journal(id,event_type,title,detail,page,entity_id)
+                      VALUES(?,?,?,?,?,?)""",(str(uuid.uuid4()),'production.rework_queued',
+                      'QC rework queued','A replacement print job was queued automatically after QC rework.','Production',new_id))
+                except Exception:pass
+
             # If all QC records are passed, order is ready for fulfillment.
             c.execute("""UPDATE orders SET status='ready' WHERE status='qc'
               AND EXISTS(SELECT 1 FROM qc_inspections q WHERE q.order_id=orders.id)
