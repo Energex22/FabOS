@@ -53,7 +53,7 @@ def _pick(value: Any, fields: Tuple[str, ...]) -> Dict[str, Any]:
 
 
 def _user_payload(user: Any) -> Dict[str, Any]:
-    return _pick(user, ("name", "email"))
+    return _pick(user, ("name", "email", "account_type", "role"))
 
 
 def _customer_payload(customer: Any) -> Optional[Dict[str, Any]]:
