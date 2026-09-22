@@ -24,7 +24,7 @@ class ProductionAutomationTests(unittest.TestCase):
             app.shop_settings.set_validated("production_auto_start", "true")
             self.assertEqual(app.shop_settings.get("production_auto_start"), "true")
             with self.assertRaises(ValueError):
-                app.shop_settings.set_validated("production_automation_interval_seconds", "2")
+                app.shop_settings.set_validated("production_automation_interval_seconds", "-1")
         finally:
             close = getattr(app, "close", None)
             if callable(close):
