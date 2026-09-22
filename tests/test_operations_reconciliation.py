@@ -40,6 +40,40 @@ class OperationsReconciliationTests(unittest.TestCase):
             with db.connect() as c:
                 self.assertEqual(c.execute("SELECT COUNT(*) FROM print_jobs WHERE order_id=?", (oid,)).fetchone()[0], 2)
 
+    def test_ready_pickup_fulfillment_advances_from_pending(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            oid = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",
+                    (oid, "O-PICKUP", "ready"),
+                )
+                c.execute(
+                    "INSERT INTO fulfillments(id,order_id,method,status) VALUES(?,?,?,?)",
+                    (str(uuid.uuid4()), oid, "pickup", "pending"),
+                )
+                c.commit()
+
+            hub = OperationsHubService(SimpleNamespace(database=db))
+            hub.reconcile_workflows()
+
+            with db.connect() as c:
+                fulfillment = c.execute(
+                    "SELECT method,status FROM fulfillments WHERE order_id=?", (oid,)
+                ).fetchone()
+                self.assertEqual(fulfillment["method"], "pickup")
+                self.assertEqual(fulfillment["status"], "ready_for_pickup")
+
+            hub.reconcile_workflows()
+            with db.connect() as c:
+                self.assertEqual(
+                    c.execute("SELECT COUNT(*) FROM fulfillments WHERE order_id=?", (oid,)).fetchone()[0],
+                    1,
+                )
+
     def test_in_production_order_advances_to_qc_then_ready(self):
         with tempfile.TemporaryDirectory() as td:
             db = Database(Path(td) / "fabos.sqlite3")
@@ -86,7 +120,7 @@ class OperationsReconciliationTests(unittest.TestCase):
                 fulfillment = c.execute("SELECT method,status FROM fulfillments WHERE order_id=?", (oid,)).fetchone()
                 self.assertIsNotNone(fulfillment)
                 self.assertEqual(fulfillment["method"], "pickup")
-                self.assertEqual(fulfillment["status"], "pending")
+                self.assertEqual(fulfillment["status"], "ready_for_pickup")
 
             # A second reconciliation pass must not create another fulfillment row.
             hub.reconcile_workflows()
