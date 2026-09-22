@@ -52,6 +52,20 @@ class OperationsReconciliationTests(unittest.TestCase):
                     "ready",
                 )
 
+            with db.connect() as c:
+                fulfillment = c.execute("SELECT method,status FROM fulfillments WHERE order_id=?", (oid,)).fetchone()
+                self.assertIsNotNone(fulfillment)
+                self.assertEqual(fulfillment["method"], "pickup")
+                self.assertEqual(fulfillment["status"], "pending")
+
+            # A second reconciliation pass must not create another fulfillment row.
+            hub.reconcile_workflows()
+            with db.connect() as c:
+                self.assertEqual(
+                    c.execute("SELECT COUNT(*) FROM fulfillments WHERE order_id=?", (oid,)).fetchone()[0],
+                    1,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
