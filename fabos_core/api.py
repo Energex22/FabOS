@@ -53,7 +53,7 @@ def _pick(value: Any, fields: Tuple[str, ...]) -> Dict[str, Any]:
 
 
 def _user_payload(user: Any) -> Dict[str, Any]:
-    return _pick(user, ("name", "email", "account_type", "role"))
+    return _pick(user, ("name", "email"))
 
 
 def _customer_payload(customer: Any) -> Optional[Dict[str, Any]]:
@@ -283,6 +283,18 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         summary = result["user"]
         return {"token": result["token"], "expires_at": result["expires_at"], "user": _user_payload(summary["user"]), "customer": _customer_payload(summary.get("customer"))}
+
+    @app.post("/api/v1/auth/team-login")
+    def team_login(payload: LoginRequest, request: Request, application: FabOSApplication = Depends(get_application)):
+        client = request.client.host if request.client else "unknown"
+        result = application.auth.login(payload.identifier, payload.password)
+        if not result:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        account = result["user"]["user"]
+        if str(account["account_type"] or "").lower() not in {"employee", "administrator"}:
+            application.auth.logout(result["token"])
+            raise HTTPException(status_code=403, detail="A team or administrator account is required")
+        return {"token": result["token"], "expires_at": result["expires_at"], "user": _pick(account, ("name", "email", "account_type", "role"))}
 
     @app.post("/api/v1/auth/logout")
     def logout(authorization: Optional[str] = Header(default=None), application: FabOSApplication = Depends(get_application)):
