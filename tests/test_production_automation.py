@@ -28,7 +28,7 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("DELETE FROM filament_spools WHERE id=?", (spool_id,))
                 conn.execute("""INSERT INTO filament_spools
                     (id,material,color,initial_g,remaining_g,active,created_at)
-                    VALUES(?,?,?,?,1,CURRENT_TIMESTAMP)""",
+                    VALUES(?,?,?,?,?,1,CURRENT_TIMESTAMP)""",
                     (spool_id, "PLA", "Green", 100.0, 100.0))
                 conn.execute("""INSERT INTO print_jobs
                     (id,status,spool_id,estimated_filament_g,actual_filament_g)
