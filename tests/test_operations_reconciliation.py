@@ -52,7 +52,7 @@ class OperationsReconciliationTests(unittest.TestCase):
                     (oid, "O-PICKUP", "ready"),
                 )
                 c.execute(
-                    "INSERT INTO fulfillments(id,order_id,method,status) VALUES(?,?,?,?,?)",
+                    "INSERT INTO fulfillments(id,order_id,method,status) VALUES(?,?,?,?)",
                     (str(uuid.uuid4()), oid, "pickup", "pending"),
                 )
                 c.commit()
