@@ -100,13 +100,17 @@ def register_admin_routes(app, get_application, administrator_user):
             "generated_at": now.isoformat(timespec="seconds"),
             "viewer": {"id": user["id"], "account_type": user["account_type"], "role": user["role"]},
             "business": {"orders_today": orders_today, "sales_today_cents": sales_today, "sales_30d_cents": sales_30d, "active_orders": active_orders, "open_quotes": open_quotes, "unpaid_invoices": unpaid, "overdue_orders": overdue, "pending_qc": pending_qc},
-            "production": {"active_jobs": active_jobs, "printing_jobs": printing_jobs, "failed_jobs": failed_jobs, "jobs": jobs},
+            "production": {"active_jobs": active_jobs, "printing_jobs": printing_jobs, "failed_jobs": failed_jobs, "jobs": jobs, "automation": {"enabled": str(application.shop_settings.get("production_automation_enabled","true")).lower() in ("1","true","yes","on"), "auto_assign": str(application.shop_settings.get("production_auto_assign","true")).lower() in ("1","true","yes","on"), "auto_start": str(application.shop_settings.get("production_auto_start","false")).lower() in ("1","true","yes","on"), "last_run": application.production_automation.last_run}},
             "printers": {"total": printer_total, "online": printer_online, "items": printers},
             "inventory": {"low_filament": low_filament, "low_supplies": low_supplies, "filament_threshold_g": low_filament_threshold, "spools": low_spools},
             "maintenance": {"items": maintenance},
             "recent_orders": recent_orders,
             "action_items": action_items,
         }
+
+    @app.post("/api/v1/admin/operations/automation/tick")
+    def run_operations_automation(user=Depends(operations_user), application=Depends(get_application)):
+        return application.production_automation.tick()
 
     @app.get("/api/v1/admin/users")
     def list_admin_users(user=Depends(administrator_user), application=Depends(get_application)):
