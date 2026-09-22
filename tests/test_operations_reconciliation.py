@@ -120,7 +120,7 @@ class OperationsReconciliationTests(unittest.TestCase):
                 fulfillment = c.execute("SELECT method,status FROM fulfillments WHERE order_id=?", (oid,)).fetchone()
                 self.assertIsNotNone(fulfillment)
                 self.assertEqual(fulfillment["method"], "pickup")
-                self.assertEqual(fulfillment["status"], "pending")
+                self.assertEqual(fulfillment["status"], "ready_for_pickup")
 
             # A second reconciliation pass must not create another fulfillment row.
             hub.reconcile_workflows()
