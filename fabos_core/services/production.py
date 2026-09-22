@@ -235,9 +235,18 @@ class ProductionService:
         if status in ("completed","failed"):
             try:
                 from fabos_core.services.manufacturing import ManufacturingService
-                m=ManufacturingService(self.database);m.learn(job_id)
-                if status=="completed" and row["order_id"]:m.ensure_qc(row["order_id"],job_id)
-            except Exception:pass
+                m=ManufacturingService(self.database)
+                if status=="completed":
+                    # Completion is the authoritative point at which actual/estimated
+                    # material consumption is recorded. The manufacturing service is
+                    # idempotent, so repeated reconciliation cannot double-deduct a spool.
+                    m.complete_with_inventory(job_id)
+                    if row["order_id"]:
+                        m.ensure_qc(row["order_id"],job_id)
+                else:
+                    m.learn(job_id)
+            except Exception:
+                pass
 
     def get(self, job_id):
         rows = self.list_jobs()
