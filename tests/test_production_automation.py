@@ -24,6 +24,8 @@ class ProductionAutomationTests(unittest.TestCase):
             with app.database.connect() as conn:
                 spool_id = "automation-test-spool"
                 job_id = "automation-test-job"
+                conn.execute("DELETE FROM qc_inspections WHERE print_job_id=?", (job_id,))
+                conn.execute("DELETE FROM manufacturing_observations WHERE print_job_id=?", (job_id,))
                 conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
                 conn.execute("DELETE FROM filament_spools WHERE id=?", (spool_id,))
                 conn.execute("""INSERT INTO filament_spools
