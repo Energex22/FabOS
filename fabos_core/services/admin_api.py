@@ -1,7 +1,7 @@
 """Administrator-only API routes for FabOS administration."""
 
 
-def register_admin_routes(app, get_application, administrator_user, current_user=None):
+def register_admin_routes(app, get_application, administrator_user):
     from typing import Optional
     from fastapi import Depends, HTTPException
     from pydantic import BaseModel, Field
@@ -31,9 +31,7 @@ def register_admin_routes(app, get_application, administrator_user, current_user
         qc_minutes: float = Field(default=0, ge=0)
         overhead_percent: Optional[float] = Field(default=None, ge=0, le=100)
 
-    def operations_user(user=Depends(current_user) if current_user else Depends(administrator_user), application=Depends(get_application)):
-        if current_user is None:
-            return user
+    def operations_user(user=Depends(app.state.current_user), application=Depends(get_application)):
         account_type = str(user["account_type"] or "").lower()
         if account_type not in ("employee", "administrator"):
             raise HTTPException(status_code=403, detail="Team account required")
