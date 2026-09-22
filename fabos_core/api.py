@@ -167,6 +167,8 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             raise HTTPException(status_code=401, detail="Invalid or expired session")
         return user
 
+    app.state.current_user = current_user
+
     def customer_user(user: Any = Depends(current_user)):
         if str(user["account_type"] or "").lower() != "customer":
             raise HTTPException(status_code=403, detail="Customer account required")
@@ -371,7 +373,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         order["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
         return {"order": order, "items": [_order_item_payload(item) for item in items]}
 
-    register_admin_routes(app, get_application, administrator_user, current_user)
+    register_admin_routes(app, get_application, administrator_user)
     register_customer_write_routes(app, get_application, customer_user)
     register_payment_routes(app, get_application, administrator_user)
     return app
