@@ -26,7 +26,7 @@ class PrinterAutomationTests(unittest.TestCase):
    self.assertEqual(j["filament_deducted"],1)
    self.assertAlmostEqual(s["remaining_g"],950)
    with db.connect() as c:
-    tx=c.execute("SELECT COUNT(*) FROM inventory_transactions WHERE job_id=? AND transaction_type='consume'",(job,)).fetchone()[0]
+    tx=c.execute("SELECT COUNT(*) FROM inventory_transactions WHERE reference_id=? AND transaction_type='consume'",(job,)).fetchone()[0]
    self.assertEqual(tx,1)
 
 if __name__=="__main__":unittest.main()
