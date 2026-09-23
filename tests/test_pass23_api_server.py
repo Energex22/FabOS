@@ -1,6 +1,8 @@
 import io
 import unittest
 
+from fastapi.testclient import TestClient
+
 from fabos_api.server import _application_with_cors
 
 
@@ -11,8 +13,18 @@ class _Security:
         return {"id": "u1"}
 
 
+class _Auth:
+    def __init__(self):
+        self.calls = 0
+
+    def login(self, identifier, password):
+        self.calls += 1
+        return None
+
+
 class _Core:
     security = _Security()
+    auth = _Auth()
     error_log = type("Log", (), {"error": lambda self, *args: None})()
 
 
@@ -33,6 +45,32 @@ class Pass23APIServerTests(unittest.TestCase):
         self.assertEqual(captured["status"], "200 OK")
         self.assertEqual(captured["headers"]["Access-Control-Allow-Origin"], "http://localhost:5173")
         self.assertIn(b'"ok": true', payload)
+
+    def test_team_login_is_rate_limited_independently(self):
+        from fabos_core.api import create_app
+
+        core = _Core()
+        client = TestClient(create_app(core))
+        for _ in range(10):
+            response = client.post("/api/v1/auth/team-login", json={"identifier": "admin", "password": "wrong"})
+            self.assertEqual(response.status_code, 401)
+        response = client.post("/api/v1/auth/team-login", json={"identifier": "admin", "password": "wrong"})
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("Retry-After", response.headers)
+        self.assertEqual(core.auth.calls, 10)
+
+    def test_customer_and_team_login_limiters_are_independent(self):
+        from fabos_core.api import create_app
+
+        core = _Core()
+        client = TestClient(create_app(core))
+        for _ in range(10):
+            response = client.post("/api/v1/auth/login", json={"identifier": "customer", "password": "wrong"})
+            self.assertEqual(response.status_code, 401)
+        response = client.post("/api/v1/auth/login", json={"identifier": "customer", "password": "wrong"})
+        self.assertEqual(response.status_code, 429)
+        response = client.post("/api/v1/auth/team-login", json={"identifier": "admin", "password": "wrong"})
+        self.assertEqual(response.status_code, 401)
 
     def test_options_preflight(self):
         captured = {}
