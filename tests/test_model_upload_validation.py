@@ -22,6 +22,11 @@ class ModelUploadValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match"):
             _validate_model_file(self._temp(".stl", invalid), ".stl")
 
+    def test_binary_stl_header_may_begin_with_solid(self):
+        header = b"solid binary header" + (b"\0" * (80 - len(b"solid binary header")))
+        valid = header + (1).to_bytes(4, "little") + (b"\0" * 50)
+        _validate_model_file(self._temp(".stl", valid), ".stl")
+
     def test_ascii_stl_requires_geometry_markers(self):
         with self.assertRaisesRegex(ValueError, "ASCII STL"):
             _validate_model_file(self._temp(".stl", b"solid model\nendsolid model\n"), ".stl")
