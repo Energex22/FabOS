@@ -112,7 +112,7 @@ class ProductionAutomationService:
                    WHERE lower(COALESCE(p.status,'')) IN ('idle','online','operational')
                      AND NOT EXISTS (
                        SELECT 1 FROM print_jobs j
-                       WHERE j.printer_id=p.id AND j.status IN ('scheduled','printing','paused')
+                       WHERE j.printer_id=p.id AND j.status IN ('queued','scheduled','printing','paused')
                      )
                    ORDER BY p.total_hours ASC, p.name ASC"""
             ).fetchall()
