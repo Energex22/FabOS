@@ -139,9 +139,6 @@ class ProductionAutomationTests(unittest.TestCase):
                     VALUES(?,?,?,?,?,1)""",
                     (spool_id, "PLA", "Green", 100, 100))
                 conn.commit()
-                job1 = conn.execute(
-                    "SELECT * FROM print_jobs WHERE 1=0"
-                ).fetchone()
                 conn.execute("""INSERT INTO print_jobs
                     (id,status,estimated_filament_g)
                     VALUES(?,?,?)""", ("reservation-job-1", "queued", 60))
