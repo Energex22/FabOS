@@ -78,8 +78,8 @@ class ManufacturingService:
    c.execute("""INSERT INTO print_jobs
     (id,order_id,product_id,variant_id,printer_id,spool_id,status,gcode_path,octoprint_file,
      estimated_minutes,estimated_filament_g,slicer_metadata_json)
-    VALUES(?,?,?,?,?,?,'scheduled',?,?,?,?,?)""",
-    (nid,j['order_id'],j['product_id'],j['variant_id'],j['printer_id'],j['spool_id'],j['gcode_path'],
+    VALUES(?,?,?,?,NULL,NULL,'queued',?,?,?,?,?)""",
+    (nid,j['order_id'],j['product_id'],j['variant_id'],j['gcode_path'],
      j['octoprint_file'],j['estimated_minutes'],j['estimated_filament_g'],j['slicer_metadata_json']))
    c.commit();return nid
  def parse_gcode_file(self,path):
