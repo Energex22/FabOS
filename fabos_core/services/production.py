@@ -165,6 +165,38 @@ class ProductionService:
 
     def assign(self, job_id, printer_id=None, spool_id=None):
         with self.database.connect() as conn:
+            job = conn.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone()
+            if not job:
+                raise KeyError("Print job not found.")
+            if printer_id:
+                if not conn.execute("SELECT id FROM printers WHERE id=?", (printer_id,)).fetchone():
+                    raise KeyError("Printer not found.")
+                occupied = conn.execute(
+                    """SELECT 1 FROM print_jobs
+                       WHERE printer_id=? AND id<>?
+                         AND status IN ('queued','scheduled','printing','paused')
+                       LIMIT 1""",
+                    (printer_id, job_id),
+                ).fetchone()
+                if occupied:
+                    raise ValueError("Printer already has an assigned active production job.")
+            if spool_id:
+                spool = conn.execute(
+                    "SELECT remaining_g FROM filament_spools WHERE id=? AND active=1",
+                    (spool_id,),
+                ).fetchone()
+                if not spool:
+                    raise KeyError("Filament spool not found or inactive.")
+                needed = float(job["estimated_filament_g"] or 0)
+                committed = conn.execute(
+                    """SELECT COALESCE(SUM(COALESCE(estimated_filament_g,0)),0)
+                       FROM print_jobs
+                       WHERE spool_id=? AND id<>?
+                         AND status IN ('queued','scheduled','printing','paused')""",
+                    (spool_id, job_id),
+                ).fetchone()[0]
+                if float(spool["remaining_g"] or 0) - float(committed or 0) < needed:
+                    raise ValueError("Filament spool does not have enough uncommitted material.")
             conn.execute(
                 """UPDATE print_jobs SET printer_id=?,spool_id=?,
                    status=CASE WHEN status='queued' AND ? IS NOT NULL THEN 'scheduled' ELSE status END
