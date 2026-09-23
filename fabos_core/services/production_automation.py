@@ -231,6 +231,14 @@ class ProductionAutomationService:
                             "Production automation pass encountered an error",
                             "%s: %s" % (job["id"], exc),
                         )
+                        self.app.operations._upsert_notification(
+                            "event:automation:error:%s" % job["id"],
+                            "high",
+                            "Production automation needs attention",
+                            "Job %s could not be processed automatically: %s" % (job["id"], exc),
+                            "Production",
+                            job["id"],
+                        )
                     except Exception:
                         pass
             try:
