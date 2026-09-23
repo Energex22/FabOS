@@ -187,7 +187,7 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("""INSERT INTO filament_spools
                     (id,material,color,initial_g,remaining_g,active)
                     VALUES(?,?,?,?,?,1)""",
-                    (spool_id, "PLA", "Green", 100, 100))
+                    (spool_id, "TEST-PLA", "Green", 100, 100))
                 conn.commit()
                 conn.execute("""INSERT INTO print_jobs
                     (id,status,estimated_filament_g)
@@ -247,7 +247,7 @@ class ProductionAutomationTests(unittest.TestCase):
                 )
                 conn.execute(
                     "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
-                    (spool_id, "PLA", "Green", 100, 100),
+                    (spool_id, "TEST-PLA", "Green", 100, 100),
                 )
                 conn.execute(
                     """INSERT INTO print_jobs
@@ -326,7 +326,7 @@ class ProductionAutomationTests(unittest.TestCase):
             with app.database.connect() as conn:
                 conn.execute(
                     "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
-                    (spool, "PLA", "Green", 100, 100),
+                    (spool, "TEST-PLA", "Green", 100, 100),
                 )
                 conn.execute(
                     "INSERT INTO print_jobs(id,spool_id,status,estimated_filament_g) VALUES(?,?,?,?)",
@@ -552,14 +552,11 @@ class ProductionAutomationTests(unittest.TestCase):
             with app.database.connect() as conn:
                 conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
                 conn.execute("DELETE FROM quote_items WHERE id=?", (quote_item_id,))
-                conn.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
                 conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+                conn.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
                 conn.execute("DELETE FROM filament_spools WHERE id=?", (spool_id,))
                 conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
                 conn.commit()
-            close = getattr(app, "close", None)
-            if callable(close):
-                close()
 
 
 if __name__ == "__main__":
