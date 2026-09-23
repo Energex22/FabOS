@@ -31,6 +31,8 @@ class _Core:
 
 class Pass23APIServerTests(unittest.TestCase):
     def test_cors_health_response(self):
+        os.environ["FABOS_CORS_ORIGINS"] = "http://localhost:5173"
+        self.addCleanup(lambda: os.environ.pop("FABOS_CORS_ORIGINS", None))
         captured = {}
         environ = {
             "REQUEST_METHOD": "GET", "PATH_INFO": "/api/v1/health", "QUERY_STRING": "",
@@ -96,6 +98,8 @@ class Pass23APIServerTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_options_preflight(self):
+        os.environ["FABOS_CORS_ORIGINS"] = "http://localhost:5173"
+        self.addCleanup(lambda: os.environ.pop("FABOS_CORS_ORIGINS", None))
         captured = {}
         environ = {
             "REQUEST_METHOD": "OPTIONS", "PATH_INFO": "/api/v1/products", "QUERY_STRING": "",
