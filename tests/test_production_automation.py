@@ -213,6 +213,30 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("DELETE FROM filament_spools WHERE id=?", ("reservation-test-spool",))
                 conn.commit()
 
+    def test_explicit_material_selects_matching_spool_even_when_mismatch_sorts_first(self):
+        app = FabOSApplication()
+        matching_id = str(uuid.uuid4())
+        mismatch_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
+                    (mismatch_id, "PETG", "Green", 100, 100),
+                )
+                conn.execute(
+                    "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
+                    (matching_id, "PLA", "Green", 100, 100),
+                )
+                conn.commit()
+            job = {"material": "PLA", "color": "", "estimated_filament_g": 20}
+            selected = app.production_automation._choose_spool(job)
+            self.assertEqual(selected["id"], matching_id)
+            self.assertEqual(str(selected["material"]).lower(), "pla")
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM filament_spools WHERE id IN (?,?)", (matching_id, mismatch_id))
+                conn.commit()
+
     def test_explicit_material_mismatch_is_never_auto_assigned(self):
         app = FabOSApplication()
         spool_id = str(uuid.uuid4())
