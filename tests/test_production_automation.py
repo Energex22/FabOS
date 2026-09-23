@@ -531,7 +531,7 @@ class ProductionAutomationTests(unittest.TestCase):
                         (qid, order_id, job_id),
                     )
                 conn.commit()
-            app.operations_hub.reconcile_workflows()
+            app.operations.reconcile_workflows()
             with app.database.connect() as conn:
                 rows = conn.execute(
                     """SELECT id,status FROM print_jobs
