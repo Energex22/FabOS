@@ -126,7 +126,6 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("DELETE FROM print_jobs WHERE id=?", ("dimension-test-job",))
                 conn.execute("DELETE FROM printers WHERE name IN ('Small','Large')")
                 conn.commit()
-            app.close()
 
     def test_spool_reservation_prevents_overcommit_within_automation_pass(self):
         app = FabOSApplication()
@@ -162,7 +161,6 @@ class ProductionAutomationTests(unittest.TestCase):
                              ("reservation-job-1", "reservation-job-2"))
                 conn.execute("DELETE FROM filament_spools WHERE id=?", ("reservation-test-spool",))
                 conn.commit()
-            app.close()
 
     def test_automation_settings_are_validated(self):
         app = FabOSApplication()
