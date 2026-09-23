@@ -21,9 +21,19 @@ from fabos_api.app import create_wsgi_app
 from fabos_core.application import FabOSApplication
 
 
+def _cors_origins():
+    configured = os.environ.get("FABOS_CORS_ORIGINS", "").strip()
+    if not configured:
+        # Backward compatibility for existing Windows deployments. New
+        # deployments should use the same variable as the FastAPI server.
+        configured = os.environ.get("FABOS_API_ALLOW_ORIGIN", "http://localhost:5173")
+    return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+
 def _application_with_cors(core):
     application = create_wsgi_app(core)
-    allowed_origin = os.environ.get("FABOS_API_ALLOW_ORIGIN", "http://localhost:5173")
+    allowed_origins = _cors_origins()
+    allowed_origin = allowed_origins[0] if allowed_origins else "*"
 
     def wrapped(environ, start_response):
         if environ.get("REQUEST_METHOD", "GET").upper() == "OPTIONS":
@@ -55,8 +65,9 @@ def run(host=None, port=None):
     core = FabOSApplication()
     application = _application_with_cors(core)
     core.production_automation.start_worker()
-    print("FabOS API development server: http://%s:%d" % (host, port))
+    print("FabOS API production server (Waitress): http://%s:%d" % (host, port))
     print("Health check: http://%s:%d/api/v1/health" % (host, port))
+    print("CORS origins: %s" % (", ".join(_cors_origins()) or "(same-origin / none configured)"))
     if serve is None:
         raise RuntimeError("Waitress is required to run the FabOS API server. Install the project dependencies first.")
     threads = int(os.environ.get("FABOS_API_THREADS", "8"))
