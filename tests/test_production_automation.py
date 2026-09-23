@@ -414,6 +414,40 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("DELETE FROM notifications WHERE dedupe_key=?", ("inventory:completion:" + job_id,))
                 conn.commit()
 
+    def test_failed_print_surfaces_inventory_accounting_failure(self):
+        from unittest.mock import patch
+        from fabos_core.services.inventory_profit import InventoryProfitService
+
+        app = FabOSApplication()
+        job_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO print_jobs(id,status,estimated_filament_g) VALUES(?,?,?)",
+                    (job_id, "printing", 40),
+                )
+                conn.commit()
+            with patch.object(InventoryProfitService, "record_failed_waste",
+                              side_effect=RuntimeError("waste accounting failed")):
+                app.production.set_status(job_id, "failed")
+            with app.database.connect() as conn:
+                note = conn.execute(
+                    "SELECT COUNT(*) FROM notifications WHERE dedupe_key=?",
+                    ("inventory:failure:" + job_id,),
+                ).fetchone()[0]
+            self.assertEqual(note, 1)
+        finally:
+            with app.database.connect() as conn:
+                self._cleanup_print_job_fixture(conn, job_id, None)
+                conn.execute(
+                    "DELETE FROM notifications WHERE dedupe_key=?",
+                    ("inventory:failure:" + job_id,),
+                )
+                conn.commit()
+            close = getattr(app, "close", None)
+            if callable(close):
+                close()
+
 
 if __name__ == "__main__":
     unittest.main()
