@@ -1,5 +1,4 @@
 import uuid
-import json
 from datetime import datetime
 
 class ProductionService:
