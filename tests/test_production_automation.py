@@ -213,6 +213,26 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("DELETE FROM filament_spools WHERE id=?", ("reservation-test-spool",))
                 conn.commit()
 
+    def test_explicit_material_mismatch_is_never_auto_assigned(self):
+        app = FabOSApplication()
+        spool_id = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
+                    (spool_id, "PETG", "Green", 100, 100),
+                )
+                conn.commit()
+            # Material is derived from quote data during the automation query;
+            # exercise the selector directly without inventing a print_jobs column.
+            job = {"material": "PLA", "color": "", "estimated_filament_g": 20}
+            self.assertIsNone(app.production_automation._choose_spool(job))
+        finally:
+            with app.database.connect() as conn:
+                self._cleanup_print_job_fixture(conn, job_id, spool_id)
+
+
     def test_automation_settings_are_validated(self):
         app = FabOSApplication()
         try:
