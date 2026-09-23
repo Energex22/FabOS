@@ -221,6 +221,16 @@ class OperationsHubService:
                                  AND r.variant_id IS j.variant_id
                                  AND r.id<>j.id AND r.status IN ('queued','scheduled','printing','paused'))""").fetchall()
             for r in rework_rows:
+                # Re-check inside the transaction because the result set above is a
+                # snapshot. Multiple rework inspections for the same original job
+                # must still collapse to one active replacement.
+                active_replacement=c.execute("""SELECT 1 FROM print_jobs
+                    WHERE order_id=? AND product_id IS ? AND variant_id IS ?
+                      AND id<>? AND status IN ('queued','scheduled','printing','paused')
+                    LIMIT 1""",
+                    (r['order_id'],r['product_id'],r['variant_id'],r['job_id'])).fetchone()
+                if active_replacement:
+                    continue
                 new_id=str(uuid.uuid4())
                 c.execute("""INSERT INTO print_jobs
                     (id,order_id,product_id,variant_id,printer_id,spool_id,status,estimated_minutes,estimated_filament_g)
