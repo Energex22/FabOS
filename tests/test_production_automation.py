@@ -506,6 +506,51 @@ class ProductionAutomationTests(unittest.TestCase):
             if callable(close):
                 close()
 
+    def test_qc_rework_multiple_inspections_create_one_replacement(self):
+        app = FabOSApplication()
+        order_id = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        qc_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    """INSERT INTO orders(id,order_number,status,total_cents)
+                       VALUES(?,?,?,?)""",
+                    (order_id, "REWORK-DUP", "qc", 1000),
+                )
+                conn.execute(
+                    """INSERT INTO print_jobs
+                       (id,order_id,status,estimated_minutes,estimated_filament_g)
+                       VALUES(?,?,?,?,?)""",
+                    (job_id, order_id, "completed", 30, 20),
+                )
+                for qid in qc_ids:
+                    conn.execute(
+                        """INSERT INTO qc_inspections
+                           (id,order_id,print_job_id,status) VALUES(?,?,?,'rework')""",
+                        (qid, order_id, job_id),
+                    )
+                conn.commit()
+            app.operations.reconcile_workflows()
+            with app.database.connect() as conn:
+                rows = conn.execute(
+                    """SELECT id,status FROM print_jobs
+                       WHERE order_id=? ORDER BY created_at""",
+                    (order_id,),
+                ).fetchall()
+                replacements = [r for r in rows if r["id"] != job_id]
+                self.assertEqual(len(replacements), 1)
+                self.assertEqual(replacements[0]["status"], "queued")
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM qc_inspections WHERE order_id=?", (order_id,))
+                conn.execute("DELETE FROM print_jobs WHERE order_id=?", (order_id,))
+                conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+                conn.commit()
+            close = getattr(app, "close", None)
+            if callable(close):
+                close()
+
 
 if __name__ == "__main__":
     unittest.main()
