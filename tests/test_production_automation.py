@@ -281,7 +281,7 @@ class ProductionAutomationTests(unittest.TestCase):
         second_id = str(uuid.uuid4())
         try:
             with app.database.connect() as conn:
-                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.execute("DELETE FROM printers")
                 conn.execute(
                     "INSERT INTO printers(id,name,model,status,total_hours) VALUES(?,?,?,?,?)",
                     (printer_id, "Queue Guard", "Test", "idle", 0),
