@@ -162,9 +162,10 @@ class ProductionVariantIntegrityTests(unittest.TestCase):
             with db.connect() as c:
                 row = c.execute("SELECT variant_id,printer_id,spool_id,status FROM print_jobs WHERE id=?", (new_id,)).fetchone()
             self.assertEqual(row["variant_id"], variant_id)
-            self.assertEqual(row["printer_id"], printer_id)
-            self.assertEqual(row["spool_id"], spool_id)
-            self.assertEqual(row["status"], "scheduled")
+            # Reprints are requeued so automation can safely select fresh resources.
+            self.assertIsNone(row["printer_id"])
+            self.assertIsNone(row["spool_id"])
+            self.assertEqual(row["status"], "queued")
 
     def test_order_lifecycle_allows_production_to_qc_to_ready(self):
         with tempfile.TemporaryDirectory() as td:
