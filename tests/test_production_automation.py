@@ -233,7 +233,38 @@ class ProductionAutomationTests(unittest.TestCase):
                 self._cleanup_print_job_fixture(conn, job_id, spool_id)
 
 
-    def test_automation_settings_are_validated(self):
+    def test_failed_print_records_filament_waste_once(self):
+        app = FabOSApplication()
+        spool_id = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
+                    (spool_id, "PLA", "Green", 100, 100),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,spool_id,status,estimated_filament_g) VALUES(?,?,?,?,?)",
+                    (job_id, spool_id, "printing", 40),
+                )
+                conn.commit()
+            app.production.set_status(job_id, "failed")
+            with app.database.connect() as conn:
+                remaining = conn.execute("SELECT remaining_g FROM filament_spools WHERE id=?", (spool_id,)).fetchone()[0]
+                waste = conn.execute(
+                    "SELECT COUNT(*) FROM inventory_transactions WHERE reference_type='failed_print' AND reference_id=? AND transaction_type='waste'",
+                    (job_id,),
+                ).fetchone()[0]
+            self.assertEqual(remaining, 80.0)
+            self.assertEqual(waste, 1)
+            app.production.set_status(job_id, "failed")
+            with app.database.connect() as conn:
+                self.assertEqual(conn.execute("SELECT remaining_g FROM filament_spools WHERE id=?", (spool_id,)).fetchone()[0], 80.0)
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM inventory_transactions WHERE reference_type='failed_print' AND reference_id=?", (job_id,)).fetchone()[0], 1)
+        finally:
+            with app.database.connect() as conn:
+                self._cleanup_print_job_fixture(conn, job_id, spool_id)
+\n    def test_automation_settings_are_validated(self):
         app = FabOSApplication()
         try:
             app.shop_settings.set_validated("production_auto_start", "true")
