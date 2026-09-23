@@ -77,14 +77,26 @@ class ProductionAutomationService:
         reserved_grams = reserved_grams or {}
         with self.db.connect() as c:
             rows = c.execute(
-                """SELECT * FROM filament_spools
-                   WHERE active=1 AND remaining_g>=?
-                   ORDER BY CASE WHEN lower(COALESCE(material,''))=? THEN 0 ELSE 1 END,
-                            CASE WHEN lower(COALESCE(color,''))=? THEN 0 ELSE 1 END,
-                            remaining_g ASC, created_at ASC""",
+                """SELECT fs.*,
+                          COALESCE((
+                              SELECT SUM(COALESCE(j.estimated_filament_g,0))
+                              FROM print_jobs j
+                              WHERE j.spool_id=fs.id
+                                AND j.status IN ('queued','scheduled','printing','paused')
+                          ),0) committed_g
+                   FROM filament_spools fs
+                   WHERE fs.active=1 AND fs.remaining_g>=?
+                   ORDER BY CASE WHEN lower(COALESCE(fs.material,''))=? THEN 0 ELSE 1 END,
+                            CASE WHEN lower(COALESCE(fs.color,''))=? THEN 0 ELSE 1 END,
+                            fs.remaining_g ASC, fs.created_at ASC""",
                 (needed, material, color),
             ).fetchall()
-        rows = [r for r in rows if float(r["remaining_g"] or 0) - float(reserved_grams.get(r["id"], 0)) >= needed]
+        rows = [
+            r for r in rows
+            if float(r["remaining_g"] or 0)
+            - float(r["committed_g"] or 0)
+            - float(reserved_grams.get(r["id"], 0)) >= needed
+        ]
         if not rows:
             return None
         # Never silently assign a different material when the order explicitly
