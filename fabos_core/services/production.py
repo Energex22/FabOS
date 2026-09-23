@@ -169,8 +169,11 @@ class ProductionService:
             if not job:
                 raise KeyError("Print job not found.")
             if printer_id:
-                if not conn.execute("SELECT id FROM printers WHERE id=?", (printer_id,)).fetchone():
+                printer = conn.execute("SELECT * FROM printers WHERE id=?", (printer_id,)).fetchone()
+                if not printer:
                     raise KeyError("Printer not found.")
+                if str(printer["status"] or "").lower() in ("offline", "error"):
+                    raise ValueError("Printer is offline or in error state.")
                 occupied = conn.execute(
                     """SELECT 1 FROM print_jobs
                        WHERE printer_id=? AND id<>?
@@ -182,12 +185,23 @@ class ProductionService:
                     raise ValueError("Printer already has an assigned active production job.")
             if spool_id:
                 spool = conn.execute(
-                    "SELECT remaining_g FROM filament_spools WHERE id=? AND active=1",
+                    "SELECT * FROM filament_spools WHERE id=? AND active=1",
                     (spool_id,),
                 ).fetchone()
                 if not spool:
                     raise KeyError("Filament spool not found or inactive.")
                 needed = float(job["estimated_filament_g"] or 0)
+                requested_material = conn.execute(
+                    """SELECT qi.material
+                       FROM quote_items qi JOIN orders o ON o.quote_id=qi.quote_id
+                       WHERE o.id=? AND qi.product_id=?
+                         AND (qi.variant_id=? OR (qi.variant_id IS NULL AND ? IS NULL))
+                       ORDER BY qi.rowid LIMIT 1""",
+                    (job["order_id"], job["product_id"], job["variant_id"], job["variant_id"]),
+                ).fetchone() if job["order_id"] and job["product_id"] else None
+                if requested_material and str(requested_material["material"] or "").strip():
+                    if str(spool["material"] or "").strip().lower() != str(requested_material["material"]).strip().lower():
+                        raise ValueError("Filament spool material does not match the order requirement.")
                 committed = conn.execute(
                     """SELECT COALESCE(SUM(COALESCE(estimated_filament_g,0)),0)
                        FROM print_jobs
