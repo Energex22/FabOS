@@ -414,6 +414,53 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("DELETE FROM notifications WHERE dedupe_key=?", ("inventory:completion:" + job_id,))
                 conn.commit()
 
+    def test_fulfillment_update_preserves_existing_shipping_cost_when_omitted(self):
+        from fabos_core.services.fulfillment import FulfillmentService
+
+        app = FabOSApplication()
+        order_id = str(uuid.uuid4())
+        invoice_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO orders(id,order_number,status) VALUES(?,?,?)",
+                    (order_id, "FULFILL-SAFETY-" + order_id[:8], "ready"),
+                )
+                conn.execute(
+                    """INSERT INTO invoices(
+                        id,invoice_number,order_id,status,subtotal_cents,tax_cents,
+                        discount_cents,paid_cents,total_cents,shipping_cents
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    (invoice_id, "INV-SAFETY-" + invoice_id[:8], order_id, "open",
+                     1000, 0, 0, 0, 1000, 0),
+                )
+                conn.commit()
+
+            service = FulfillmentService(app.database)
+            fid = service.save(order_id, "shipping", "packed", shipping_cost_cents=500)
+            service.save(order_id, "shipping", "shipped")
+
+            with app.database.connect() as conn:
+                fulfillment = conn.execute(
+                    "SELECT shipping_cost_cents FROM fulfillments WHERE id=?", (fid,)
+                ).fetchone()
+                invoice = conn.execute(
+                    "SELECT shipping_cents,total_cents FROM invoices WHERE id=?", (invoice_id,)
+                ).fetchone()
+
+            self.assertEqual(int(fulfillment["shipping_cost_cents"]), 500)
+            self.assertEqual(int(invoice["shipping_cents"]), 500)
+            self.assertEqual(int(invoice["total_cents"]), 1500)
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM invoices WHERE id=?", (invoice_id,))
+                conn.execute("DELETE FROM fulfillments WHERE order_id=?", (order_id,))
+                conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+                conn.commit()
+            close = getattr(app, "close", None)
+            if callable(close):
+                close()
+
 
 if __name__ == "__main__":
     unittest.main()
