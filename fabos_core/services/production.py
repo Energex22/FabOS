@@ -245,6 +245,7 @@ class ProductionService:
                         m.ensure_qc(row["order_id"],job_id)
                 else:
                     m.learn(job_id)
+                    # Failed prints consume material too; record estimated waste idempotently.\n                    try:\n                        from fabos_core.services.inventory_profit import InventoryProfitService\n                        InventoryProfitService(self.database).record_failed_waste(job_id)\n                    except Exception:\n                        pass
             except Exception:
                 pass
 
