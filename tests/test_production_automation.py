@@ -461,6 +461,51 @@ class ProductionAutomationTests(unittest.TestCase):
             if callable(close):
                 close()
 
+    def test_manual_assignment_rejects_occupied_printer_and_overcommitted_spool(self):
+        app = FabOSApplication()
+        printer_id, spool_id = str(uuid.uuid4()), str(uuid.uuid4())
+        blocker_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "DELETE FROM printers"
+                )
+                conn.execute(
+                    "INSERT INTO printers(id,name,model,status) VALUES(?,?,?,?)",
+                    (printer_id, "Manual Guard", "Test", "idle"),
+                )
+                conn.execute(
+                    """INSERT INTO filament_spools
+                       (id,material,color,initial_g,remaining_g,active)
+                       VALUES(?,?,?,?,?,1)""",
+                    (spool_id, "PLA", "Green", 100, 100),
+                )
+                conn.execute(
+                    """INSERT INTO print_jobs
+                       (id,printer_id,spool_id,status,estimated_filament_g)
+                       VALUES(?,?,?,?,?)""",
+                    (blocker_id, printer_id, spool_id, "queued", 60),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,status,estimated_filament_g) VALUES(?,?,?)",
+                    (job_id, "queued", 60),
+                )
+                conn.commit()
+            with self.assertRaises(ValueError):
+                app.production.assign(job_id, printer_id=printer_id)
+            with self.assertRaises(ValueError):
+                app.production.assign(job_id, spool_id=spool_id)
+        finally:
+            with app.database.connect() as conn:
+                self._cleanup_print_job_fixture(conn, blocker_id, spool_id)
+                self._cleanup_print_job_fixture(conn, job_id, None)
+                conn.execute("DELETE FROM filament_spools WHERE id=?", (spool_id,))
+                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.commit()
+            close = getattr(app, "close", None)
+            if callable(close):
+                close()
+
 
 if __name__ == "__main__":
     unittest.main()
