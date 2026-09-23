@@ -223,12 +223,10 @@ class ProductionAutomationTests(unittest.TestCase):
                     "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
                     (spool_id, "PETG", "Green", 100, 100),
                 )
-                conn.execute(
-                    "INSERT INTO print_jobs(id,status,material,estimated_filament_g) VALUES(?,?,?,?)",
-                    (job_id, "queued", "PLA", 20),
-                )
                 conn.commit()
-                job = conn.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone()
+            # Material is derived from quote data during the automation query;
+            # exercise the selector directly without inventing a print_jobs column.
+            job = {"material": "PLA", "color": "", "estimated_filament_g": 20}
             self.assertIsNone(app.production_automation._choose_spool(job))
         finally:
             with app.database.connect() as conn:
