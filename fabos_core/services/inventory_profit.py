@@ -56,7 +56,9 @@ class InventoryProfitService:
     WHERE item_type='filament' AND item_id=? AND reference_type='print_job' AND reference_id=? AND transaction_type='consume'""",
     (sid,job_id)).fetchone()
    if exists:return
-   c.execute("UPDATE filament_spools SET remaining_g=MAX(0,remaining_g-?) WHERE id=?",(float(grams),sid))
+   updated=c.execute("UPDATE filament_spools SET remaining_g=MAX(0,remaining_g-?) WHERE id=?",(float(grams),sid))
+   if updated.rowcount != 1:
+    raise KeyError("Filament spool not found")
    c.execute("""INSERT INTO inventory_transactions(id,item_type,item_id,transaction_type,quantity,unit,reference_type,reference_id,notes)
     VALUES(?,?,?,?,?,?,?,?,?)""",(str(uuid.uuid4()),"filament",sid,"consume",-float(grams),"g","print_job",job_id,"Automatic print consumption"))
    c.commit()
