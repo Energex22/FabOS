@@ -264,7 +264,8 @@ class ProductionAutomationTests(unittest.TestCase):
         finally:
             with app.database.connect() as conn:
                 self._cleanup_print_job_fixture(conn, job_id, spool_id)
-\n    def test_automation_settings_are_validated(self):
+
+    def test_automation_settings_are_validated(self):
         app = FabOSApplication()
         try:
             app.shop_settings.set_validated("production_auto_start", "true")
