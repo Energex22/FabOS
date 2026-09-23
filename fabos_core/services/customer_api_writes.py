@@ -14,7 +14,6 @@ MAX_3MF_MEMBERS = 500
 MAX_3MF_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MAX_3MF_COMPRESSION_RATIO = 100
 MAX_STL_TRIANGLES = 2_000_000
-MAX_OBJ_LINES = 2_000_000
 MAX_STEP_HEADER_BYTES = 64 * 1024
 
 
@@ -34,6 +33,14 @@ def _validate_model_file(path, extension):
         head = handle.read(MAX_STEP_HEADER_BYTES)
 
     if extension == ".stl":
+        if size >= 84:
+            triangle_count = int.from_bytes(head[80:84], "little")
+            expected_size = 84 + triangle_count * 50
+            # Binary STL headers are arbitrary 80-byte data and may legitimately
+            # begin with the word "solid", so prefer a structurally valid binary
+            # interpretation before falling back to ASCII detection.
+            if 0 < triangle_count <= MAX_STL_TRIANGLES and expected_size == size:
+                return
         if head[:5].lower() == b"solid":
             text = head.decode("utf-8", errors="ignore").lower()
             if "facet" not in text or "vertex" not in text:
@@ -44,10 +51,7 @@ def _validate_model_file(path, extension):
         triangle_count = int.from_bytes(head[80:84], "little")
         if triangle_count <= 0 or triangle_count > MAX_STL_TRIANGLES:
             raise ValueError("Invalid binary STL triangle count")
-        expected_size = 84 + triangle_count * 50
-        if expected_size != size:
-            raise ValueError("Binary STL size does not match its triangle count")
-        return
+        raise ValueError("Binary STL size does not match its triangle count")
 
     if extension == ".obj":
         text = head.decode("utf-8", errors="ignore")
