@@ -1,4 +1,5 @@
 import io
+import os
 import unittest
 
 from fastapi.testclient import TestClient
@@ -45,6 +46,28 @@ class Pass23APIServerTests(unittest.TestCase):
         self.assertEqual(captured["status"], "200 OK")
         self.assertEqual(captured["headers"]["Access-Control-Allow-Origin"], "http://localhost:5173")
         self.assertIn(b'"ok": true', payload)
+
+    def test_production_server_uses_canonical_cors_setting(self):
+        from fabos_api.server import _application_with_cors
+
+        core = _Core()
+        previous = os.environ.get("FABOS_CORS_ORIGINS")
+        try:
+            os.environ["FABOS_CORS_ORIGINS"] = "https://shop.example"
+            captured = {}
+            environ = {
+                "REQUEST_METHOD": "GET", "PATH_INFO": "/api/v1/health", "QUERY_STRING": "",
+                "CONTENT_LENGTH": "0", "wsgi.input": io.BytesIO(b""),
+            }
+            def start_response(status, headers):
+                captured["headers"] = dict(headers)
+            b"".join(_application_with_cors(core)(environ, start_response))
+            self.assertEqual(captured["headers"]["Access-Control-Allow-Origin"], "https://shop.example")
+        finally:
+            if previous is None:
+                os.environ.pop("FABOS_CORS_ORIGINS", None)
+            else:
+                os.environ["FABOS_CORS_ORIGINS"] = previous
 
     def test_team_login_is_rate_limited_independently(self):
         from fabos_core.api import create_app
