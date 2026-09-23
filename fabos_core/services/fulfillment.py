@@ -128,7 +128,7 @@ class FulfillmentService:
         return self.ensure(order_id, method)
 
     def save_for_user(self, user_id, order_id, method, status, carrier="", tracking="", weight_oz=None,
-                      shipping_cost_cents=0, destination="", notes="", length_in=None, width_in=None,
+                      shipping_cost_cents=None, destination="", notes="", length_in=None, width_in=None,
                       height_in=None):
         self._require(user_id, "fulfillment.manage")
         if not self._customer_order_allowed(user_id, order_id):
@@ -137,7 +137,7 @@ class FulfillmentService:
                          shipping_cost_cents, destination, notes, length_in, width_in, height_in)
 
     def save(self, order_id, method, status, carrier="", tracking="", weight_oz=None,
-             shipping_cost_cents=0, destination="", notes="", length_in=None, width_in=None, height_in=None):
+             shipping_cost_cents=None, destination="", notes="", length_in=None, width_in=None, height_in=None):
         method = str(method or "").strip().lower()
         status = str(status or "").strip().lower()
         if method not in self.METHODS:
@@ -146,8 +146,10 @@ class FulfillmentService:
             raise ValueError("Unsupported fulfillment status")
         fid = self.ensure(order_id, method)
         with self.db.connect() as c:
-            current = c.execute("SELECT method,status FROM fulfillments WHERE id=?", (fid,)).fetchone()
+            current = c.execute("SELECT method,status,shipping_cost_cents FROM fulfillments WHERE id=?", (fid,)).fetchone()
         current_status = str(current["status"] or "pending").lower() if current else "pending"
+        if shipping_cost_cents is None:
+            shipping_cost_cents = int(current["shipping_cost_cents"] or 0) if current else 0
         if current_status in self.TERMINAL_STATUSES and status != current_status:
             raise ValueError("Cannot move a completed fulfillment back to an earlier status")
         if current and current["method"] != method and current_status != "pending":
