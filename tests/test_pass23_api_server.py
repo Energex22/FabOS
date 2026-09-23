@@ -35,7 +35,7 @@ class Pass23APIServerTests(unittest.TestCase):
         environ = {
             "REQUEST_METHOD": "GET", "PATH_INFO": "/api/v1/health", "QUERY_STRING": "",
             "CONTENT_LENGTH": "0", "wsgi.input": io.BytesIO(b""),
-            "HTTP_AUTHORIZATION": "", "HTTP_USER_AGENT": "test", "REMOTE_ADDR": "127.0.0.1",
+            "HTTP_AUTHORIZATION": "", "HTTP_USER_AGENT": "test", "REMOTE_ADDR": "127.0.0.1", "HTTP_ORIGIN": "http://localhost:5173",
         }
 
         def start_response(status, headers):
@@ -57,7 +57,7 @@ class Pass23APIServerTests(unittest.TestCase):
             captured = {}
             environ = {
                 "REQUEST_METHOD": "GET", "PATH_INFO": "/api/v1/health", "QUERY_STRING": "",
-                "CONTENT_LENGTH": "0", "wsgi.input": io.BytesIO(b""),
+                "CONTENT_LENGTH": "0", "wsgi.input": io.BytesIO(b""), "HTTP_ORIGIN": "https://shop.example",
             }
             def start_response(status, headers):
                 captured["headers"] = dict(headers)
@@ -99,7 +99,7 @@ class Pass23APIServerTests(unittest.TestCase):
         captured = {}
         environ = {
             "REQUEST_METHOD": "OPTIONS", "PATH_INFO": "/api/v1/products", "QUERY_STRING": "",
-            "CONTENT_LENGTH": "0", "wsgi.input": io.BytesIO(b""),
+            "CONTENT_LENGTH": "0", "wsgi.input": io.BytesIO(b""), "HTTP_ORIGIN": "http://localhost:5173",
         }
 
         def start_response(status, headers):
@@ -110,6 +110,30 @@ class Pass23APIServerTests(unittest.TestCase):
         self.assertEqual(captured["status"], "204 No Content")
         self.assertEqual(captured["headers"]["Access-Control-Allow-Origin"], "http://localhost:5173")
         self.assertEqual(payload, b"")
+
+    def test_disallowed_cors_origin_is_not_reflected(self):
+        captured = {}
+        environ = {
+            "REQUEST_METHOD": "GET", "PATH_INFO": "/api/v1/health", "QUERY_STRING": "",
+            "CONTENT_LENGTH": "0", "wsgi.input": io.BytesIO(b""),
+            "HTTP_ORIGIN": "https://evil.example",
+        }
+        def start_response(status, headers):
+            captured["headers"] = dict(headers)
+        b"".join(_application_with_cors(_Core())(environ, start_response))
+        self.assertNotIn("Access-Control-Allow-Origin", captured["headers"])
+
+    def test_disallowed_preflight_is_rejected(self):
+        captured = {}
+        environ = {
+            "REQUEST_METHOD": "OPTIONS", "PATH_INFO": "/api/v1/health", "QUERY_STRING": "",
+            "CONTENT_LENGTH": "0", "wsgi.input": io.BytesIO(b""),
+            "HTTP_ORIGIN": "https://evil.example",
+        }
+        def start_response(status, headers):
+            captured["status"] = status
+        b"".join(_application_with_cors(_Core())(environ, start_response))
+        self.assertEqual(captured["status"], "403 Forbidden")
 
 
 if __name__ == "__main__":
