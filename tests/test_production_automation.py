@@ -244,7 +244,7 @@ class ProductionAutomationTests(unittest.TestCase):
                     (spool_id, "PLA", "Green", 100, 100),
                 )
                 conn.execute(
-                    "INSERT INTO print_jobs(id,spool_id,status,estimated_filament_g) VALUES(?,?,?,?,?)",
+                    "INSERT INTO print_jobs(id,spool_id,status,estimated_filament_g) VALUES(?,?,?,?)",
                     (job_id, spool_id, "printing", 40),
                 )
                 conn.commit()
