@@ -274,5 +274,36 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.commit()
 
 
+    def test_printer_assignment_does_not_overcommit_queued_jobs(self):
+        app = FabOSApplication()
+        printer_id = str(uuid.uuid4())
+        first_id = str(uuid.uuid4())
+        second_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.execute(
+                    "INSERT INTO printers(id,name,model,status,total_hours) VALUES(?,?,?,?,?)",
+                    (printer_id, "Queue Guard", "Test", "idle", 0),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,printer_id,status,estimated_filament_g) VALUES(?,?,?,?)",
+                    (first_id, printer_id, "queued", 10),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,status,estimated_filament_g) VALUES(?,?,?)",
+                    (second_id, "queued", 10),
+                )
+                conn.commit()
+                second = conn.execute("SELECT * FROM print_jobs WHERE id=?", (second_id,)).fetchone()
+            self.assertIsNone(app.production_automation._choose_printer(second))
+        finally:
+            with app.database.connect() as conn:
+                self._cleanup_print_job_fixture(conn, first_id, None)
+                self._cleanup_print_job_fixture(conn, second_id, None)
+                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.commit()
+
+
 if __name__ == "__main__":
     unittest.main()
