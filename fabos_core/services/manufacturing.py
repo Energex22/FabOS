@@ -54,6 +54,7 @@ class ManufacturingService:
      actual_filament_g=COALESCE(?,actual_filament_g)
      WHERE id=?""",(actual_minutes,grams,jid))
    c.commit()
+  inventory_error=None
   try:
    from fabos_core.services.inventory_profit import InventoryProfitService
    inv=InventoryProfitService(self.db)
@@ -62,8 +63,19 @@ class ManufacturingService:
     with self.db.connect() as c:
      c.execute("UPDATE print_jobs SET filament_deducted=1 WHERE id=?",(jid,));c.commit()
    inv.calculate_job_cost(jid)
-  except Exception:
-   pass
+  except Exception as exc:
+   inventory_error=str(exc)
+  if inventory_error:
+   try:
+    with self.db.connect() as c:
+     c.execute("""INSERT OR IGNORE INTO notifications(
+      id,dedupe_key,severity,title,body,page,entity_id,is_read)
+      VALUES(?,?,?,?,?,?,?,0)""",
+      (str(uuid.uuid4()),'inventory:completion:'+jid,'error','Inventory accounting needs attention',
+       'Print completed, but filament/cost accounting failed: %s'%inventory_error,'Production',jid))
+     c.commit()
+   except Exception:
+    pass
   self.learn(jid)
 
  def fail_job(self,jid,reason):
