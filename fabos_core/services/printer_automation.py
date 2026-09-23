@@ -30,8 +30,9 @@ class PrinterAutomationService:
    progress=min(100,float(pr['simulation_progress'] or 0)+step)
    c.execute('UPDATE printers SET simulation_progress=?,nozzle_temp=205,bed_temp=60,last_seen_at=? WHERE id=?',(progress,datetime.now().isoformat(timespec='seconds'),pid));c.commit()
   if progress>=100:
+   # ProductionService owns completion and inventory accounting. Avoid a second
+   # completion call here so simulation and physical paths share one authority.
    self.production.set_status(job['id'],'completed')
-   self.m.complete_with_inventory(job['id'],job['estimated_minutes'],job['estimated_filament_g'])
    with self.db.connect() as c:c.execute("UPDATE printers SET status='idle',simulation_progress=100 WHERE id=?",(pid,));c.commit()
   return progress
  def sync_octoprint(self,pid):
