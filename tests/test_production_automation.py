@@ -175,21 +175,21 @@ class ProductionAutomationTests(unittest.TestCase):
                 close()
 
 
- def test_spool_assignment_accounts_for_existing_committed_jobs(self):
-  app = self._app()
-  with app.database.connect() as c:
-   spool = str(uuid.uuid4())
-   c.execute("INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
-             (spool,"PLA","Green",100,100))
-   first = str(uuid.uuid4())
-   second = str(uuid.uuid4())
-   c.execute("INSERT INTO print_jobs(id,spool_id,status,estimated_filament_g) VALUES(?,?,?,?)",
-             (first,spool,"scheduled",60))
-   c.execute("INSERT INTO print_jobs(id,status,estimated_filament_g) VALUES(?,?,?)",
-             (second,"queued",60))
-   c.commit()
-   job = c.execute("SELECT * FROM print_jobs WHERE id=?",(second,)).fetchone()
-  self.assertIsNone(app.production_automation._choose_spool(job))
+    def test_spool_assignment_accounts_for_existing_committed_jobs(self):
+    app = self._app()
+    with app.database.connect() as c:
+    spool = str(uuid.uuid4())
+    c.execute("INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
+    (spool,"PLA","Green",100,100))
+    first = str(uuid.uuid4())
+    second = str(uuid.uuid4())
+    c.execute("INSERT INTO print_jobs(id,spool_id,status,estimated_filament_g) VALUES(?,?,?,?)",
+    (first,spool,"scheduled",60))
+    c.execute("INSERT INTO print_jobs(id,status,estimated_filament_g) VALUES(?,?,?)",
+    (second,"queued",60))
+    c.commit()
+    job = c.execute("SELECT * FROM print_jobs WHERE id=?",(second,)).fetchone()
+    self.assertIsNone(app.production_automation._choose_spool(job))
 
 if __name__ == "__main__":
     unittest.main()
