@@ -140,6 +140,9 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     fabos = application or FabOSApplication()
     app.state.fabos = fabos
     app.state.auth_rate_limiter = RateLimiter(10, 300)
+    # Keep team/admin authentication on its own limiter so customer login
+    # traffic cannot consume the security budget for privileged accounts.
+    app.state.team_auth_rate_limiter = RateLimiter(10, 300)
     app.state.public_rate_limiter = RateLimiter(30, 3600)
 
     allowed_hosts = [x.strip() for x in os.environ.get("FABOS_ALLOWED_HOSTS", "").split(",") if x.strip()]
@@ -289,6 +292,13 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     @app.post("/api/v1/auth/team-login")
     def team_login(payload: LoginRequest, request: Request, application: FabOSApplication = Depends(get_application)):
         client = request.client.host if request.client else "unknown"
+        limiter_key = "team-login:" + client
+        if not app.state.team_auth_rate_limiter.allow(limiter_key):
+            raise HTTPException(
+                status_code=429,
+                detail="Too many team login attempts. Try again later.",
+                headers={"Retry-After": str(app.state.team_auth_rate_limiter.retry_after(limiter_key))},
+            )
         result = application.auth.login(payload.identifier, payload.password)
         if not result:
             raise HTTPException(status_code=401, detail="Invalid credentials")
