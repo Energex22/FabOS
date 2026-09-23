@@ -273,6 +273,36 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
                 conn.commit()
 
+    def test_completed_print_accounting_failure_creates_notification(self):
+        app = FabOSApplication()
+        job_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO print_jobs(id,status,estimated_filament_g) VALUES(?,?,?)",
+                    (job_id, "printing", 20),
+                )
+                conn.commit()
+            from unittest.mock import patch
+            with patch(
+                "fabos_core.services.manufacturing.ManufacturingService.complete_with_inventory",
+                side_effect=RuntimeError("inventory failure"),
+            ):
+                app.production.set_status(job_id, "completed")
+            with app.database.connect() as conn:
+                row = conn.execute(
+                    "SELECT severity,title,body FROM notifications WHERE dedupe_key=?",
+                    ("event:production:completed:%s" % job_id,),
+                ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["severity"], "high")
+            self.assertIn("inventory failure", row["body"])
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM notifications WHERE dedupe_key=?", ("event:production:completed:%s" % job_id,))
+                conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
+                conn.commit()
+
     def test_failed_print_records_filament_waste_once(self):
         app = FabOSApplication()
         spool_id = str(uuid.uuid4())
