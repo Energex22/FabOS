@@ -377,5 +377,34 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.commit()
 
 
+    def test_completion_surfaces_inventory_accounting_failure(self):
+        app = FabOSApplication()
+        job_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO print_jobs(id,status,spool_id,estimated_filament_g) VALUES(?,?,?,?)",
+                    (job_id, "printing", "missing-spool", 40),
+                )
+                conn.commit()
+            from fabos_core.services.manufacturing import ManufacturingService
+            ManufacturingService(app.database).complete_with_inventory(job_id)
+            with app.database.connect() as conn:
+                note = conn.execute(
+                    "SELECT COUNT(*) FROM notifications WHERE dedupe_key=?",
+                    ("inventory:completion:" + job_id,),
+                ).fetchone()[0]
+                deducted = conn.execute(
+                    "SELECT filament_deducted FROM print_jobs WHERE id=?", (job_id,)
+                ).fetchone()[0]
+            self.assertEqual(note, 1)
+            self.assertEqual(deducted, 0)
+        finally:
+            with app.database.connect() as conn:
+                self._cleanup_print_job_fixture(conn, job_id, None)
+                conn.execute("DELETE FROM notifications WHERE dedupe_key=?", ("inventory:completion:" + job_id,))
+                conn.commit()
+
+
 if __name__ == "__main__":
     unittest.main()
