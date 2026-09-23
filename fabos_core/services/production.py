@@ -191,14 +191,26 @@ class ProductionService:
                 if not spool:
                     raise KeyError("Filament spool not found or inactive.")
                 needed = float(job["estimated_filament_g"] or 0)
-                requested_material = conn.execute(
-                    """SELECT qi.material
-                       FROM quote_items qi JOIN orders o ON o.quote_id=qi.quote_id
-                       WHERE o.id=? AND qi.product_id=?
-                         AND (qi.variant_id=? OR (qi.variant_id IS NULL AND ? IS NULL))
-                       ORDER BY qi.rowid LIMIT 1""",
-                    (job["order_id"], job["product_id"], job["variant_id"], job["variant_id"]),
-                ).fetchone() if job["order_id"] and job["product_id"] else None
+                requested_material = None
+                if job["order_id"]:
+                    if job["product_id"]:
+                        requested_material = conn.execute(
+                            """SELECT qi.material
+                               FROM quote_items qi JOIN orders o ON o.quote_id=qi.quote_id
+                               WHERE o.id=? AND qi.product_id=?
+                                 AND (qi.variant_id=? OR (qi.variant_id IS NULL AND ? IS NULL))
+                               ORDER BY qi.rowid LIMIT 1""",
+                            (job["order_id"], job["product_id"], job["variant_id"], job["variant_id"]),
+                        ).fetchone()
+                    else:
+                        requested_material = conn.execute(
+                            """SELECT qi.material
+                               FROM quote_items qi JOIN orders o ON o.quote_id=qi.quote_id
+                               WHERE o.id=? AND qi.product_id IS NULL
+                                 AND (qi.variant_id=? OR (qi.variant_id IS NULL AND ? IS NULL))
+                               ORDER BY qi.rowid LIMIT 1""",
+                            (job["order_id"], job["variant_id"], job["variant_id"]),
+                        ).fetchone()
                 if requested_material and str(requested_material["material"] or "").strip():
                     if str(spool["material"] or "").strip().lower() != str(requested_material["material"]).strip().lower():
                         raise ValueError("Filament spool material does not match the order requirement.")
