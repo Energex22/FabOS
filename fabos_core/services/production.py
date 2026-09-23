@@ -249,8 +249,21 @@ class ProductionService:
                     from fabos_core.services.inventory_profit import InventoryProfitService
                     InventoryProfitService(self.database).record_failed_waste(job_id)
                     m.learn(job_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                # The physical print state is already authoritative. Surface accounting
+                # failures instead of silently leaving inventory/cost records incomplete.
+                try:
+                    with self.database.connect() as conn:
+                        conn.execute("""INSERT OR IGNORE INTO notifications(
+                            id,dedupe_key,severity,title,body,page,entity_id,is_read)
+                            VALUES(?,?,?,?,?,?,?,0)""",
+                            (str(uuid.uuid4()), "inventory:failure:" + job_id, "error",
+                             "Inventory accounting needs attention",
+                             "Print failed, but filament waste/cost accounting failed: %s" % exc,
+                             "Production", job_id))
+                        conn.commit()
+                except Exception:
+                    pass
 
     def get(self, job_id):
         rows = self.list_jobs()
