@@ -29,7 +29,6 @@ class ProductionAutomationTests(unittest.TestCase):
                 except Exception:
                     continue
                 for fk in foreign_keys:
-                    # PRAGMA columns: id, seq, table, from, to, ...
                     if fk[2] != "print_jobs":
                         continue
                     try:
@@ -39,8 +38,6 @@ class ProductionAutomationTests(unittest.TestCase):
                         )
                         deleted = deleted or cursor.rowcount > 0
                     except Exception:
-                        # A child may itself have dependents; another pass can
-                        # remove those children first.
                         continue
             try:
                 conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
@@ -96,7 +93,6 @@ class ProductionAutomationTests(unittest.TestCase):
             close = getattr(app, "close", None)
             if callable(close):
                 close()
-
 
     def test_printer_assignment_rejects_build_volume_mismatch(self):
         app = FabOSApplication()
@@ -174,22 +170,34 @@ class ProductionAutomationTests(unittest.TestCase):
             if callable(close):
                 close()
 
-
     def test_spool_assignment_accounts_for_existing_committed_jobs(self):
-        app = self._app()
-        with app.database.connect() as c:
-            spool = str(uuid.uuid4())
-            c.execute("INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
-                      (spool, "PLA", "Green", 100, 100))
-            first = str(uuid.uuid4())
-            second = str(uuid.uuid4())
-            c.execute("INSERT INTO print_jobs(id,spool_id,status,estimated_filament_g) VALUES(?,?,?,?)",
-                      (first, spool, "scheduled", 60))
-            c.execute("INSERT INTO print_jobs(id,status,estimated_filament_g) VALUES(?,?,?)",
-                      (second, "queued", 60))
-            c.commit()
-            job = c.execute("SELECT * FROM print_jobs WHERE id=?", (second,)).fetchone()
-        self.assertIsNone(app.production_automation._choose_spool(job))
+        app = FabOSApplication()
+        spool = str(uuid.uuid4())
+        first = str(uuid.uuid4())
+        second = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
+                    (spool, "PLA", "Green", 100, 100),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,spool_id,status,estimated_filament_g) VALUES(?,?,?,?)",
+                    (first, spool, "scheduled", 60),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,status,estimated_filament_g) VALUES(?,?,?)",
+                    (second, "queued", 60),
+                )
+                conn.commit()
+                job = conn.execute("SELECT * FROM print_jobs WHERE id=?", (second,)).fetchone()
+            self.assertIsNone(app.production_automation._choose_spool(job))
+        finally:
+            with app.database.connect() as conn:
+                self._cleanup_print_job_fixture(conn, first, spool)
+                conn.execute("DELETE FROM print_jobs WHERE id=?", (second,))
+                conn.commit()
+
 
 if __name__ == "__main__":
     unittest.main()
