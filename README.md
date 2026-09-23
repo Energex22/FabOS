@@ -35,7 +35,7 @@ variables**.
 | --- | --- | --- |
 | Implementation | FastAPI + Uvicorn (`fabos_core/api.py`) | WSGI + Waitress (`fabos_api/app.py`) |
 | Used by | local development, API docs | `Start-FabVex-Production.ps1` in FabOS-Web |
-| Reads | `FABOS_CORS_ORIGINS`, `FABOS_ALLOWED_HOSTS`, `FABOS_API_DOCS` | `FABOS_API_ALLOW_ORIGIN`, `FABOS_API_THREADS` |
+| Reads | `FABOS_CORS_ORIGINS`, `FABOS_ALLOWED_HOSTS`, `FABOS_API_DOCS` | `FABOS_CORS_ORIGINS` (with `FABOS_API_ALLOW_ORIGIN` as a legacy fallback), `FABOS_API_THREADS` |
 | Both read | `FABOS_DATA_DIR`, `FABOS_API_HOST`, `FABOS_API_PORT`, and the payment variables | |
 
 Both serve the same customer route set and delegate to the same FabOS services.
