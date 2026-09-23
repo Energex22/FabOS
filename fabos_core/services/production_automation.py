@@ -1,11 +1,8 @@
-import os
-import threading
-import time
 import json
+import math
 import os
 import threading
 import time
-import uuid
 from datetime import datetime
 
 
@@ -47,9 +44,12 @@ class ProductionAutomationService:
         for key in ("x", "y", "z"):
             value = candidates.get(key, candidates.get(key.upper()))
             try:
-                values.append(float(value))
+                value = float(value)
             except (TypeError, ValueError):
                 return None
+            if not math.isfinite(value) or value <= 0:
+                return None
+            values.append(value)
         return tuple(values)
 
     def _printer_supports_job(self, printer, job):

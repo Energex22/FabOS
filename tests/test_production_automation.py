@@ -123,6 +123,61 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("DELETE FROM printers WHERE name IN ('Small','Large')")
                 conn.commit()
 
+    def test_printer_assignment_skips_unavailable_statuses(self):
+        app = FabOSApplication()
+        try:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM printers")
+                offline_id, maintenance_id, idle_id = [str(uuid.uuid4()) for _ in range(3)]
+                for pid, name, status, hours in (
+                    (offline_id, "Offline", "offline", 0),
+                    (maintenance_id, "Maintenance", "maintenance", 0),
+                    (idle_id, "Idle", "idle", 10),
+                ):
+                    conn.execute("""INSERT INTO printers
+                        (id,name,model,status,total_hours)
+                        VALUES(?,?,?,?,?)""",
+                        (pid, name, "Test", status, hours))
+                conn.execute("""INSERT INTO print_jobs
+                    (id,status,estimated_filament_g)
+                    VALUES(?,?,?)""",
+                    ("status-test-job", "queued", 10))
+                conn.commit()
+                job = conn.execute("SELECT * FROM print_jobs WHERE id=?", ("status-test-job",)).fetchone()
+            selected = app.production_automation._choose_printer(job)
+            self.assertEqual(selected["id"], idle_id)
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM print_jobs WHERE id=?", ("status-test-job",))
+                conn.execute("DELETE FROM printers WHERE name IN ('Offline','Maintenance','Idle')")
+                conn.commit()
+
+    def test_invalid_job_dimensions_do_not_create_false_capability_match(self):
+        app = FabOSApplication()
+        with app.database.connect() as conn:
+            job = conn.execute(
+                "SELECT * FROM print_jobs WHERE id=?",
+                ("dimension-invalid-test-job",),
+            ).fetchone()
+            if job:
+                conn.execute("DELETE FROM print_jobs WHERE id=?", ("dimension-invalid-test-job",))
+            conn.execute(
+                "INSERT INTO print_jobs(id,status,estimated_filament_g,slicer_metadata_json) VALUES(?,?,?,?)",
+                ("dimension-invalid-test-job", "queued", 10,
+                 json.dumps({"dimensions": {"x": -1, "y": 20, "z": 20}})),
+            )
+            conn.commit()
+            job = conn.execute(
+                "SELECT * FROM print_jobs WHERE id=?",
+                ("dimension-invalid-test-job",),
+            ).fetchone()
+        try:
+            self.assertIsNone(app.production_automation._job_dimensions(job))
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM print_jobs WHERE id=?", ("dimension-invalid-test-job",))
+                conn.commit()
+
     def test_spool_reservation_prevents_overcommit_within_automation_pass(self):
         app = FabOSApplication()
         try:
