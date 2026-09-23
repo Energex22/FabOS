@@ -194,7 +194,7 @@ class ProductionService:
             conn.commit()
         return created
 
-    def set_status(self, job_id, status):
+    def set_status(self, job_id, status, actual_minutes=None, actual_filament_g=None):
         status=str(status or "").strip().lower()
         if status not in self.VALID_JOB_STATUSES:
             raise ValueError("Invalid print job status.")
@@ -240,7 +240,7 @@ class ProductionService:
                     # Completion is the authoritative point at which actual/estimated
                     # material consumption is recorded. The manufacturing service is
                     # idempotent, so repeated reconciliation cannot double-deduct a spool.
-                    m.complete_with_inventory(job_id)
+                    m.complete_with_inventory(job_id, actual_minutes, actual_filament_g)
                     if row["order_id"]:
                         m.ensure_qc(row["order_id"],job_id)
                 else:
