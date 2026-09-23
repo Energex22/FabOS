@@ -384,7 +384,7 @@ class ProductionAutomationTests(unittest.TestCase):
             with app.database.connect() as conn:
                 conn.execute(
                     "INSERT INTO print_jobs(id,status,spool_id,estimated_filament_g) VALUES(?,?,?,?)",
-                    (job_id, "printing", "missing-spool", 40),
+                    (job_id, "printing", None, 40),
                 )
                 conn.commit()
             from fabos_core.services.manufacturing import ManufacturingService
