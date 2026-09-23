@@ -1,6 +1,10 @@
 import os
 import threading
 import time
+import json
+import os
+import threading
+import time
 import uuid
 from datetime import datetime
 
@@ -25,10 +29,52 @@ class ProductionAutomationService:
         value = str(self.app.shop_settings.get(key, "true" if default else "false") or "").strip().lower()
         return value in ("1", "true", "yes", "on")
 
-    def _choose_spool(self, job):
+    def _job_dimensions(self, job):
+        """Return required X/Y/Z dimensions when slicer metadata provides them."""
+        raw = job["slicer_metadata_json"] if "slicer_metadata_json" in job.keys() else None
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            return None
+        if not isinstance(data, dict):
+            return None
+        candidates = data.get("dimensions") or data.get("size") or data.get("bounds")
+        if not isinstance(candidates, dict):
+            return None
+        values = []
+        for key in ("x", "y", "z"):
+            value = candidates.get(key, candidates.get(key.upper()))
+            try:
+                values.append(float(value))
+            except (TypeError, ValueError):
+                return None
+        return tuple(values)
+
+    def _printer_supports_job(self, printer, job):
+        """Apply only capability data FabOS actually stores."""
+        dimensions = self._job_dimensions(job)
+        if not dimensions:
+            return True
+        limits = []
+        for key in ("build_x_mm", "build_y_mm", "build_z_mm"):
+            try:
+                value = float(printer[key])
+            except (TypeError, ValueError):
+                return True
+            if value <= 0:
+                return True
+            limits.append(value)
+        x, y, z = dimensions
+        return ((x <= limits[0] and y <= limits[1] and z <= limits[2]) or
+                (y <= limits[0] and x <= limits[1] and z <= limits[2]))
+
+    def _choose_spool(self, job, reserved_grams=None):
         material = str(job["material"] or "").strip().lower() if "material" in job.keys() else ""
         color = str(job["color"] or "").strip().lower() if "color" in job.keys() else ""
         needed = float(job["estimated_filament_g"] or 0)
+        reserved_grams = reserved_grams or {}
         with self.db.connect() as c:
             rows = c.execute(
                 """SELECT * FROM filament_spools
@@ -38,6 +84,7 @@ class ProductionAutomationService:
                             remaining_g ASC, created_at ASC""",
                 (needed, material, color),
             ).fetchall()
+        rows = [r for r in rows if float(r["remaining_g"] or 0) - float(reserved_grams.get(r["id"], 0)) >= needed]
         if not rows:
             return None
         # Never silently assign a different material when the order explicitly
@@ -57,17 +104,18 @@ class ProductionAutomationService:
                      )
                    ORDER BY p.total_hours ASC, p.name ASC"""
             ).fetchall()
+        rows = [r for r in rows if self._printer_supports_job(r, job)]
         if not rows:
             return None
         return rows[0]
 
-    def _assign_resources(self, job):
+    def _assign_resources(self, job, reserved_grams=None):
         if not self._setting_bool("production_auto_assign", True):
             return False
         if job["printer_id"] and job["spool_id"]:
             return False
         printer = self._choose_printer(job) if not job["printer_id"] else None
-        spool = self._choose_spool(job) if not job["spool_id"] else None
+        spool = self._choose_spool(job, reserved_grams) if not job["spool_id"] else None
         printer_id = job["printer_id"] or (printer["id"] if printer else None)
         spool_id = job["spool_id"] or (spool["id"] if spool else None)
         if printer_id == job["printer_id"] and spool_id == job["spool_id"]:
@@ -116,6 +164,7 @@ class ProductionAutomationService:
         try:
             created = self.app.production.create_jobs_for_all_new_orders()
             assigned = 0
+            reserved_grams = {}
             started = 0
             with self.db.connect() as c:
                 jobs = c.execute(
@@ -150,8 +199,16 @@ class ProductionAutomationService:
                 ).fetchall()
             for job in jobs:
                 try:
-                    if self._assign_resources(job):
+                    if self._assign_resources(job, reserved_grams):
                         assigned += 1
+                        if not job["spool_id"]:
+                            assigned_job = self.app.production.get(job["id"])
+                            if assigned_job["spool_id"]:
+                                spool_id = assigned_job["spool_id"]
+                                reserved_grams[spool_id] = (
+                                    reserved_grams.get(spool_id, 0) +
+                                    float(assigned_job["estimated_filament_g"] or 0)
+                                )
                     refreshed = self.app.production.get(job["id"])
                     if refreshed["printer_id"] and refreshed["spool_id"]:
                         if self._start_job(refreshed):
