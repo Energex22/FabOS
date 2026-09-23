@@ -54,7 +54,7 @@ class StripePaymentProvider(PaymentProvider):
     def create_checkout(self, *, payment_id, amount_cents, currency, metadata):
         success_url=os.environ.get("STRIPE_SUCCESS_URL","").strip();cancel_url=os.environ.get("STRIPE_CANCEL_URL","").strip()
         if not success_url or not cancel_url: raise PaymentProviderNotConfigured("STRIPE_SUCCESS_URL and STRIPE_CANCEL_URL are required")
-        fields={"mode":"payment","success_url":success_url,"cancel_url":cancel_url,"line_items[0][price_data][currency]":currency.lower(),"line_items[0][price_data][product_data][name]":"FabOS order "+str(metadata["order_id"]),"line_items[0][price_data][unit_amount]":str(int(amount_cents)),"line_items[0][quantity]":"1","client_reference_id":str(metadata["order_id"]),"metadata[payment_id]":str(payment_id),"metadata[order_id]":str(metadata["order_id"])}
+        fields={"mode":"payment","success_url":success_url,"cancel_url":cancel_url,"line_items[0][price_data][currency]":currency.lower(),"line_items[0][price_data][product_data][name]":"FabOS order "+str(metadata["order_id"]),"line_items[0][price_data][unit_amount]":str(int(amount_cents)),"line_items[0][quantity]":"1","client_reference_id":str(metadata["order_id"]),"metadata[payment_id]":str(payment_id),"metadata[order_id]":str(metadata["order_id"]),"metadata[invoice_id]":str(metadata.get("invoice_id") or "")}
         session=self._request("/checkout/sessions",fields,idempotency_key=payment_id)
         return {"provider_payment_id":session.get("payment_intent") or session.get("id"),"checkout_url":session.get("url"),"status":"pending","metadata":{**metadata,"stripe_session_id":session.get("id")}}
     def parse_webhook(self,payload,signature=None):
