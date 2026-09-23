@@ -1,4 +1,5 @@
 import uuid
+import json
 from datetime import datetime
 
 class ProductionService:
@@ -163,6 +164,22 @@ class ProductionService:
             total += len(self.create_jobs_from_order(order["id"]))
         return total
 
+    def _record_post_status_error(self, job_id, status, exc):
+        key = "event:production:%s:%s" % (status, job_id)
+        title = "Production accounting needs attention"
+        body = "Print job %s reached %s, but post-print accounting failed: %s" % (job_id, status, exc)
+        with self.database.connect() as conn:
+            conn.execute(
+                """INSERT INTO notifications(
+                   id,dedupe_key,severity,title,body,page,entity_id,is_read)
+                   VALUES(?,?,?,?,?,?,?,0)
+                   ON CONFLICT(dedupe_key) DO UPDATE SET
+                     severity=excluded.severity,title=excluded.title,body=excluded.body,
+                     page=excluded.page,entity_id=excluded.entity_id,updated_at=CURRENT_TIMESTAMP""",
+                (str(uuid.uuid4()), key, "high", title, body, "Production", job_id),
+            )
+            conn.commit()
+
     def assign(self, job_id, printer_id=None, spool_id=None):
         with self.database.connect() as conn:
             job = conn.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone()
@@ -281,8 +298,11 @@ class ProductionService:
                     from fabos_core.services.inventory_profit import InventoryProfitService
                     InventoryProfitService(self.database).record_failed_waste(job_id)
                     m.learn(job_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                try:
+                    self._record_post_status_error(job_id, status, exc)
+                except Exception:
+                    pass
 
     def get(self, job_id):
         rows = self.list_jobs()
