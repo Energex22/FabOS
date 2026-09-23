@@ -381,14 +381,22 @@ class ProductionAutomationTests(unittest.TestCase):
         app = FabOSApplication()
         job_id = str(uuid.uuid4())
         try:
+            spool_id = str(uuid.uuid4())
             with app.database.connect() as conn:
                 conn.execute(
+                    "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
+                    (spool_id, "PLA", "Green", 100, 100),
+                )
+                conn.execute(
                     "INSERT INTO print_jobs(id,status,spool_id,estimated_filament_g) VALUES(?,?,?,?)",
-                    (job_id, "printing", None, 40),
+                    (job_id, "printing", spool_id, 40),
                 )
                 conn.commit()
+            from unittest.mock import patch
+            from fabos_core.services.inventory_profit import InventoryProfitService
             from fabos_core.services.manufacturing import ManufacturingService
-            ManufacturingService(app.database).complete_with_inventory(job_id)
+            with patch.object(InventoryProfitService, "record_consumption", side_effect=RuntimeError("inventory write failed")):
+                ManufacturingService(app.database).complete_with_inventory(job_id)
             with app.database.connect() as conn:
                 note = conn.execute(
                     "SELECT COUNT(*) FROM notifications WHERE dedupe_key=?",
@@ -401,7 +409,8 @@ class ProductionAutomationTests(unittest.TestCase):
             self.assertEqual(deducted, 0)
         finally:
             with app.database.connect() as conn:
-                self._cleanup_print_job_fixture(conn, job_id, None)
+                self._cleanup_print_job_fixture(conn, job_id, spool_id)
+                conn.execute("DELETE FROM filament_spools WHERE id=?", (spool_id,))
                 conn.execute("DELETE FROM notifications WHERE dedupe_key=?", ("inventory:completion:" + job_id,))
                 conn.commit()
 
