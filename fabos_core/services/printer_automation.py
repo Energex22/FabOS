@@ -105,9 +105,13 @@ class PrinterAutomationService:
        left is not None and left<=1 and elapsed is not None and elapsed>0)
    if same_file and finished:
     try:
-     self.production.set_status(active_before['id'],'completed')
      actual_minutes=max(1,int(round(elapsed/60.0))) if elapsed else None
-     self.m.complete_with_inventory(active_before['id'],actual_minutes,active_before['estimated_filament_g'])
+     self.production.set_status(active_before['id'],'completed')
+     # ProductionService owns inventory completion; avoid a second accounting pass.
+     if actual_minutes:
+      with self.db.connect() as c:
+       c.execute("UPDATE print_jobs SET actual_minutes=? WHERE id=? AND actual_minutes IS NULL",(actual_minutes,active_before['id']))
+       c.commit()
      try:
       with self.db.connect() as c:
        c.execute("""INSERT INTO activity_journal(id,event_type,title,detail,page,entity_id)
