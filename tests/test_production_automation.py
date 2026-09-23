@@ -233,6 +233,46 @@ class ProductionAutomationTests(unittest.TestCase):
                 self._cleanup_print_job_fixture(conn, job_id, spool_id)
 
 
+    def test_reprint_requeues_without_stale_resources(self):
+        app = FabOSApplication()
+        job_id = str(uuid.uuid4())
+        printer_id = str(uuid.uuid4())
+        spool_id = str(uuid.uuid4())
+        new_job_id = None
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO printers(id,name,model,status,build_x_mm,build_y_mm,build_z_mm,total_hours) VALUES(?,?,?,?,?,?,?,?)",
+                    (printer_id, "Reprint Test Printer", "Test", "idle", 200, 200, 200, 0),
+                )
+                conn.execute(
+                    "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
+                    (spool_id, "PLA", "Green", 100, 100),
+                )
+                conn.execute(
+                    """INSERT INTO print_jobs
+                    (id,printer_id,spool_id,status,gcode_path,estimated_minutes,estimated_filament_g)
+                    VALUES(?,?,?,?,?,?,?)""",
+                    (job_id, printer_id, spool_id, "failed", "test.gcode", 20, 20),
+                )
+                conn.commit()
+            new_job_id = app.manufacturing.reprint(job_id)
+            with app.database.connect() as conn:
+                row = conn.execute(
+                    "SELECT status,printer_id,spool_id FROM print_jobs WHERE id=?",
+                    (new_job_id,),
+                ).fetchone()
+            self.assertEqual(row["status"], "queued")
+            self.assertIsNone(row["printer_id"])
+            self.assertIsNone(row["spool_id"])
+        finally:
+            with app.database.connect() as conn:
+                if new_job_id:
+                    self._cleanup_print_job_fixture(conn, new_job_id, None)
+                self._cleanup_print_job_fixture(conn, job_id, spool_id)
+                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.commit()
+
     def test_failed_print_records_filament_waste_once(self):
         app = FabOSApplication()
         spool_id = str(uuid.uuid4())
