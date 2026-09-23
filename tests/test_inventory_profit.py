@@ -17,6 +17,17 @@ class InventoryProfitTests(unittest.TestCase):
    with db.connect() as c:r=c.execute("SELECT remaining_g FROM filament_spools WHERE id=?",(sid,)).fetchone()
    self.assertAlmostEqual(r["remaining_g"],900)
 
+ def test_spool_consumption_rejects_missing_spool(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   svc=InventoryProfitService(db)
+   jid=str(uuid.uuid4())
+   with self.assertRaises(KeyError):
+    svc.record_consumption("missing-spool",50,jid)
+   with db.connect() as c:
+    tx=c.execute("SELECT COUNT(*) n FROM inventory_transactions WHERE reference_id=?",(jid,)).fetchone()
+   self.assertEqual(tx["n"],0)
+
  def test_cost_calculation(self):
   with tempfile.TemporaryDirectory() as td:
    db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
