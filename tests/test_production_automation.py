@@ -517,12 +517,12 @@ class ProductionAutomationTests(unittest.TestCase):
         try:
             with app.database.connect() as conn:
                 conn.execute(
-                    "INSERT INTO orders(id,order_number,status,total_cents,quote_id) VALUES(?,?,?,?,?)",
-                    (order_id, "ASSIGN-GUARD", "in_production", 1000, quote_id),
-                )
-                conn.execute(
                     "INSERT INTO quotes(id,quote_number,status) VALUES(?,?,?)",
                     (quote_id, "Q-ASSIGN-GUARD", "accepted"),
+                )
+                conn.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents,quote_id) VALUES(?,?,?,?,?)",
+                    (order_id, "ASSIGN-GUARD", "in_production", 1000, quote_id),
                 )
                 conn.execute(
                     """INSERT INTO quote_items
