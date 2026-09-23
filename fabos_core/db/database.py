@@ -9,7 +9,7 @@ class Database:
         with self.connect() as c: c.executescript(sql); c.commit()
     @contextmanager
     def connect(self):
-        c=sqlite3.connect(str(self.path),timeout=30,isolation_level=None); c.row_factory=sqlite3.Row
+        c=sqlite3.connect(str(self.path),timeout=30); c.row_factory=sqlite3.Row
         c.execute('PRAGMA foreign_keys=ON'); c.execute('PRAGMA journal_mode=WAL'); c.execute('PRAGMA busy_timeout=30000')
         try: yield c
         finally: c.close()
