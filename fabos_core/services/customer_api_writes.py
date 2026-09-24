@@ -8,6 +8,7 @@ import zipfile
 from fastapi import Depends, File, HTTPException, UploadFile, Request
 from pydantic import BaseModel, Field
 from fabos_core.services.rate_limit import request_client_key
+from fabos_core.services.rate_limit import request_client_key
 
 MAX_CUSTOM_UPLOAD_BYTES = 25 * 1024 * 1024
 ALLOWED_CUSTOM_UPLOAD_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj"}
@@ -216,7 +217,7 @@ def register_customer_write_routes(app, get_application, current_user):
 
     @app.post("/api/v1/quote-requests")
     def create_public_quote_request(payload: PublicQuoteRequest, request: Request, application=Depends(get_application)):
-        client = request.client.host if request.client else "unknown"
+        client = request_client_key(request)
         if not app.state.public_rate_limiter.allow("quote:" + client):
             raise HTTPException(status_code=429, detail="Too many quote requests. Try again later.", headers={"Retry-After": str(app.state.public_rate_limiter.retry_after("quote:" + client))})
         try:
