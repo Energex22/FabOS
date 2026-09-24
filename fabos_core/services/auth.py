@@ -167,27 +167,30 @@ class AuthService:
     def reset_password(self, token, new_password):
         if not token:
             return False
-        with self.database.connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM password_reset_tokens WHERE token_hash=? AND used_at IS NULL",
-                (self._token_hash(token),),
-            ).fetchone()
-        if not row:
-            return False
-        try:
-            if datetime.fromisoformat(row["expires_at"]) <= datetime.utcnow():
-                return False
-        except ValueError:
-            return False
         password_hash = self.hash_password(new_password)
+        now = datetime.utcnow().isoformat()
         with self.database.connect() as connection:
+            # Consume the reset token and update the password in one transaction.
+            # The used_at predicate makes concurrent reset requests single-use even
+            # when both requests validate the same token before either commits.
+            row = connection.execute(
+                """SELECT user_id FROM password_reset_tokens
+                   WHERE token_hash=? AND used_at IS NULL AND expires_at>?""",
+                (self._token_hash(token), now),
+            ).fetchone()
+            if not row:
+                return False
+            cursor = connection.execute(
+                """UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP
+                   WHERE token_hash=? AND used_at IS NULL AND expires_at>?""",
+                (self._token_hash(token), now),
+            )
+            if cursor.rowcount != 1:
+                connection.rollback()
+                return False
             connection.execute(
                 "UPDATE users SET password_hash=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (password_hash, row["user_id"]),
-            )
-            connection.execute(
-                "UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=?",
-                (row["id"],),
             )
             connection.execute(
                 "UPDATE auth_sessions SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND revoked_at IS NULL",
