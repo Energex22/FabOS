@@ -35,8 +35,8 @@ class PrinterAutomationTests(unittest.TestCase):
    pid=str(uuid.uuid4());job=str(uuid.uuid4())
    with db.connect() as c:
     c.execute("""INSERT INTO printers
-      (id,name,status,connection_mode,octoprint_url,api_key_ref)
-      VALUES(?,?,?,?,?,?)""",(pid,"Mismatch Test","printing","octoprint","http://octoprint","key"))
+      (id,name,status,octoprint_url,api_key_ref)
+      VALUES(?,?,?,?,?)""",(pid,"Mismatch Test","printing","http://octoprint","key"))
     c.execute("""INSERT INTO print_jobs
       (id,printer_id,status,estimated_filament_g,octoprint_file)
       VALUES(?,?,?,?,?)""",(job,pid,"printing",20,"expected.gcode"))
@@ -63,5 +63,39 @@ class PrinterAutomationTests(unittest.TestCase):
    self.assertIsNotNone(note)
    self.assertEqual(note["severity"],"high")
    self.assertIn("different file",note["body"].lower())
+
+ def test_octoprint_active_without_matching_fabos_job_creates_alert(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db);m=ManufacturingService(db)
+   prod=ProductionService(db);svc=PrinterAutomationService(db,prod,m)
+   pid=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("""INSERT INTO printers
+      (id,name,status,octoprint_url,api_key_ref)
+      VALUES(?,?,?,?,?)""",(pid,"Orphan Test","idle","http://octoprint","key"))
+    c.commit()
+
+   class FakeManufacturing:
+    def octo(self,base,key,path,method="GET",body=None):
+     if path=="/api/connection":
+      return {"current":{"state":"Operational"}}
+     if path=="/api/printer?history=true&limit=2":
+      import time
+      return {"temperature":{"tool0":{"actual":200},"bed":{"actual":60},
+                              "history":[{"time":time.time(),"tool0":{"actual":200}}]}}
+     raise AssertionError(path)
+    def octo_job(self,base,key):
+     return {"state":"Printing","job":{"file":{"name":"external.gcode"}},
+             "progress":{"completion":25,"printTime":120,"printTimeLeft":360}}
+
+   svc.m=FakeManufacturing()
+   svc.sync_octoprint(pid)
+   with db.connect() as c:
+    note=c.execute("SELECT severity,title,body FROM notifications WHERE dedupe_key=?",
+                   ("event:octoprint:active-mismatch:"+pid,)).fetchone()
+   self.assertIsNotNone(note)
+   self.assertEqual(note["severity"],"high")
+   self.assertIn("no matching active job",note["body"].lower())
+
 
 if __name__=="__main__":unittest.main()
