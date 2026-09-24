@@ -293,16 +293,8 @@ class CustomerCommerceService:
                         ),
                     )
                 conn.commit()
-            row, saved_items = self._order_for_customer(user_id, order_id)
-            return row, saved_items, subtotal_cents, shipping_cents, tax_cents, total_cents
-        except Exception:
-            # The quote is created before the order transaction so it can carry
-            # the resolved price snapshot. If order creation fails, remove the
-            # approved quote rather than leaving an orphaned commerce record.
-            with self.database.connect() as cleanup:
-                cleanup.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
-                cleanup.commit()
-            raise
+        row, saved_items = self._order_for_customer(user_id, order_id)
+        return row, saved_items, subtotal_cents, shipping_cents, tax_cents, total_cents
 
     def _order_for_customer(self, user_id, order_id):
         customer = self._customer(user_id)
