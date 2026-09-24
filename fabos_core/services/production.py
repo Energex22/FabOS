@@ -348,10 +348,17 @@ class ProductionService:
             args = list(values.values()) + [job_id]
             conn.execute("UPDATE print_jobs SET %s WHERE id=?" % setters, args)
             if row["printer_id"]:
-                # Derive printer state from remaining active jobs rather than blindly
-                # setting it idle when one job finishes/fails/cancels. This prevents
-                # a stale/legacy duplicate job from being hidden by a later completion.
-                active_printing = conn.execute(
+                # Preserve a known offline/error printer state when a job is closed;
+                # finishing the job must not make an unreachable printer appear idle.
+                printer = conn.execute("SELECT status FROM printers WHERE id=?", (row["printer_id"],)).fetchone()
+                current_printer_state = str(printer["status"] or "").strip().lower() if printer else ""
+                if status in ("completed", "failed", "cancelled") and current_printer_state in ("offline", "error"):
+                    printer_state = current_printer_state
+                else:
+                    # Derive printer state from remaining active jobs rather than blindly
+                    # setting it idle when one job finishes/fails/cancels. This prevents
+                    # a stale/legacy duplicate job from being hidden by a later completion.
+                    active_printing = conn.execute(
                     """SELECT 1 FROM print_jobs
                        WHERE printer_id=? AND id<>? AND status IN ('printing','paused')
                        LIMIT 1""",
@@ -366,7 +373,7 @@ class ProductionService:
                     ).fetchone() else "paused"
                 else:
                     printer_state = "printing" if status == "printing" else "idle"
-                conn.execute("UPDATE printers SET status=? WHERE id=?", (printer_state, row["printer_id"]))
+                    conn.execute("UPDATE printers SET status=? WHERE id=?", (printer_state, row["printer_id"]))
             if status == "completed" and row["order_id"]:
                 remaining = conn.execute(
                     "SELECT COUNT(*) FROM print_jobs WHERE order_id=? AND status NOT IN ('completed','cancelled')",
