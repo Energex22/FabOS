@@ -183,7 +183,7 @@ class FabOSAPI:
 
             if len(route) == 4 and route[:3] == ["api", self.VERSION, "catalog"] and method == "GET":
                 product = self.core.products.get(route[3])
-                if product is None:
+                if product is None or not self.core.products.is_customer_eligible(route[3]):
                     raise KeyError("Product not found")
                 return self._response(200, {
                     "product": self._public_product(product),
