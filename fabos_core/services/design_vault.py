@@ -36,18 +36,25 @@ class DesignVaultService:
   kind={'.stl':'STL','.3mf':'3MF','.step':'STEP','.stp':'STEP','.gcode':'GCODE','.gco':'GCODE','.gc':'GCODE','.png':'IMAGE','.jpg':'IMAGE','.jpeg':'IMAGE'}.get(src.suffix.lower(),'OTHER')
   safe=re.sub(r'[^A-Za-z0-9._-]+','_',d['name'])[:70];folder=self.root/safe/('v%03d'%d['current_version'])/kind;folder.mkdir(parents=True,exist_ok=True);target=folder/src.name
   if target.exists():target=folder/(src.stem+'_'+sha[:8]+src.suffix)
-  shutil.copy2(str(src),str(target));meta=self.stl_meta(target) if kind=='STL' else (None,None,None,None,[])
-  aid=str(uuid.uuid4())
-  with self.db.connect() as c:
-   if make_primary and kind in ('STL','3MF','STEP'):
-    c.execute('UPDATE design_assets SET is_primary=0 WHERE design_id=?',(did,))
-   c.execute('INSERT INTO design_assets(id,design_id,version_id,kind,original_name,stored_path,sha256,bytes,width_mm,depth_mm,height_mm,triangle_count,is_primary) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    (aid,did,v['id'],kind,src.name,str(target),sha,target.stat().st_size,meta[0],meta[1],meta[2],meta[3],
-     1 if make_primary and kind in ('STL','3MF','STEP') else 0))
-   if kind in ('STL','3MF','STEP'):
-    primary=c.execute('SELECT id FROM design_assets WHERE design_id=? AND is_primary=1',(did,)).fetchone()
-    if not primary:c.execute('UPDATE design_assets SET is_primary=1 WHERE id=?',(aid,))
-   c.commit()
+  try:
+   shutil.copy2(str(src),str(target))
+   meta=self.stl_meta(target) if kind=='STL' else (None,None,None,None,[])
+   aid=str(uuid.uuid4())
+   with self.db.connect() as c:
+    if make_primary and kind in ('STL','3MF','STEP'):
+     c.execute('UPDATE design_assets SET is_primary=0 WHERE design_id=?',(did,))
+    c.execute('INSERT INTO design_assets(id,design_id,version_id,kind,original_name,stored_path,sha256,bytes,width_mm,depth_mm,height_mm,triangle_count,is_primary) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+     (aid,did,v['id'],kind,src.name,str(target),sha,target.stat().st_size,meta[0],meta[1],meta[2],meta[3],
+      1 if make_primary and kind in ('STL','3MF','STEP') else 0))
+    if kind in ('STL','3MF','STEP'):
+     primary=c.execute('SELECT id FROM design_assets WHERE design_id=? AND is_primary=1',(did,)).fetchone()
+     if not primary:c.execute('UPDATE design_assets SET is_primary=1 WHERE design_id=?',(aid,))
+    c.commit()
+  except Exception:
+   try:
+    if target.exists():target.unlink()
+   except OSError:pass
+   raise
   return True
  @staticmethod
  def stl_meta(path):
