@@ -98,4 +98,43 @@ class PrinterAutomationTests(unittest.TestCase):
    self.assertIn("no matching active job",note["body"].lower())
 
 
+ def test_octoprint_does_not_reconcile_terminal_job_as_active(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db);m=ManufacturingService(db)
+   prod=ProductionService(db);svc=PrinterAutomationService(db,prod,m)
+   pid=str(uuid.uuid4());terminal_job=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("""INSERT INTO printers
+      (id,name,status,octoprint_url,api_key_ref)
+      VALUES(?,?,?,?,?)""",(pid,"Terminal Match Test","idle","http://octoprint","key"))
+    c.execute("""INSERT INTO print_jobs
+      (id,printer_id,status,octoprint_file,gcode_path,estimated_minutes,estimated_filament_g)
+      VALUES(?,?,?,?,?,?,?)""",
+      (terminal_job,pid,"completed","same.gcode","same.gcode",10,5))
+    c.commit()
+
+   class FakeManufacturing:
+    def octo(self,base,key,path,method="GET",body=None):
+     if path=="/api/connection":
+      return {"current":{"state":"Operational"}}
+     if path=="/api/printer?history=true&limit=2":
+      import time
+      return {"temperature":{"tool0":{"actual":200},"bed":{"actual":60},
+                              "history":[{"time":time.time(),"tool0":{"actual":200}}]}}
+     raise AssertionError(path)
+    def octo_job(self,base,key):
+     return {"state":"Printing","job":{"file":{"name":"same.gcode"}},
+             "progress":{"completion":25,"printTime":120,"printTimeLeft":360}}
+
+   svc.m=FakeManufacturing()
+   svc.sync_octoprint(pid)
+   with db.connect() as c:
+    note=c.execute("SELECT severity,body FROM notifications WHERE dedupe_key=?",
+                   ("event:octoprint:active-mismatch:"+pid,)).fetchone()
+    job=c.execute("SELECT status FROM print_jobs WHERE id=?",(terminal_job,)).fetchone()
+   self.assertIsNotNone(note)
+   self.assertEqual(note["severity"],"high")
+   self.assertEqual(job["status"],"completed")
+
+
 if __name__=="__main__":unittest.main()
