@@ -258,8 +258,11 @@ class ProductionAutomationTests(unittest.TestCase):
 
 
     def test_reprint_requeues_without_stale_resources(self):
+        import os
+        previous_disable = os.environ.get("FABOS_DISABLE_AUTOMATION")
+        os.environ["FABOS_DISABLE_AUTOMATION"] = "1"
+        self.addCleanup(lambda: os.environ.pop("FABOS_DISABLE_AUTOMATION", None) if previous_disable is None else os.environ.__setitem__("FABOS_DISABLE_AUTOMATION", previous_disable))
         app = FabOSApplication()
-        app.production_automation.stop_worker()
         job_id = str(uuid.uuid4())
         printer_id = str(uuid.uuid4())
         spool_id = str(uuid.uuid4())
