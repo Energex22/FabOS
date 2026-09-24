@@ -24,9 +24,10 @@ class _Auth:
 
 
 class _Core:
-    security = _Security()
-    auth = _Auth()
-    error_log = type("Log", (), {"error": lambda self, *args: None})()
+    def __init__(self):
+        self.security = _Security()
+        self.auth = _Auth()
+        self.error_log = type("Log", (), {"error": lambda self, *args: None})()
 
 
 class Pass23APIServerTests(unittest.TestCase):
