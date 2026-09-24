@@ -170,10 +170,10 @@ class FulfillmentService:
             inv = c.execute("""SELECT id,subtotal_cents,tax_cents,discount_cents,paid_cents,status
               FROM invoices WHERE order_id=? AND status<>'void' ORDER BY created_at DESC LIMIT 1""", (order_id,)).fetchone()
             if inv:
-                active_payment = c.execute(
-                    "SELECT 1 FROM payment_transactions WHERE invoice_id=? AND status IN ('created','pending','authorized','paid','partially_refunded') LIMIT 1",
-                    (inv["id"],),
-                ).fetchone()
+                payment_table = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payment_transactions'").fetchone()
+                active_payment = None
+                if payment_table:
+                    active_payment = c.execute("SELECT 1 FROM payment_transactions WHERE invoice_id=? AND status IN ('created','pending','authorized','paid','partially_refunded') LIMIT 1", (inv["id"],)).fetchone()
                 previous_shipping = int(c.execute("SELECT shipping_cents FROM invoices WHERE id=?", (inv["id"],)).fetchone()["shipping_cents"] or 0)
                 if active_payment and int(shipping_cost_cents) != previous_shipping:
                     raise ValueError("Fulfillment shipping cost cannot change while a payment attempt is active.")
