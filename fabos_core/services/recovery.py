@@ -1,6 +1,6 @@
 from pathlib import Path
 from datetime import datetime
-import json,os
+import json,os,atexit
 
 class RecoveryService:
     def __init__(self,app):
@@ -8,6 +8,7 @@ class RecoveryService:
         self.marker=Path(app.settings.data_dir)/"runtime_session.json"
         self.previous_unclean=self.marker.exists()
         self.start_session()
+        atexit.register(self.clean_shutdown)
 
     def start_session(self):
         self.marker.write_text(json.dumps({"pid":os.getpid(),"started_at":datetime.now().isoformat()}),encoding="utf-8")
