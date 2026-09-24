@@ -694,10 +694,9 @@ class ProductionAutomationTests(unittest.TestCase):
             self.assertEqual(printer["status"], "offline")
         finally:
             with app.database.connect() as conn:
-                conn.execute(
-                    "DELETE FROM inventory_transactions WHERE reference_id=?",
-                    (job_id,),
-                )
+                conn.execute("DELETE FROM inventory_transactions WHERE reference_id=?", (job_id,))
+                conn.execute("DELETE FROM manufacturing_observations WHERE print_job_id=?", (job_id,))
+                conn.execute("DELETE FROM qc_inspections WHERE print_job_id=?", (job_id,))
                 conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
                 conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
                 conn.commit()
