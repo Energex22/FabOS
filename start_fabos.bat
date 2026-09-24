@@ -2,6 +2,10 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+rem Prefer the repository virtual environment for consistent dependencies.
+set "FABOS_PYTHON=python"
+if exist "%CD%\.venv\Scripts\python.exe" set "FABOS_PYTHON=%CD%\.venv\Scripts\python.exe"
+
 :menu
 cls
 echo ============================================
@@ -106,7 +110,7 @@ if errorlevel 1 (
     pause
     goto :menu
 )
-python -m fabos_core.cli serve
+"%FABOS_PYTHON%" -m fabos_core.cli serve
 echo.
 echo FabOS API server stopped.
 pause
@@ -124,7 +128,7 @@ if errorlevel 1 (
     pause
     goto :menu
 )
-python -m unittest discover -s tests -v
+"%FABOS_PYTHON%" -m unittest discover -s tests -v
 echo.
 echo Test suite finished with exit code %ERRORLEVEL%.
 pause
@@ -161,7 +165,7 @@ if errorlevel 1 (
     pause
     goto :menu
 )
-python -m pip install "Pillow==9.5.0"
+"%FABOS_PYTHON%" -m pip install "Pillow==9.5.0"
 echo.
 if errorlevel 1 (
     echo ERROR: Pillow installation failed.
