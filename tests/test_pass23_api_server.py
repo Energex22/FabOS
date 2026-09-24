@@ -33,7 +33,7 @@ class _Core:
 class Pass23APIServerTests(unittest.TestCase):
     def test_request_client_key_prefers_forwarded_client(self):
         from fabos_core.services.rate_limit import request_client_key
-        request = TestClient(create_app(_Core())).build_request(
+        request = TestClient(__import__("fabos_core.api", fromlist=["create_app"]).create_app(_Core())).build_request(
             "GET", "/api/v1/health", headers={"X-Forwarded-For": "203.0.113.42, 10.0.0.1"}
         )
         self.assertEqual(request_client_key(request), "203.0.113.42")
