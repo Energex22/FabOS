@@ -280,9 +280,12 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
 
     @app.post("/api/v1/auth/login")
     def login(payload: LoginRequest, request: Request, application: FabOSApplication = Depends(get_application)):
-        client = request.client.host if request.client else "unknown"
-        if not app.state.auth_rate_limiter.allow("login:" + client):
-            raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.", headers={"Retry-After": str(app.state.auth_rate_limiter.retry_after("login:" + client))})
+        client = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip() or (request.client.host if request.client else "unknown")
+        identifier_key = payload.identifier.strip().lower()
+        limiter_keys = ("login-ip:" + client, "login-id:" + identifier_key)
+        blocked = next((key for key in limiter_keys if not app.state.auth_rate_limiter.allow(key)), None)
+        if blocked:
+            raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.", headers={"Retry-After": str(app.state.auth_rate_limiter.retry_after(blocked))})
         result = application.auth.login(payload.identifier, payload.password)
         if not result:
             raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -291,13 +294,15 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
 
     @app.post("/api/v1/auth/team-login")
     def team_login(payload: LoginRequest, request: Request, application: FabOSApplication = Depends(get_application)):
-        client = request.client.host if request.client else "unknown"
-        limiter_key = "team-login:" + client
-        if not app.state.team_auth_rate_limiter.allow(limiter_key):
+        client = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip() or (request.client.host if request.client else "unknown")
+        identifier_key = payload.identifier.strip().lower()
+        limiter_keys = ("team-login-ip:" + client, "team-login-id:" + identifier_key)
+        blocked = next((key for key in limiter_keys if not app.state.team_auth_rate_limiter.allow(key)), None)
+        if blocked:
             raise HTTPException(
                 status_code=429,
                 detail="Too many team login attempts. Try again later.",
-                headers={"Retry-After": str(app.state.team_auth_rate_limiter.retry_after(limiter_key))},
+                headers={"Retry-After": str(app.state.team_auth_rate_limiter.retry_after(blocked))},
             )
         result = application.auth.login(payload.identifier, payload.password)
         if not result:
