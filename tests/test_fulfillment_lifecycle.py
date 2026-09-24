@@ -64,6 +64,7 @@ class FulfillmentLifecycleTests(unittest.TestCase):
             with db.connect() as c:
                 c.execute("INSERT INTO orders(id,order_number,status,total_cents,tax_cents,shipping_cents) VALUES(?,?,?,?,?,?)", (oid, "O-PAY", "pending", 1100, 0, 100))
                 c.execute("INSERT INTO invoices(id,invoice_number,order_id,status,total_cents,paid_cents,due_at,subtotal_cents,tax_cents,shipping_cents,discount_cents) VALUES(?,?,?,?,?,?,?,?,?,?,?)", (iid, "INV-TEST", oid, "open", 1100, 0, "2099-01-01", 1000, 0, 100, 0))
+                c.execute("CREATE TABLE payment_transactions(id TEXT PRIMARY KEY, invoice_id TEXT, order_id TEXT, provider TEXT, status TEXT, amount_cents INTEGER)")
                 c.execute("INSERT INTO payment_transactions(id,invoice_id,order_id,provider,status,amount_cents) VALUES(?,?,?,?,?,?)", (str(uuid.uuid4()), iid, oid, "stripe", "pending", 1100))
                 c.commit()
             service = FulfillmentService(db)
