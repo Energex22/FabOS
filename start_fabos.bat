@@ -120,13 +120,14 @@ echo ============================================
 echo       FabOS Beta Readiness Self-Test
 echo ============================================
 echo.
-where python >nul 2>nul
-if errorlevel 1 (
+if /I "%FABOS_PYTHON%"=="python" where python >nul 2>nul
+if /I "%FABOS_PYTHON%"=="python" if errorlevel 1 (
     echo ERROR: Python was not found on PATH.
+    echo Install Python 3.11 and run this launcher again.
     pause
     goto :menu
 )
-python tools\beta_self_test.py
+"%FABOS_PYTHON%" tools\beta_self_test.py
 echo.
 echo Self-test finished with exit code %ERRORLEVEL%.
 pause

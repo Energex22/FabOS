@@ -23,7 +23,7 @@ a directory outside the Git checkout.
 
 Run the test suite with:
 
-    python -m pytest
+    python -m unittest discover -s tests -p 'test*.py' -v
 
 ## Two API entry points
 
