@@ -67,8 +67,6 @@ class OwnerBootstrapTests(unittest.TestCase):
         self.assertTrue(self.auth.login("owner", "owner-password"))
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class OwnerSetupCommandTests(unittest.TestCase):
@@ -78,7 +76,7 @@ class OwnerSetupCommandTests(unittest.TestCase):
         from unittest.mock import patch
         from fabos_core.cli import main
 
-        app = FabOSApplication()
+        app = self.app
         try:
             with patch.object(builtins, "input", return_value="fabvex-admin"), patch.object(
                 getpass, "getpass", side_effect=["a-strong-owner-password", "a-strong-owner-password"]
@@ -89,5 +87,7 @@ class OwnerSetupCommandTests(unittest.TestCase):
             self.assertIsNone(app.auth.accounts.get_by_username("owner"))
             self.assertIsNotNone(app.auth.login("fabvex-admin", "a-strong-owner-password"))
             self.assertIsNone(app.auth.login("fabvex-admin", "owner-password"))
-        finally:
-            app.database.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
