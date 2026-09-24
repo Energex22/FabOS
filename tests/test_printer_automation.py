@@ -35,8 +35,8 @@ class PrinterAutomationTests(unittest.TestCase):
    pid=str(uuid.uuid4());job=str(uuid.uuid4())
    with db.connect() as c:
     c.execute("""INSERT INTO printers
-      (id,name,status,connection_mode,octoprint_url,api_key_ref)
-      VALUES(?,?,?,?,?,?)""",(pid,"Mismatch Test","printing","octoprint","http://octoprint","key"))
+      (id,name,status,octoprint_url,api_key_ref)
+      VALUES(?,?,?,?,?,?)""",(pid,"Mismatch Test","printing","http://octoprint","key"))
     c.execute("""INSERT INTO print_jobs
       (id,printer_id,status,estimated_filament_g,octoprint_file)
       VALUES(?,?,?,?,?)""",(job,pid,"printing",20,"expected.gcode"))
@@ -72,7 +72,7 @@ class PrinterAutomationTests(unittest.TestCase):
    with db.connect() as c:
     c.execute("""INSERT INTO printers
       (id,name,status,connection_mode,octoprint_url,api_key_ref)
-      VALUES(?,?,?,?,?,?)""",(pid,"Orphan Test","idle","octoprint","http://octoprint","key"))
+      VALUES(?,?,?,?,?,?)""",(pid,"Orphan Test","idle","http://octoprint","key"))
     c.commit()
 
    class FakeManufacturing:
