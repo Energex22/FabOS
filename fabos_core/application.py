@@ -60,14 +60,43 @@ class FabOSApplication:
 
 
     def _ensure_owner_account(self):
-        """Create the documented owner account only on a truly fresh install."""
+        """Ensure a designated owner exists without changing an existing password."""
         with self.database.connect() as connection:
-            if connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]:
+            owner = connection.execute(
+                "SELECT id FROM users WHERE lower(COALESCE(role,''))='owner' "
+                "AND lower(COALESCE(account_type,''))='administrator' AND active=1 LIMIT 1"
+            ).fetchone()
+            if owner:
                 return
-        password_hash = self.auth.hash_password("owner-password")
-        with self.database.connect() as connection:
+
+            admins = connection.execute(
+                "SELECT id FROM users WHERE lower(COALESCE(account_type,''))='administrator' "
+                "AND active=1 ORDER BY created_at, id"
+            ).fetchall()
+            if len(admins) == 1:
+                # Legacy databases created before the owner-only console existed
+                # commonly have one active administrator but no owner role. Promote
+                # that sole administrator without touching credentials.
+                connection.execute(
+                    "UPDATE users SET role='owner',account_type='administrator',updated_at=CURRENT_TIMESTAMP "
+                    "WHERE id=?",
+                    (admins[0]["id"],),
+                )
+                connection.commit()
+                return
+
+            if admins:
+                # Do not guess which administrator should become the owner when
+                # multiple active administrators exist. The console remains locked
+                # until an explicit owner is configured.
+                return
+
+            # Truly fresh installs have no users. The bootstrap credential is only
+            # created here and must be changed before production use.
+            password_hash = self.auth.hash_password("owner-password")
             connection.execute(
-                "INSERT INTO users(id,username,password_hash,role,active,account_type) VALUES(?,?,?,?,?,?)",
+                "INSERT INTO users(id,username,password_hash,role,active,account_type) "
+                "VALUES(?,?,?,?,?,?)",
                 ("owner", "owner", password_hash, "owner", 1, "administrator"),
             )
             connection.commit()
