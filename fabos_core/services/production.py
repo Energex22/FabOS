@@ -1,3 +1,4 @@
+import math
 import uuid
 from datetime import datetime
 
@@ -179,14 +180,64 @@ class ProductionService:
             )
             conn.commit()
 
+    @staticmethod
+    def _job_dimensions(job):
+        raw = job["slicer_metadata_json"] if "slicer_metadata_json" in job.keys() else None
+        if not raw:
+            return None
+        try:
+            import json
+            data = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            return None
+        if not isinstance(data, dict):
+            return None
+        candidates = data.get("dimensions") or data.get("size") or data.get("bounds")
+        if not isinstance(candidates, dict):
+            return None
+        values = []
+        for key in ("x", "y", "z"):
+            value = candidates.get(key, candidates.get(key.upper()))
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(value) or value <= 0:
+                return None
+            values.append(value)
+        return tuple(values)
+
+    @classmethod
+    def _printer_supports_job(cls, printer, job):
+        dimensions = cls._job_dimensions(job)
+        if not dimensions:
+            return True
+        limits = []
+        for key in ("build_x_mm", "build_y_mm", "build_z_mm"):
+            try:
+                value = float(printer[key])
+            except (TypeError, ValueError):
+                return True
+            if value <= 0:
+                return True
+            limits.append(value)
+        x, y, z = dimensions
+        return ((x <= limits[0] and y <= limits[1] and z <= limits[2]) or
+                (y <= limits[0] and x <= limits[1] and z <= limits[2]))
+
     def assign(self, job_id, printer_id=None, spool_id=None):
         with self.database.connect() as conn:
             job = conn.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone()
             if not job:
                 raise KeyError("Print job not found.")
             if printer_id:
-                if not conn.execute("SELECT id FROM printers WHERE id=?", (printer_id,)).fetchone():
+                printer = conn.execute("SELECT * FROM printers WHERE id=?", (printer_id,)).fetchone()
+                if not printer:
                     raise KeyError("Printer not found.")
+                if str(printer["status"] or "").lower() in ("offline", "error"):
+                    raise ValueError("Printer is offline or in error state.")
+                if not self._printer_supports_job(printer, job):
+                    raise ValueError("Printer build volume is too small for this print.")
                 occupied = conn.execute(
                     """SELECT 1 FROM print_jobs
                        WHERE printer_id=? AND id<>?
@@ -198,12 +249,35 @@ class ProductionService:
                     raise ValueError("Printer already has an assigned active production job.")
             if spool_id:
                 spool = conn.execute(
-                    "SELECT remaining_g FROM filament_spools WHERE id=? AND active=1",
+                    "SELECT * FROM filament_spools WHERE id=? AND active=1",
                     (spool_id,),
                 ).fetchone()
                 if not spool:
                     raise KeyError("Filament spool not found or inactive.")
                 needed = float(job["estimated_filament_g"] or 0)
+                requested_material = None
+                if job["order_id"]:
+                    if job["product_id"]:
+                        requested_material = conn.execute(
+                            """SELECT qi.material
+                               FROM quote_items qi JOIN orders o ON o.quote_id=qi.quote_id
+                               WHERE o.id=? AND qi.product_id=?
+                                 AND (qi.variant_id=? OR (qi.variant_id IS NULL AND ? IS NULL))
+                               ORDER BY qi.rowid LIMIT 1""",
+                            (job["order_id"], job["product_id"], job["variant_id"], job["variant_id"]),
+                        ).fetchone()
+                    else:
+                        requested_material = conn.execute(
+                            """SELECT qi.material
+                               FROM quote_items qi JOIN orders o ON o.quote_id=qi.quote_id
+                               WHERE o.id=? AND qi.product_id IS NULL
+                                 AND (qi.variant_id=? OR (qi.variant_id IS NULL AND ? IS NULL))
+                               ORDER BY qi.rowid LIMIT 1""",
+                            (job["order_id"], job["variant_id"], job["variant_id"]),
+                        ).fetchone()
+                if requested_material and str(requested_material["material"] or "").strip():
+                    if str(spool["material"] or "").strip().lower() != str(requested_material["material"]).strip().lower():
+                        raise ValueError("Filament spool material does not match the order requirement.")
                 committed = conn.execute(
                     """SELECT COALESCE(SUM(COALESCE(estimated_filament_g,0)),0)
                        FROM print_jobs
