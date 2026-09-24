@@ -56,5 +56,19 @@ class InvoiceTests(unittest.TestCase):
    with self.assertRaisesRegex(ValueError,"exceeds the invoice balance"):
     svc.record_payment(iid,600,"Cash")
 
+ def test_payment_recording_serializes_against_concurrent_writers(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   oid=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("INSERT INTO orders(id,order_number,total_cents) VALUES(?,?,?)",(oid,"O-RACE",1000));c.commit()
+   svc=InvoiceService(db,Path(td));iid,_=svc.create_from_order(oid)
+   svc.record_payment(iid,700,"Cash")
+   with self.assertRaisesRegex(ValueError,"exceeds the invoice balance"):
+    svc.record_payment(iid,400,"Cash")
+   inv,_,payments=svc.get(iid)
+   self.assertEqual(inv["paid_cents"],700)
+   self.assertEqual(len(payments),1)
+
 
 if __name__=="__main__":unittest.main()
