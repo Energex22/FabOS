@@ -671,5 +671,33 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.commit()
 
 
+    def test_closing_job_does_not_hide_offline_printer(self):
+        app = FabOSApplication()
+        job_id = "offline-printer-close-test-job"
+        printer_id = "offline-printer-close-test"
+        try:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
+                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.execute(
+                    "INSERT INTO printers(id,name,status) VALUES(?,?,?)",
+                    (printer_id, "Offline Close Test", "offline"),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,printer_id,status,estimated_filament_g) VALUES(?,?,?,?)",
+                    (job_id, printer_id, "printing", 10),
+                )
+                conn.commit()
+            app.production.set_status(job_id, "failed")
+            with app.database.connect() as conn:
+                printer = conn.execute("SELECT status FROM printers WHERE id=?", (printer_id,)).fetchone()
+            self.assertEqual(printer["status"], "offline")
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
+                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.commit()
+
+
 if __name__ == "__main__":
     unittest.main()
