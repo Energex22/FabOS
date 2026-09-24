@@ -86,11 +86,13 @@ class ProductionAutomationService:
                                 AND j.status IN ('queued','scheduled','printing','paused')
                           ),0) committed_g
                    FROM filament_spools fs
-                   WHERE fs.active=1 AND fs.remaining_g>=?
+                   WHERE fs.active=1
+                     AND fs.remaining_g>=?
+                     AND (?='' OR lower(COALESCE(fs.material,''))=?)
                    ORDER BY CASE WHEN lower(COALESCE(fs.material,''))=? THEN 0 ELSE 1 END,
                             CASE WHEN lower(COALESCE(fs.color,''))=? THEN 0 ELSE 1 END,
                             fs.remaining_g ASC, fs.created_at ASC""",
-                (needed, material, color),
+                (needed, material, material, material, color),
             ).fetchall()
         rows = [
             r for r in rows
