@@ -152,6 +152,8 @@ class FulfillmentService:
         if shipping_cost_cents is None:
             shipping_cost_cents = int(current["shipping_cost_cents"] or 0) if current else 0
         if self.STATUS_ORDER.get(status, 0) < self.STATUS_ORDER.get(current_status, 0):
+            if current_status in self.TERMINAL_STATUSES:
+                raise ValueError("Cannot move a completed fulfillment back to an earlier status")
             raise ValueError("Cannot move fulfillment back to an earlier status")
         if current and current["method"] != method and current_status != "pending":
             raise ValueError("Cannot change fulfillment method after fulfillment has started")
