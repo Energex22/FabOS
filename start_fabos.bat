@@ -15,15 +15,31 @@ echo  3. Start Built EXE (debug window)
 echo  4. Run Test Suite
 echo  5. Run Beta Readiness Self-Test
 echo  6. Install Image Support (Pillow)
-echo  7. Exit
+echo  7. Set Up / Change Owner Account
+echo  8. Exit
 echo.
-choice /C 1234567 /N /M "Select an option: "
-if errorlevel 7 goto :done
+choice /C 12345678 /N /M "Select an option: "
+if errorlevel 8 goto :done
+if errorlevel 7 goto :owner
 if errorlevel 6 goto :image
 if errorlevel 5 goto :selftest
 if errorlevel 4 goto :tests
 if errorlevel 3 goto :debug
-if errorlevel 2 goto :server
+if errorlevel 2 goto :owner
+echo.
+echo ============================================
+echo           Owner Account Setup
+echo ============================================
+echo.
+echo This changes the default/bootstrap owner credential to a password you choose.
+echo The password is entered privately by the setup command and is never written here.
+echo.
+"%FABOS_PYTHON%" -m fabos_core.cli setup-owner
+if errorlevel 1 echo Owner setup did not complete successfully.
+pause
+goto :menu
+
+:server
 if errorlevel 1 goto :desktop
 goto :menu
 
