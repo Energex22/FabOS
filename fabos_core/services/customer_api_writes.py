@@ -208,6 +208,8 @@ def register_customer_write_routes(app, get_application, current_user):
             result = application.customer_commerce.register_customer(payload.name, payload.email, payload.password, payload.phone)
             summary = result["user"]
             return {"token": result["token"], "expires_at": result["expires_at"], "user": _public_user(summary["user"]), "customer": _public_customer(summary.get("customer"))}
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -229,6 +231,8 @@ def register_customer_write_routes(app, get_application, current_user):
             quote_id = _create_public_quote(application, customer_id, project)
             quote=application.quotes.get(quote_id)[0]
             return {"quote":_public_quote(quote),"request_number":str(quote["quote_number"]),"file":payload.file}
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -299,6 +303,14 @@ def register_customer_write_routes(app, get_application, current_user):
             application.design_vault.import_file(design_id,temp_path,make_primary=True)
         except HTTPException:
             raise
+        except PermissionError as exc:
+            if quote_id:
+                with application.database.connect() as conn:
+                    conn.execute("DELETE FROM quote_designs WHERE quote_id=?", (quote_id,))
+                    if design_id:
+                        conn.execute("DELETE FROM designs WHERE id=?", (design_id,))
+                    conn.commit()
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except Exception as exc:
             if quote_id:
                 with application.database.connect() as conn:
