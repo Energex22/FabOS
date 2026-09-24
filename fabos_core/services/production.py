@@ -231,6 +231,10 @@ class ProductionService:
 
     def assign(self, job_id, printer_id=None, spool_id=None):
         with self.database.connect() as conn:
+            # Serialize capability and capacity checks with the assignment update.
+            # Without a write lock, two workers can both observe the same idle
+            # printer/spool and assign it before either transaction commits.
+            conn.execute("BEGIN IMMEDIATE")
             job = conn.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone()
             if not job:
                 raise KeyError("Print job not found.")
