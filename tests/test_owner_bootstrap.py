@@ -80,7 +80,7 @@ class OwnerSetupCommandTests(unittest.TestCase):
         try:
             with patch.object(builtins, "input", return_value="fabvex-admin"), patch.object(
                 getpass, "getpass", side_effect=["a-strong-owner-password", "a-strong-owner-password"]
-            ), patch("sys.argv", ["fabos", "setup-owner"]):
+            ), patch("sys.argv", ["fabos", "setup-owner"]), patch("fabos_core.cli.FabOSApplication", return_value=app):
                 main()
             user = app.auth.accounts.get_by_username("fabvex-admin")
             self.assertIsNotNone(user)
