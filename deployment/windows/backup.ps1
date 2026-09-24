@@ -1,12 +1,32 @@
 param(
-    [int]$Keep = 14
+    [int]$Keep = 14,
+    [string]$PythonExe = ""
 )
 
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backupScript = Join-Path $scriptDir "backup.py"
 
-python $backupScript
+if (-not $PythonExe) {
+    $repoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+    $venvPython = Join-Path $repoRoot ".venv\Scripts\python.exe"
+    if (Test-Path -LiteralPath $venvPython) {
+        $PythonExe = $venvPython
+    } else {
+        $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+        if ($pythonCommand) {
+            $PythonExe = $pythonCommand.Source
+        } else {
+            throw "Python was not found. Provide -PythonExe or install Python on PATH."
+        }
+    }
+}
+
+if (-not (Test-Path -LiteralPath $PythonExe)) {
+    throw "Configured Python executable was not found: $PythonExe"
+}
+
+& $PythonExe $backupScript
 if ($LASTEXITCODE -ne 0) {
     throw "FabOS backup failed with exit code $LASTEXITCODE."
 }
