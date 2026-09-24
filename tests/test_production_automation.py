@@ -359,6 +359,51 @@ class ProductionAutomationTests(unittest.TestCase):
             with app.database.connect() as conn:
                 self._cleanup_print_job_fixture(conn, job_id, spool_id)
 
+    def test_physical_start_claims_job_before_hardware_command(self):
+        from unittest.mock import patch
+
+        app = FabOSApplication()
+        job_id = str(uuid.uuid4())
+        printer_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO printers(id,name,status,connection_mode) VALUES(?,?,?,?)",
+                    (printer_id, "Physical Claim Test", "idle", "octoprint"),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,status,printer_id,estimated_filament_g) VALUES(?,?,?,?)",
+                    (job_id, "scheduled", printer_id, 10),
+                )
+                conn.commit()
+                job = conn.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone()
+
+            events = []
+            def claim(job_id_arg, status):
+                events.append(("status", status))
+                app.production.set_status(job_id_arg, status)
+
+            def start(*args, **kwargs):
+                events.append(("hardware", None))
+                raise RuntimeError("printer start verification failed")
+
+            with patch.object(app.production, "job_print_readiness", return_value={"ready": True, "gcode": "test.gcode"}),                  patch.object(app.production, "set_status", side_effect=claim),                  patch.object(app.octoprint_print, "prepare_and_start", side_effect=start):
+                with self.assertRaises(RuntimeError):
+                    app.production_automation._start_job(job)
+
+            self.assertEqual(events, [("status", "printing"), ("hardware", None)])
+            with app.database.connect() as conn:
+                state = conn.execute("SELECT status FROM print_jobs WHERE id=?", (job_id,)).fetchone()[0]
+            self.assertEqual(state, "printing")
+        finally:
+            with app.database.connect() as conn:
+                self._cleanup_print_job_fixture(conn, job_id, None)
+                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.commit()
+            close = getattr(app, "close", None)
+            if callable(close):
+                close()
+
     def test_automation_settings_are_validated(self):
         app = FabOSApplication()
         try:
