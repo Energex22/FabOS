@@ -82,8 +82,11 @@ class PrinterAutomationService:
     (mapped,prog or 0,(temps.get('tool0') or {}).get('actual'),(temps.get('bed') or {}).get('actual'),
      datetime.now().isoformat(timespec='seconds'),current_file if responsive else None,print_time,time_left,display_state,pid))
    if current_file and responsive:
-    row=c.execute("""SELECT * FROM print_jobs WHERE printer_id=? AND
-      (octoprint_file=? OR gcode_path LIKE ?) ORDER BY created_at DESC LIMIT 1""",(pid,current_file,'%'+current_file)).fetchone()
+    row=c.execute("""SELECT * FROM print_jobs WHERE printer_id=?
+      AND status IN ('queued','scheduled','printing','paused')
+      AND (octoprint_file=? OR gcode_path LIKE ?)
+      ORDER BY CASE status WHEN 'printing' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END,
+               created_at DESC LIMIT 1""",(pid,current_file,'%'+current_file)).fetchone()
     if row:
      jstatus='printing' if state in ('Printing','Pausing') else ('paused' if state=='Paused' else row['status'])
      c.execute('UPDATE print_jobs SET status=?,octoprint_state=?,octoprint_file=? WHERE id=?',(jstatus,state,current_file,row['id']))
