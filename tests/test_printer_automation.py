@@ -36,7 +36,7 @@ class PrinterAutomationTests(unittest.TestCase):
    with db.connect() as c:
     c.execute("""INSERT INTO printers
       (id,name,status,octoprint_url,api_key_ref)
-      VALUES(?,?,?,?,?,?)""",(pid,"Mismatch Test","printing","http://octoprint","key"))
+      VALUES(?,?,?,?,?)""",(pid,"Mismatch Test","printing","http://octoprint","key"))
     c.execute("""INSERT INTO print_jobs
       (id,printer_id,status,estimated_filament_g,octoprint_file)
       VALUES(?,?,?,?,?)""",(job,pid,"printing",20,"expected.gcode"))
@@ -66,7 +66,7 @@ class PrinterAutomationTests(unittest.TestCase):
 
  def test_octoprint_active_without_matching_fabos_job_creates_alert(self):
   with tempfile.TemporaryDirectory() as td:
-   db=Database(Path(td)/"x.sqlite3");db.initialize();m=ManufacturingService(db)
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db);m=ManufacturingService(db)
    prod=ProductionService(db);svc=PrinterAutomationService(db,prod,m)
    pid=str(uuid.uuid4())
    with db.connect() as c:
