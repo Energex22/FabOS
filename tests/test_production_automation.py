@@ -671,5 +671,39 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.commit()
 
 
+    def test_filament_consumption_rejects_overdraw_without_mutation(self):
+        app = FabOSApplication()
+        spool_id = "overdraw-test-spool"
+        job_id = "overdraw-test-job"
+        try:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM inventory_transactions WHERE item_id=?", (spool_id,))
+                conn.execute("DELETE FROM filament_spools WHERE id=?", (spool_id,))
+                conn.execute(
+                    """INSERT INTO filament_spools
+                    (id,material,color,remaining_g,initial_g,cost_cents,active)
+                    VALUES(?,?,?,?,?,?,1)""",
+                    (spool_id, "TEST-PLA", "Green", 10, 100, 2000),
+                )
+                conn.commit()
+            with self.assertRaisesRegex(ValueError, "Insufficient filament"):
+                app.inventory_profit.record_consumption(spool_id, 11, job_id)
+            with app.database.connect() as conn:
+                spool = conn.execute(
+                    "SELECT remaining_g FROM filament_spools WHERE id=?", (spool_id,)
+                ).fetchone()
+                tx = conn.execute(
+                    "SELECT COUNT(*) FROM inventory_transactions WHERE item_id=? AND reference_id=?",
+                    (spool_id, job_id),
+                ).fetchone()[0]
+            self.assertEqual(float(spool["remaining_g"]), 10.0)
+            self.assertEqual(tx, 0)
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM inventory_transactions WHERE item_id=?", (spool_id,))
+                conn.execute("DELETE FROM filament_spools WHERE id=?", (spool_id,))
+                conn.commit()
+
+
 if __name__ == "__main__":
     unittest.main()
