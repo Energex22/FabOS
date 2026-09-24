@@ -383,9 +383,10 @@ class ProductionAutomationTests(unittest.TestCase):
                 job = conn.execute("SELECT * FROM print_jobs WHERE id=?", (job_id,)).fetchone()
 
             events = []
+            real_set_status = app.production.set_status
             def claim(job_id_arg, status):
                 events.append(("status", status))
-                app.production.set_status(job_id_arg, status)
+                real_set_status(job_id_arg, status)
 
             def start(*args, **kwargs):
                 events.append(("hardware", None))
