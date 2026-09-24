@@ -123,6 +123,38 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("DELETE FROM printers WHERE name IN ('Small','Large')")
                 conn.commit()
 
+    def test_manual_printer_assignment_rejects_build_volume_mismatch(self):
+        app = FabOSApplication()
+        job_id = "manual-dimension-test-job"
+        small_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "DELETE FROM print_jobs WHERE id=?",
+                    (job_id,),
+                )
+                conn.execute(
+                    """INSERT INTO printers
+                    (id,name,model,status,build_x_mm,build_y_mm,build_z_mm,total_hours)
+                    VALUES(?,?,?,?,?,?,?,?)""",
+                    (small_id, "Manual Small", "Test", "idle", 100, 100, 100, 0),
+                )
+                conn.execute(
+                    """INSERT INTO print_jobs
+                    (id,status,estimated_filament_g,slicer_metadata_json)
+                    VALUES(?,?,?,?)""",
+                    (job_id, "queued", 10,
+                     json.dumps({"dimensions": {"x": 150, "y": 80, "z": 50}})),
+                )
+                conn.commit()
+            with self.assertRaisesRegex(ValueError, "build volume"):
+                app.production.assign(job_id, small_id, None)
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
+                conn.execute("DELETE FROM printers WHERE id=?", (small_id,))
+                conn.commit()
+
     def test_printer_assignment_skips_unavailable_statuses(self):
         app = FabOSApplication()
         try:
