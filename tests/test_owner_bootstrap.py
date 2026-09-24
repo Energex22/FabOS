@@ -77,6 +77,7 @@ class OwnerSetupCommandTests(OwnerBootstrapTests):
         from fabos_core.cli import main
 
         app = self.app
+        app._ensure_owner_account()
         with patch.object(builtins, "input", return_value="fabvex-admin"), patch.object(
             getpass, "getpass", side_effect=["a-strong-owner-password", "a-strong-owner-password"]
         ), patch("sys.argv", ["fabos", "setup-owner"]), patch(
