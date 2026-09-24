@@ -110,10 +110,13 @@ class PrinterAutomationService:
      reason='OctoPrint is idle, but FabOS has an active print job without confirmed completion evidence.'
      if active_before['octoprint_file'] and current_file and not same_file_probe:
       reason='OctoPrint is idle with a different file than the active FabOS print job.'
-     self._upsert_notification = getattr(self, '_upsert_notification', None)
-     if self._upsert_notification:
-      self._upsert_notification('event:octoprint:mismatch:'+active_before['id'],'high',
-       'Printer/job state needs attention',reason,'Production',active_before['id'])
+     with self.db.connect() as nc:
+      nc.execute("""INSERT OR IGNORE INTO notifications
+       (id,dedupe_key,severity,title,body,page,entity_id,is_read)
+       VALUES(?,?,?,?,?,?,?,0)""",
+       (str(uuid.uuid4()),'event:octoprint:mismatch:'+active_before['id'],'high',
+        'Printer/job state needs attention',reason,'Production',active_before['id']))
+      nc.commit()
     except Exception:pass
    try:completion=float(prog) if prog is not None else None
    except Exception:completion=None
