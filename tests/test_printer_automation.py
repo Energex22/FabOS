@@ -26,4 +26,42 @@ class PrinterAutomationTests(unittest.TestCase):
    self.assertEqual(j["filament_deducted"],1)
    self.assertAlmostEqual(s["remaining_g"],950)
 
+
+ def test_idle_octoprint_with_unconfirmed_active_job_creates_mismatch_alert(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   prod=ProductionService(db);m=ManufacturingService(db)
+   svc=PrinterAutomationService(db,prod,m)
+   pid=str(uuid.uuid4());job=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("""INSERT INTO printers
+      (id,name,status,connection_mode,octoprint_url,api_key_ref)
+      VALUES(?,?,?,?,?,?)""",(pid,"Mismatch Test","printing","octoprint","http://octoprint","key"))
+    c.execute("""INSERT INTO print_jobs
+      (id,printer_id,status,estimated_filament_g,octoprint_file)
+      VALUES(?,?,?,?,?)""",(job,pid,"printing",20,"expected.gcode"))
+    c.commit()
+
+   class FakeManufacturing:
+    def octo(self,base,key,path,method="GET",body=None):
+     if path=="/api/connection":
+      return {"current":{"state":"Operational"}}
+     if path=="/api/printer?history=true&limit=2":
+      import time
+      return {"temperature":{"tool0":{"actual":200},"bed":{"actual":60},
+                              "history":[{"time":time.time(),"tool0":{"actual":200}}]}}
+     raise AssertionError(path)
+    def octo_job(self,base,key):
+     return {"state":"Operational","job":{"file":{"name":"different.gcode"}},
+             "progress":{"completion":50,"printTime":60,"printTimeLeft":60}}
+
+   svc.m=FakeManufacturing()
+   svc.sync_octoprint(pid)
+   with db.connect() as c:
+    note=c.execute("SELECT severity,title,body FROM notifications WHERE dedupe_key=?",
+                   ("event:octoprint:mismatch:"+job,)).fetchone()
+   self.assertIsNotNone(note)
+   self.assertEqual(note["severity"],"high")
+   self.assertIn("different file",note["body"].lower())
+
 if __name__=="__main__":unittest.main()
