@@ -21,6 +21,8 @@ class ProductionAutomationService:
         self.db = app.database
         self._lock = threading.Lock()
         self._last = None
+        self._worker_thread = None
+        self._stop_event = threading.Event()
 
     def _setting_bool(self, key, default=False):
         value = str(self.app.shop_settings.get(key, "true" if default else "false") or "").strip().lower()
@@ -262,25 +264,41 @@ class ProductionAutomationService:
             return None
         if os.environ.get("FABOS_DISABLE_AUTOMATION", "").strip().lower() in ("1", "true", "yes"):
             return None
-        interval = int(float(self.app.shop_settings.get(
-            "production_automation_interval_seconds", self.DEFAULT_INTERVAL
-        ) or self.DEFAULT_INTERVAL))
-        interval = max(3, min(interval, 300))
+        with self._lock:
+            if self._worker_thread and self._worker_thread.is_alive():
+                return self._worker_thread
+            try:
+                interval = int(float(self.app.shop_settings.get(
+                    "production_automation_interval_seconds", self.DEFAULT_INTERVAL
+                ) or self.DEFAULT_INTERVAL))
+            except (TypeError, ValueError):
+                interval = self.DEFAULT_INTERVAL
+            interval = max(3, min(interval, 300))
+            self._stop_event.clear()
 
-        def worker():
-            while True:
-                try:
-                    self.tick()
-                except Exception as exc:
+            def worker():
+                while not self._stop_event.is_set():
                     try:
-                        self.app.error_log.error("Production automation worker failed", str(exc))
-                    except Exception:
-                        pass
-                time.sleep(interval)
+                        self.tick()
+                    except Exception as exc:
+                        try:
+                            self.app.error_log.error("Production automation worker failed", str(exc))
+                        except Exception:
+                            pass
+                    self._stop_event.wait(interval)
 
-        thread = threading.Thread(target=worker, name="FabOSProductionAutomation", daemon=True)
-        thread.start()
-        return thread
+            thread = threading.Thread(target=worker, name="FabOSProductionAutomation", daemon=True)
+            thread.start()
+            self._worker_thread = thread
+            return thread
+
+    def stop_worker(self, timeout=5):
+        self._stop_event.set()
+        thread = self._worker_thread
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=max(0, float(timeout)))
+        self._worker_thread = None
+        return True
 
     @property
     def last_run(self):
