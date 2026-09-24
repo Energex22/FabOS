@@ -64,6 +64,8 @@ def run(host=None, port=None):
         serve(application, host=host, port=port, threads=max(1, threads), ident="FabOS")
     except KeyboardInterrupt:
         pass
+    finally:
+        core.production_automation.stop_worker()
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@ import json
 import math
 import os
 import threading
-import time
 from datetime import datetime
 
 
@@ -21,6 +20,8 @@ class ProductionAutomationService:
         self.db = app.database
         self._lock = threading.Lock()
         self._last = None
+        self._worker_thread = None
+        self._stop_event = threading.Event()
 
     def _setting_bool(self, key, default=False):
         value = str(self.app.shop_settings.get(key, "true" if default else "false") or "").strip().lower()
@@ -99,8 +100,6 @@ class ProductionAutomationService:
         ]
         if not rows:
             return None
-        # Never silently assign a different material when the order explicitly
-        # requested one. Color is a preference because many products permit it.
         if material and str(rows[0]["material"] or "").strip().lower() != material:
             return None
         return rows[0]
@@ -257,30 +256,54 @@ class ProductionAutomationService:
         finally:
             self._lock.release()
 
+    def _worker_interval(self):
+        try:
+            interval = float(self.app.shop_settings.get(
+                "production_automation_interval_seconds", self.DEFAULT_INTERVAL
+            ) or self.DEFAULT_INTERVAL)
+        except (TypeError, ValueError):
+            interval = self.DEFAULT_INTERVAL
+        if not math.isfinite(interval):
+            interval = self.DEFAULT_INTERVAL
+        return max(3, min(int(interval), 300))
+
     def start_worker(self):
         if not self._setting_bool("production_automation_enabled", True):
             return None
         if os.environ.get("FABOS_DISABLE_AUTOMATION", "").strip().lower() in ("1", "true", "yes"):
             return None
-        interval = int(float(self.app.shop_settings.get(
-            "production_automation_interval_seconds", self.DEFAULT_INTERVAL
-        ) or self.DEFAULT_INTERVAL))
-        interval = max(3, min(interval, 300))
+        with self._lock:
+            if self._worker_thread is not None and self._worker_thread.is_alive():
+                return self._worker_thread
+            self._stop_event.clear()
+            interval = self._worker_interval()
 
-        def worker():
-            while True:
-                try:
-                    self.tick()
-                except Exception as exc:
+            def worker():
+                while not self._stop_event.is_set():
                     try:
-                        self.app.error_log.error("Production automation worker failed", str(exc))
-                    except Exception:
-                        pass
-                time.sleep(interval)
+                        self.tick()
+                    except Exception as exc:
+                        try:
+                            self.app.error_log.error("Production automation worker failed", str(exc))
+                        except Exception:
+                            pass
+                    self._stop_event.wait(interval)
 
-        thread = threading.Thread(target=worker, name="FabOSProductionAutomation", daemon=True)
-        thread.start()
-        return thread
+            thread = threading.Thread(target=worker, name="FabOSProductionAutomation", daemon=True)
+            self._worker_thread = thread
+            thread.start()
+            return thread
+
+    def stop_worker(self, timeout=5):
+        with self._lock:
+            thread = self._worker_thread
+            self._stop_event.set()
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(max(0, timeout))
+        with self._lock:
+            if self._worker_thread is thread and (thread is None or not thread.is_alive()):
+                self._worker_thread = None
+        return thread is not None and not thread.is_alive()
 
     @property
     def last_run(self):
