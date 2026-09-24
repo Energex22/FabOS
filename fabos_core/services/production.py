@@ -120,6 +120,10 @@ class ProductionService:
     def create_jobs_from_order(self, order_id):
         created = []
         with self.database.connect() as conn:
+            # Serialize job creation for this SQLite-backed installation so two
+            # automation/API callers cannot both observe the same missing copies
+            # and insert duplicates before either transaction commits.
+            conn.execute("BEGIN IMMEDIATE")
             order = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
             if not order:
                 raise KeyError("Order not found.")
