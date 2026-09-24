@@ -234,7 +234,7 @@ def register_customer_write_routes(app, get_application, current_user):
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/v1/quote-requests/upload")
     async def create_public_quote_request_with_file(
@@ -303,6 +303,14 @@ def register_customer_write_routes(app, get_application, current_user):
             application.design_vault.import_file(design_id,temp_path,make_primary=True)
         except HTTPException:
             raise
+        except PermissionError as exc:
+            if quote_id:
+                with application.database.connect() as conn:
+                    conn.execute("DELETE FROM quote_designs WHERE quote_id=?", (quote_id,))
+                    if design_id:
+                        conn.execute("DELETE FROM designs WHERE id=?", (design_id,))
+                    conn.commit()
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except Exception as exc:
             if quote_id:
                 with application.database.connect() as conn:
