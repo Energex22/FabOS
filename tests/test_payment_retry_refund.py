@@ -35,6 +35,12 @@ class _Database:
                 reference TEXT,
                 notes TEXT
             );
+            CREATE TABLE payment_webhook_events(
+                event_id TEXT PRIMARY KEY,
+                provider TEXT,
+                event_type TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
 
