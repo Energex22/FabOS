@@ -176,6 +176,28 @@ class Pass23APIServerTests(unittest.TestCase):
         b"".join(_application_with_cors(_Core())(environ, start_response))
         self.assertEqual(captured["status"], "403 Forbidden")
 
+    def test_wsgi_catalog_detail_requires_customer_eligibility(self):
+        from fabos_api.app import FabOSAPI
+
+        class Products:
+            def get(self, product_id):
+                return {"id": product_id, "name": "Hidden", "price_cents": 1000}
+
+            def is_customer_eligible(self, product_id):
+                return False
+
+            def images(self, product_id):
+                return []
+
+            def variants(self, product_id):
+                return []
+
+        core = _Core()
+        core.products = Products()
+        api = FabOSAPI(core)
+        response = api.request("GET", "/api/v1/catalog/hidden")
+        self.assertEqual(response["status"], 404)
+
     def test_wsgi_team_login_is_rate_limited(self):
         from fabos_api.app import FabOSAPI
         core = _Core()
