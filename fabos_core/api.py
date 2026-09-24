@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from fabos_core.services.rate_limit import RateLimiter, request_client_key, request_client_key
+from fabos_core.services.rate_limit import RateLimiter, request_client_key
 from pydantic import BaseModel, Field
 
 from fabos_core.application import FabOSApplication
