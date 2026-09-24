@@ -251,7 +251,7 @@ class OperationsHubService:
             # Every QC-passed order is ready for fulfillment. Create the pending
             # fulfillment record once so the next operational step is explicit,
             # while leaving the pickup/shipping choice editable by staff/customer.
-            c.execute("""INSERT INTO fulfillments(id,order_id,method,status)
+            c.execute("""INSERT OR IGNORE INTO fulfillments(id,order_id,method,status)
               SELECT lower(hex(randomblob(16))),o.id,'pickup','pending'
               FROM orders o
               WHERE o.status='ready'
