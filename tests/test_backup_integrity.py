@@ -61,3 +61,35 @@ class BackupIntegrityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+    def test_backup_verifier_accepts_integrity_checked_archive(self):
+        from deployment.windows.verify_backup import verify_backup
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "fabos-backup-test.zip"
+            db = root / "fabos.sqlite3"
+            conn = sqlite3.connect(db)
+            conn.execute("CREATE TABLE example (id INTEGER PRIMARY KEY, value TEXT)")
+            conn.execute("INSERT INTO example(value) VALUES ('ok')")
+            conn.commit()
+            conn.close()
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(db, "fabos.sqlite3")
+            ok, message = verify_backup(archive)
+            self.assertTrue(ok, message)
+
+    def test_backup_verifier_rejects_path_traversal(self):
+        from deployment.windows.verify_backup import verify_backup
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archive = root / "unsafe.zip"
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("fabos.sqlite3", b"not-a-database")
+                zf.writestr("../outside.txt", b"unsafe")
+            ok, message = verify_backup(archive)
+            self.assertFalse(ok)
+            self.assertIn("unsafe archive path", message)
+
