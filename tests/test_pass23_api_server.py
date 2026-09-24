@@ -140,6 +140,16 @@ class Pass23APIServerTests(unittest.TestCase):
         b"".join(_application_with_cors(_Core())(environ, start_response))
         self.assertEqual(captured["status"], "403 Forbidden")
 
+    def test_wsgi_team_login_is_rate_limited(self):
+        from fabos_api.app import FabOSAPI
+        core = _Core()
+        api = FabOSAPI(core)
+        headers = {"X-Forwarded-For": "203.0.113.10"}
+        for _ in range(10):
+            self.assertEqual(api.request("POST", "/api/v1/auth/team-login", {"identifier": "admin", "password": "wrong"}, headers)["status"], 401)
+        self.assertEqual(api.request("POST", "/api/v1/auth/team-login", {"identifier": "admin", "password": "wrong"}, headers)["status"], 429)
+        self.assertEqual(core.auth.calls, 10)
+
 
 if __name__ == "__main__":
     unittest.main()
