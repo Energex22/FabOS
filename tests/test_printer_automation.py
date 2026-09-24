@@ -72,7 +72,7 @@ class PrinterAutomationTests(unittest.TestCase):
    with db.connect() as c:
     c.execute("""INSERT INTO printers
       (id,name,status,octoprint_url,api_key_ref)
-      VALUES(?,?,?,?,?,?)""",(pid,"Orphan Test","idle","http://octoprint","key"))
+      VALUES(?,?,?,?,?)""",(pid,"Orphan Test","idle","http://octoprint","key"))
     c.commit()
 
    class FakeManufacturing:
