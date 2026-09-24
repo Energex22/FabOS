@@ -69,14 +69,14 @@ def run(host=None, port=None, threads=None, data_dir=None):
         os.environ["FABOS_DATA_DIR"] = data_dir
     host = host or os.environ.get("FABOS_API_HOST", "127.0.0.1")
     port = int(port or os.environ.get("FABOS_API_PORT", "8000"))
+    if serve is None:
+        raise RuntimeError("Waitress is required to run the FabOS API server. Install the project dependencies first.")
     core = FabOSApplication()
     application = _application_with_cors(core)
     core.production_automation.start_worker()
     print("FabOS API production server (Waitress): http://%s:%d" % (host, port))
     print("Health check: http://%s:%d/api/v1/health" % (host, port))
     print("CORS origins: %s" % (", ".join(_cors_origins()) or "(same-origin / none configured)"))
-    if serve is None:
-        raise RuntimeError("Waitress is required to run the FabOS API server. Install the project dependencies first.")
     threads = int(threads or os.environ.get("FABOS_API_THREADS", "8"))
     try:
         serve(application, host=host, port=port, threads=max(1, threads), ident="FabOS")
