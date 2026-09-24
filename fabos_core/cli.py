@@ -1,12 +1,50 @@
-import argparse,json,os
+import argparse,json,os,getpass
 from pathlib import Path
 from fabos_core.application import FabOSApplication
 
 def main():
     p=argparse.ArgumentParser(); s=p.add_subparsers(dest='cmd',required=True)
-    for x in ['init','summary','backup','serve']: s.add_parser(x)
+    for x in ['init','summary','backup','serve','setup-owner']: s.add_parser(x)
     i=s.add_parser('import-data'); i.add_argument('path')
-    a=p.parse_args(); app=FabOSApplication()
+    a=p.parse_args()
+    if a.cmd=='setup-owner':
+        app=FabOSApplication()
+        owner=None
+        with app.database.connect() as connection:
+            owner=connection.execute(
+                "SELECT id,username FROM users WHERE lower(COALESCE(role,''))='owner' "
+                "AND lower(COALESCE(account_type,''))='administrator' AND active=1 LIMIT 1"
+            ).fetchone()
+        if owner is None:
+            raise SystemExit("No active owner account exists. Run the normal initialization first.")
+        username=(input("Owner username [owner]: ").strip() or "owner")
+        if username != owner["username"]:
+            with app.database.connect() as connection:
+                taken=connection.execute(
+                    "SELECT 1 FROM users WHERE lower(username)=lower(?) AND id<>? LIMIT 1",
+                    (username,owner["id"]),
+                ).fetchone()
+                if taken:
+                    raise SystemExit("That username is already in use.")
+                connection.execute(
+                    "UPDATE users SET username=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (username,owner["id"]),
+                )
+                connection.commit()
+        while True:
+            password=getpass.getpass("New owner password (minimum 12 characters): ")
+            confirmation=getpass.getpass("Confirm owner password: ")
+            if len(password) < 12:
+                print("Password must be at least 12 characters.")
+                continue
+            if password != confirmation:
+                print("Passwords do not match.")
+                continue
+            break
+        app.auth.set_password(owner["id"],password)
+        print("Owner setup complete. The default owner credential is no longer usable.")
+        return
+    app=FabOSApplication()
     if a.cmd=='init': print(app.settings.database_path)
     elif a.cmd=='summary': print(json.dumps(app.summary(),indent=2))
     elif a.cmd=='backup': print(app.backups.create())
