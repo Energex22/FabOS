@@ -165,8 +165,14 @@ class ProductionAutomationService:
             gcode = readiness.get("gcode")
             if not gcode:
                 return False
-            self.app.octoprint_print.prepare_and_start(printer, gcode)
+            # Claim the job before crossing the hardware boundary. If the
+            # printer accepts the start command but the subsequent DB write
+            # fails, leaving the job queued/scheduled would let the next
+            # automation pass issue a duplicate physical start. A claimed
+            # printing state is intentionally conservative; a failed start is
+            # surfaced for operator reconciliation rather than retried blindly.
             self.app.production.set_status(job["id"], "printing")
+            self.app.octoprint_print.prepare_and_start(printer, gcode)
             return True
         return False
 
