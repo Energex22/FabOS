@@ -147,6 +147,7 @@ class FulfillmentService:
             raise ValueError("Unsupported fulfillment status")
         fid = self.ensure(order_id, method)
         with self.db.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
             current = c.execute("SELECT method,status,shipping_cost_cents FROM fulfillments WHERE id=?", (fid,)).fetchone()
         current_status = str(current["status"] or "pending").lower() if current else "pending"
         if shipping_cost_cents is None:
