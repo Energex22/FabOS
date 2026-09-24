@@ -13,6 +13,65 @@ ALLOWED_CUSTOM_UPLOAD_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj"}
 MAX_3MF_MEMBERS = 500
 MAX_3MF_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 MAX_3MF_COMPRESSION_RATIO = 100
+MAX_STL_TRIANGLES = 2_000_000
+MAX_STEP_HEADER_BYTES = 64 * 1024
+
+
+def _validate_model_file(path, extension):
+    """Validate lightweight file structure before a model enters the Design Vault.
+
+    These checks intentionally stay parser-free: they catch empty, mislabeled and
+    obviously malformed files without introducing a heavyweight geometry parser
+    into the public API process. Full geometry inspection remains a downstream
+    workflow responsibility.
+    """
+    size = os.path.getsize(path)
+    if size <= 0:
+        raise ValueError("The uploaded model is empty")
+
+    with open(path, "rb") as handle:
+        head = handle.read(MAX_STEP_HEADER_BYTES)
+
+    if extension == ".stl":
+        if size >= 84:
+            triangle_count = int.from_bytes(head[80:84], "little")
+            expected_size = 84 + triangle_count * 50
+            # Binary STL headers are arbitrary 80-byte data and may legitimately
+            # begin with the word "solid", so prefer a structurally valid binary
+            # interpretation before falling back to ASCII detection.
+            if 0 < triangle_count <= MAX_STL_TRIANGLES and expected_size == size:
+                return
+        if head[:5].lower() == b"solid":
+            text = head.decode("utf-8", errors="ignore").lower()
+            if "facet" not in text or "vertex" not in text:
+                raise ValueError("Invalid ASCII STL model")
+            return
+        if size < 84:
+            raise ValueError("Invalid binary STL model")
+        triangle_count = int.from_bytes(head[80:84], "little")
+        if triangle_count <= 0 or triangle_count > MAX_STL_TRIANGLES:
+            raise ValueError("Invalid binary STL triangle count")
+        raise ValueError("Binary STL size does not match its triangle count")
+
+    if extension == ".obj":
+        text = head.decode("utf-8", errors="ignore")
+        if "\x00" in text:
+            raise ValueError("Invalid OBJ model")
+        if not any(line.lstrip().startswith("v ") for line in text.splitlines()):
+            raise ValueError("OBJ model contains no vertices")
+        return
+
+    if extension in {".step", ".stp"}:
+        text = head.decode("ascii", errors="ignore").upper()
+        if "ISO-10303-21" not in text or "HEADER;" not in text or "ENDSEC;" not in text:
+            raise ValueError("Invalid STEP model header")
+        return
+
+    if extension == ".3mf":
+        _validate_3mf(path)
+        return
+
+    raise ValueError("Unsupported model type")
 
 
 def _validate_3mf(path):
@@ -214,11 +273,10 @@ def register_customer_write_routes(app, get_application, current_user):
                     if size > MAX_CUSTOM_UPLOAD_BYTES:
                         raise HTTPException(status_code=413, detail="3D model must be 25 MB or smaller")
                     tmp.write(chunk)
-            if extension == ".3mf":
-                try:
-                    _validate_3mf(temp_path)
-                except ValueError as exc:
-                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+            try:
+                _validate_model_file(temp_path, extension)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
             existing = application.customers.list(query=email.strip())
             customer_id = next((str(row["id"]) for row in existing if str(row["email"] or "").lower()==email.strip().lower()), None)
