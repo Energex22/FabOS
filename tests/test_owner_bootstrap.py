@@ -69,3 +69,25 @@ class OwnerBootstrapTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnerSetupCommandTests(unittest.TestCase):
+    def test_owner_setup_command_changes_default_credentials(self):
+        import builtins
+        import getpass
+        from unittest.mock import patch
+        from fabos_core.cli import main
+
+        app = FabOSApplication()
+        try:
+            with patch.object(builtins, "input", return_value="fabvex-admin"), patch.object(
+                getpass, "getpass", side_effect=["a-strong-owner-password", "a-strong-owner-password"]
+            ), patch("sys.argv", ["fabos", "setup-owner"]):
+                main()
+            user = app.auth.accounts.get_by_username("fabvex-admin")
+            self.assertIsNotNone(user)
+            self.assertIsNone(app.auth.accounts.get_by_username("owner"))
+            self.assertIsNotNone(app.auth.login("fabvex-admin", "a-strong-owner-password"))
+            self.assertIsNone(app.auth.login("fabvex-admin", "owner-password"))
+        finally:
+            app.database.close()
