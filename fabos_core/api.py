@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from fabos_core.services.rate_limit import RateLimiter
+from fabos_core.services.rate_limit import RateLimiter, request_client_key
 from pydantic import BaseModel, Field
 
 from fabos_core.application import FabOSApplication
@@ -280,7 +280,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
 
     @app.post("/api/v1/auth/login")
     def login(payload: LoginRequest, request: Request, application: FabOSApplication = Depends(get_application)):
-        client = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip() or (request.client.host if request.client else "unknown")
+        client = request_client_key(request)
         identifier_key = payload.identifier.strip().lower()
         limiter_keys = ("login-ip:" + client, "login-id:" + identifier_key)
         blocked = next((key for key in limiter_keys if not app.state.auth_rate_limiter.allow(key)), None)
@@ -294,7 +294,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
 
     @app.post("/api/v1/auth/team-login")
     def team_login(payload: LoginRequest, request: Request, application: FabOSApplication = Depends(get_application)):
-        client = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip() or (request.client.host if request.client else "unknown")
+        client = request_client_key(request)
         identifier_key = payload.identifier.strip().lower()
         limiter_keys = ("team-login-ip:" + client, "team-login-id:" + identifier_key)
         blocked = next((key for key in limiter_keys if not app.state.team_auth_rate_limiter.allow(key)), None)

@@ -9,6 +9,17 @@ from threading import Lock
 import time
 
 
+def request_client_key(request):
+    """Return the public client address supplied by the trusted local proxy.
+
+    Production binds the API to loopback and exposes it only through Caddy, so
+    X-Forwarded-For is used for the real remote client. Direct external access to
+    the API port must remain blocked; otherwise forwarded headers are spoofable.
+    """
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+    return forwarded or (request.client.host if request.client else "unknown")
+
+
 class RateLimiter:
     def __init__(self, limit, window_seconds):
         self.limit = max(1, int(limit))
