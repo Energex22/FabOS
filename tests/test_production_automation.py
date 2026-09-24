@@ -584,3 +584,93 @@ class ProductionAutomationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_manual_assignment_rejects_incompatible_material_and_offline_printer(self):
+        app = FabOSApplication()
+        order_id = str(uuid.uuid4())
+        quote_id = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        quote_item_id = str(uuid.uuid4())
+        printer_id = str(uuid.uuid4())
+        spool_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO quotes(id,quote_number,status) VALUES(?,?,?)",
+                    (quote_id, "Q-ASSIGN-GUARD", "accepted"),
+                )
+                conn.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents,quote_id) VALUES(?,?,?,?,?)",
+                    (order_id, "ASSIGN-GUARD", "in_production", 1000, quote_id),
+                )
+                conn.execute(
+                    """INSERT INTO quote_items
+                       (id,quote_id,product_id,variant_id,description,quantity,unit_price_cents,material)
+                       VALUES(?,?,?,?,?,?,?,?)""",
+                    (quote_item_id, quote_id, None, None, "Custom", 1, 1000, "PLA"),
+                )
+                conn.execute(
+                    """INSERT INTO print_jobs(id,order_id,status,estimated_filament_g)
+                       VALUES(?,?,?,?)""",
+                    (job_id, order_id, "queued", 20),
+                )
+                conn.execute(
+                    "INSERT INTO filament_spools(id,material,color,initial_g,remaining_g,active) VALUES(?,?,?,?,?,1)",
+                    (spool_id, "PETG", "Green", 100, 100),
+                )
+                conn.execute(
+                    "INSERT INTO printers(id,name,status) VALUES(?,?,?)",
+                    (printer_id, "Offline Guard", "offline"),
+                )
+                conn.commit()
+            with self.assertRaises(ValueError):
+                app.production.assign(job_id, spool_id=spool_id)
+            with self.assertRaises(ValueError):
+                app.production.assign(job_id, printer_id=printer_id)
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
+                conn.execute("DELETE FROM quote_items WHERE id=?", (quote_item_id,))
+                conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+                conn.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
+                conn.execute("DELETE FROM filament_spools WHERE id=?", (spool_id,))
+                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.commit()
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+    def test_manual_printer_assignment_rejects_build_volume_mismatch(self):
+        app = FabOSApplication()
+        job_id = "manual-dimension-test-job"
+        small_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "DELETE FROM print_jobs WHERE id=?",
+                    (job_id,),
+                )
+                conn.execute(
+                    """INSERT INTO printers
+                    (id,name,model,status,build_x_mm,build_y_mm,build_z_mm,total_hours)
+                    VALUES(?,?,?,?,?,?,?,?)""",
+                    (small_id, "Manual Small", "Test", "idle", 100, 100, 100, 0),
+                )
+                conn.execute(
+                    """INSERT INTO print_jobs
+                    (id,status,estimated_filament_g,slicer_metadata_json)
+                    VALUES(?,?,?,?)""",
+                    (job_id, "queued", 10,
+                     json.dumps({"dimensions": {"x": 150, "y": 80, "z": 50}})),
+                )
+                conn.commit()
+            with self.assertRaisesRegex(ValueError, "build volume"):
+                app.production.assign(job_id, small_id, None)
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
+                conn.execute("DELETE FROM printers WHERE id=?", (small_id,))
+                conn.commit()
+
