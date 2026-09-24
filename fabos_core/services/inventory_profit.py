@@ -56,7 +56,16 @@ class InventoryProfitService:
     WHERE item_type='filament' AND item_id=? AND reference_type='print_job' AND reference_id=? AND transaction_type='consume'""",
     (sid,job_id)).fetchone()
    if exists:return
-   updated=c.execute("UPDATE filament_spools SET remaining_g=MAX(0,remaining_g-?) WHERE id=?",(float(grams),sid))
+   grams=float(grams)
+   spool=c.execute("SELECT remaining_g FROM filament_spools WHERE id=?",(sid,)).fetchone()
+   if not spool:
+    raise KeyError("Filament spool not found")
+   if grams < 0:
+    raise ValueError("Filament consumption cannot be negative")
+   remaining=float(spool["remaining_g"] or 0)
+   if remaining < grams:
+    raise ValueError("Insufficient filament for recorded consumption")
+   updated=c.execute("UPDATE filament_spools SET remaining_g=remaining_g-? WHERE id=?",(grams,sid))
    if updated.rowcount != 1:
     raise KeyError("Filament spool not found")
    c.execute("""INSERT INTO inventory_transactions(id,item_type,item_id,transaction_type,quantity,unit,reference_type,reference_id,notes)
