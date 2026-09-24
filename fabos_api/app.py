@@ -3,6 +3,8 @@ import binascii
 import json
 import threading
 import time
+
+from fabos_core.services.rate_limit import RateLimiter
 from urllib.parse import parse_qs, urlsplit
 
 
@@ -15,6 +17,11 @@ class FabOSAPI:
         self.core = core
         self._auth_attempts = {}
         self._auth_attempts_lock = threading.Lock()
+        self._public_rate_limits = {
+            "register": RateLimiter(10, 900),
+            "quote": RateLimiter(5, 900),
+            "team_login": RateLimiter(10, 900),
+        }
 
     def _allow_auth_attempt(self, client_ip):
         now = time.monotonic()
@@ -27,6 +34,11 @@ class FabOSAPI:
             attempts.append(now)
             self._auth_attempts[key] = attempts
             return True
+
+    def _allow_public_attempt(self, kind, client_ip):
+        limiter = self._public_rate_limits[kind]
+        key = "%s:%s" % (kind, str(client_ip or "unknown").split(",")[0].strip())
+        return limiter.allow(key), limiter.retry_after(key)
 
     def _clear_auth_attempts(self, client_ip):
         key = str(client_ip or "unknown").split(",")[0].strip()
@@ -196,6 +208,9 @@ class FabOSAPI:
                 return self._response(401, {"error": "Invalid email/username or password"})
 
             if route == ["api", self.VERSION, "auth", "team-login"] and method == "POST":
+                allowed, retry_after = self._allow_public_attempt("team_login", (headers or {}).get("X-Forwarded-For", ""))
+                if not allowed:
+                    return self._response(429, {"error": "Too many team sign-in attempts. Please try again later.", "retry_after": retry_after})
                 result = self.core.auth.login(body.get("identifier", ""), body.get("password", ""))
                 if not result:
                     return self._response(401, {"error": "Invalid credentials"})
@@ -279,12 +294,18 @@ class FabOSAPI:
                 return self._response(200, {"payment": payment})
 
             if route == ["api", self.VERSION, "auth", "register"] and method == "POST":
+                allowed, retry_after = self._allow_public_attempt("register", (headers or {}).get("X-Forwarded-For", ""))
+                if not allowed:
+                    return self._response(429, {"error": "Too many registration attempts. Please try again later.", "retry_after": retry_after})
                 result = self.core.customer_commerce.register_customer(
                     body.get("name", ""), body.get("email", ""), body.get("password", ""), body.get("phone", "")
                 )
                 return self._response(201, result)
 
             if route == ["api", self.VERSION, "quote-requests"] and method == "POST":
+                allowed, retry_after = self._allow_public_attempt("quote", (headers or {}).get("X-Forwarded-For", ""))
+                if not allowed:
+                    return self._response(429, {"error": "Too many quote requests. Please try again later.", "retry_after": retry_after})
                 file_bytes = None
                 file_base64 = body.get("file_base64") or ""
                 if file_base64:
