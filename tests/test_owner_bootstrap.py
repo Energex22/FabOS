@@ -90,6 +90,43 @@ class OwnerSetupCommandTests(OwnerBootstrapTests):
         self.assertIsNotNone(app.auth.login("fabvex-admin", "a-strong-owner-password"))
         self.assertIsNone(app.auth.login("fabvex-admin", "owner-password"))
 
+class ProductionSetupCommandTests(OwnerBootstrapTests):
+    def test_stripe_setup_writes_test_mode_settings(self):
+        import getpass
+        from pathlib import Path
+        from unittest.mock import patch
+        from fabos_core.cli import _setup_stripe
+        with tempfile.TemporaryDirectory() as temp:
+            env_file=Path(temp)/"server.env"
+            with patch.dict(os.environ,{"FABOS_ENV_FILE":str(env_file)}), patch("builtins.input",return_value="test"), patch.object(
+                getpass,"getpass",side_effect=["pk_test_example","sk_test_example"]
+            ):
+                _setup_stripe()
+            text=env_file.read_text(encoding="utf-8")
+            self.assertIn("STRIPE_MODE=test",text)
+            self.assertIn("STRIPE_PUBLISHABLE_KEY=pk_test_example",text)
+            self.assertIn("STRIPE_SECRET_KEY=sk_test_example",text)
+            self.assertIn("https://fabvex.duckdns.org/orders.html",text)
+
+    def test_dns_setup_updates_duckdns_and_writes_settings(self):
+        import getpass
+        from pathlib import Path
+        from unittest.mock import patch
+        from fabos_core.cli import _setup_dns
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self,*args): pass
+            def read(self): return b"OK"
+        with tempfile.TemporaryDirectory() as temp:
+            env_file=Path(temp)/"server.env"
+            with patch.dict(os.environ,{"FABOS_ENV_FILE":str(env_file)}), patch("builtins.input",return_value="fabvex.duckdns.org"), patch.object(
+                getpass,"getpass",return_value="secret-token"
+            ), patch("fabos_core.cli.urlopen",return_value=Response()) as request:
+                _setup_dns()
+            request.assert_called_once()
+            self.assertIn("domains=fabvex",request.call_args.args[0])
+            self.assertIn("DUCKDNS_DOMAIN=fabvex",env_file.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
