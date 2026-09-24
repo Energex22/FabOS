@@ -348,7 +348,24 @@ class ProductionService:
             args = list(values.values()) + [job_id]
             conn.execute("UPDATE print_jobs SET %s WHERE id=?" % setters, args)
             if row["printer_id"]:
-                printer_state = "printing" if status == "printing" else "idle"
+                # Derive printer state from remaining active jobs rather than blindly
+                # setting it idle when one job finishes/fails/cancels. This prevents
+                # a stale/legacy duplicate job from being hidden by a later completion.
+                active_printing = conn.execute(
+                    """SELECT 1 FROM print_jobs
+                       WHERE printer_id=? AND id<>? AND status IN ('printing','paused')
+                       LIMIT 1""",
+                    (row["printer_id"], job_id),
+                ).fetchone()
+                if active_printing:
+                    printer_state = "printing" if conn.execute(
+                        """SELECT 1 FROM print_jobs
+                           WHERE printer_id=? AND id<>? AND status='printing'
+                           LIMIT 1""",
+                        (row["printer_id"], job_id),
+                    ).fetchone() else "paused"
+                else:
+                    printer_state = "printing" if status == "printing" else "idle"
                 conn.execute("UPDATE printers SET status=? WHERE id=?", (printer_state, row["printer_id"]))
             if status == "completed" and row["order_id"]:
                 remaining = conn.execute(
