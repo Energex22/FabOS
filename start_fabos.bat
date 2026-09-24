@@ -20,16 +20,18 @@ echo  4. Run Test Suite
 echo  5. Run Beta Readiness Self-Test
 echo  6. Install Image Support (Pillow)
 echo  7. Set Up / Change Owner Account
-echo  8. Exit
+echo  8. Production Setup (Owner / DNS / Stripe)
+echo  9. Exit
 echo.
-choice /C 12345678 /N /M "Select an option: "
-if errorlevel 8 goto :done
+choice /C 123456789 /N /M "Select an option: "
+if errorlevel 9 goto :done
+if errorlevel 8 goto :production
 if errorlevel 7 goto :owner
 if errorlevel 6 goto :image
 if errorlevel 5 goto :selftest
 if errorlevel 4 goto :tests
 if errorlevel 3 goto :debug
-if errorlevel 2 goto :owner
+if errorlevel 2 goto :server
 echo.
 echo ============================================
 echo           Owner Account Setup
