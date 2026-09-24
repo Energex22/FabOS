@@ -705,5 +705,46 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.commit()
 
 
+    def test_closing_job_does_not_hide_offline_printer(self):
+        app = FabOSApplication()
+        printer_id = "offline-close-test-printer"
+        spool_id = "offline-close-test-spool"
+        job_id = "offline-close-test-job"
+        try:
+            with app.database.connect() as conn:
+                self._cleanup_print_job_fixture(conn, job_id, spool_id)
+                conn.execute("DELETE FROM inventory_transactions WHERE reference_id=?", (job_id,))
+                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.execute(
+                    """INSERT INTO printers
+                    (id,name,model,status,build_x_mm,build_y_mm,build_z_mm,total_hours)
+                    VALUES(?,?,?,?,?,?,?,?)""",
+                    (printer_id, "Offline Test", "Test", "offline", 200, 200, 200, 0),
+                )
+                conn.execute(
+                    """INSERT INTO filament_spools
+                    (id,material,color,initial_g,remaining_g,active)
+                    VALUES(?,?,?,?,?,1)""",
+                    (spool_id, "TEST-PLA", "Green", 100, 100),
+                )
+                conn.execute(
+                    """INSERT INTO print_jobs
+                    (id,status,printer_id,spool_id,estimated_filament_g)
+                    VALUES(?,?,?,?,?)""",
+                    (job_id, "printing", printer_id, spool_id, 20),
+                )
+                conn.commit()
+            app.production.set_status(job_id, "failed")
+            with app.database.connect() as conn:
+                state = conn.execute("SELECT status FROM printers WHERE id=?", (printer_id,)).fetchone()[0]
+            self.assertEqual(state, "offline")
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM inventory_transactions WHERE reference_id=?", (job_id,))
+                self._cleanup_print_job_fixture(conn, job_id, spool_id)
+                conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.commit()
+
+
 if __name__ == "__main__":
     unittest.main()
