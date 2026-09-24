@@ -45,5 +45,16 @@ class InvoiceTests(unittest.TestCase):
    path=svc.export_html(iid)
    self.assertTrue(path.exists())
    self.assertIn("1480",str(inv["total_cents"]))
+ def test_payment_cannot_exceed_invoice_balance(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   oid=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("INSERT INTO orders(id,order_number,total_cents) VALUES(?,?,?)",(oid,"O-OVER",2500));c.commit()
+   svc=InvoiceService(db,Path(td));iid,_=svc.create_from_order(oid)
+   svc.record_payment(iid,2000,"Cash")
+   with self.assertRaisesRegex(ValueError,"exceeds the invoice balance"):
+    svc.record_payment(iid,600,"Cash")
+
 
 if __name__=="__main__":unittest.main()
