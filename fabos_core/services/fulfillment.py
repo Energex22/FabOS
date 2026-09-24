@@ -8,6 +8,7 @@ class FulfillmentService:
     METHODS = ("pickup", "shipping")
     STATUSES = ("pending", "ready_for_pickup", "packed", "shipped", "delivered", "picked_up")
     TERMINAL_STATUSES = ("delivered", "picked_up")
+    STATUS_ORDER = {"pending": 0, "ready_for_pickup": 1, "packed": 2, "shipped": 3, "delivered": 4, "picked_up": 4}
 
     def __init__(self, db, accounts=None, permissions=None):
         self.db = db
@@ -150,8 +151,10 @@ class FulfillmentService:
         current_status = str(current["status"] or "pending").lower() if current else "pending"
         if shipping_cost_cents is None:
             shipping_cost_cents = int(current["shipping_cost_cents"] or 0) if current else 0
-        if current_status in self.TERMINAL_STATUSES and status != current_status:
-            raise ValueError("Cannot move a completed fulfillment back to an earlier status")
+        if self.STATUS_ORDER.get(status, 0) < self.STATUS_ORDER.get(current_status, 0):
+            if current_status in self.TERMINAL_STATUSES:
+                raise ValueError("Cannot move a completed fulfillment back to an earlier status")
+            raise ValueError("Cannot move fulfillment back to an earlier status")
         if current and current["method"] != method and current_status != "pending":
             raise ValueError("Cannot change fulfillment method after fulfillment has started")
         now = datetime.now().isoformat(timespec="seconds")
@@ -169,6 +172,13 @@ class FulfillmentService:
             inv = c.execute("""SELECT id,subtotal_cents,tax_cents,discount_cents,paid_cents,status
               FROM invoices WHERE order_id=? AND status<>'void' ORDER BY created_at DESC LIMIT 1""", (order_id,)).fetchone()
             if inv:
+                payment_table = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payment_transactions'").fetchone()
+                active_payment = None
+                if payment_table:
+                    active_payment = c.execute("SELECT 1 FROM payment_transactions WHERE invoice_id=? AND status IN ('created','pending','authorized','paid','partially_refunded') LIMIT 1", (inv["id"],)).fetchone()
+                previous_shipping = int(c.execute("SELECT shipping_cents FROM invoices WHERE id=?", (inv["id"],)).fetchone()["shipping_cents"] or 0)
+                if active_payment and int(shipping_cost_cents) != previous_shipping:
+                    raise ValueError("Fulfillment shipping cost cannot change while a payment attempt is active.")
                 total = max(0, int(inv['subtotal_cents'] or 0) + int(inv['tax_cents'] or 0) + int(shipping_cost_cents) - int(inv['discount_cents'] or 0))
                 new_status = 'paid' if int(inv['paid_cents'] or 0) >= total and total > 0 else ('partial' if int(inv['paid_cents'] or 0) > 0 else 'open')
                 c.execute("UPDATE invoices SET shipping_cents=?,total_cents=?,status=? WHERE id=?",
