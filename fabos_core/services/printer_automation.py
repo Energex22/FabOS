@@ -91,6 +91,30 @@ class PrinterAutomationService:
       c.execute('UPDATE print_jobs SET started_at=? WHERE id=?',(datetime.now().isoformat(timespec='seconds'),row['id']))
    c.commit()
 
+  # If OctoPrint reports an active print but FabOS has no matching active job/file,
+  # stop automatic reconciliation and create a durable operator alert. This covers
+  # jobs started outside FabOS and stale/misassigned state after a restart.
+  if responsive and state in ('Printing','Pausing','Paused'):
+   active_match=False
+   if current_file and active_before:
+    expected=active_before['octoprint_file']
+    active_match=(not expected or str(expected)==str(current_file))
+   if not active_match:
+    try:
+     reason='OctoPrint reports an active print, but FabOS has no matching active job for the reported file.'
+     if active_before and active_before['octoprint_file'] and current_file:
+      reason='OctoPrint reports an active print with a different file than the active FabOS job.'
+     with self.db.connect() as nc:
+      nc.execute("""INSERT OR IGNORE INTO notifications
+       (id,dedupe_key,severity,title,body,page,entity_id,is_read)
+       VALUES(?,?,?,?,?,?,?,0)""",
+       (str(uuid.uuid4()),'event:octoprint:active-mismatch:'+pid,'high',
+        'Printer/job state needs attention',reason,'Production',
+        active_before['id'] if active_before else pid))
+      nc.commit()
+    except Exception:
+     pass
+
   # Never infer successful completion from an idle OctoPrint state alone. If FabOS still has
   # an active job but OctoPrint provides no matching completion evidence, surface a durable
   # operator alert instead of silently leaving the printer/job state inconsistent.
