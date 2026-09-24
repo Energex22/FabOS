@@ -91,7 +91,30 @@ class PrinterAutomationService:
       c.execute('UPDATE print_jobs SET started_at=? WHERE id=?',(datetime.now().isoformat(timespec='seconds'),row['id']))
    c.commit()
 
+  # Never infer successful completion from an idle OctoPrint state alone. If FabOS still has
+  # an active job but OctoPrint provides no matching completion evidence, surface a durable
+  # operator alert instead of silently leaving the printer/job state inconsistent.
   if responsive and active_before and active_before['status'] in ('printing','paused') and mapped=='idle':
+   try:completion_probe=float(prog) if prog is not None else None
+   except Exception:completion_probe=None
+   try:left_probe=float(time_left) if time_left is not None else None
+   except Exception:left_probe=None
+   try:elapsed_probe=float(print_time) if print_time is not None else None
+   except Exception:elapsed_probe=None
+   same_file_probe=(not active_before['octoprint_file'] or not current_file or
+                    str(active_before['octoprint_file'])==str(current_file))
+   finished_probe=(completion_probe is not None and completion_probe>=99.5) or (
+       left_probe is not None and left_probe<=1 and elapsed_probe is not None and elapsed_probe>0)
+   if not (same_file_probe and finished_probe):
+    try:
+     reason='OctoPrint is idle, but FabOS has an active print job without confirmed completion evidence.'
+     if active_before['octoprint_file'] and current_file and not same_file_probe:
+      reason='OctoPrint is idle with a different file than the active FabOS print job.'
+     self._upsert_notification = getattr(self, '_upsert_notification', None)
+     if self._upsert_notification:
+      self._upsert_notification('event:octoprint:mismatch:'+active_before['id'],'high',
+       'Printer/job state needs attention',reason,'Production',active_before['id'])
+    except Exception:pass
    try:completion=float(prog) if prog is not None else None
    except Exception:completion=None
    try:left=float(time_left) if time_left is not None else None
