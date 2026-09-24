@@ -41,7 +41,15 @@ Use Windows Task Scheduler to run the PowerShell command once per day. Recommend
 
 Local backups are not a complete disaster-recovery strategy. Periodically copy a verified backup to a separate physical disk or other storage location.
 
-## Restore test
+## Backup verification can be run offline without modifying the live data directory:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Verify-FabOS-Backup.ps1 -Archive C:\FabVex\Data\Backups\fabos-backup-YYYYMMDD-HHMMSS.zip
+```
+
+The verifier rejects archive path traversal, extracts only into a temporary directory, opens the bundled SQLite database read-only, and runs `PRAGMA integrity_check`. It does not restore or overwrite production data.
+
+Restore test
 
 A backup is not considered verified until a ZIP can be extracted and its `fabos.sqlite3` can be opened by SQLite. Test restores should be performed against a separate temporary FabOS data directory, never over the live database.
 
