@@ -30,7 +30,8 @@ def _record_refund(application, provider_name, payload):
             return None
         # A created Stripe refund may still be pending. Reconcile only once the
         # provider reports the refund as successfully completed.
-        if str(obj.get("status") or "").strip().lower() != "succeeded":
+        refund_status = str(obj.get("status") or "").strip().lower()
+        if refund_status and refund_status != "succeeded":
             return None
         amount_cents = int(obj.get("amount") or 0)
         provider_payment_id = str(obj.get("payment_intent") or obj.get("charge") or "")
