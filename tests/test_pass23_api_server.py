@@ -31,6 +31,42 @@ class _Core:
 
 
 class Pass23APIServerTests(unittest.TestCase):
+    def test_request_client_key_prefers_forwarded_client(self):
+        from fabos_core.services.rate_limit import request_client_key
+        request = TestClient(create_app(_Core())).build_request(
+            "GET", "/api/v1/health", headers={"X-Forwarded-For": "203.0.113.42, 10.0.0.1"}
+        )
+        self.assertEqual(request_client_key(request), "203.0.113.42")
+
+    def test_customer_login_rate_limit_isolated_by_forwarded_client(self):
+        from fabos_core.api import create_app
+        core = _Core()
+        client = TestClient(create_app(core))
+        for _ in range(10):
+            response = client.post(
+                "/api/v1/auth/login",
+                headers={"X-Forwarded-For": "203.0.113.10"},
+                json={"identifier": "one@example.com", "password": "wrong"},
+            )
+            self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            client.post(
+                "/api/v1/auth/login",
+                headers={"X-Forwarded-For": "203.0.113.11"},
+                json={"identifier": "two@example.com", "password": "wrong"},
+            ).status_code,
+            401,
+        )
+        self.assertEqual(
+            client.post(
+                "/api/v1/auth/login",
+                headers={"X-Forwarded-For": "203.0.113.10"},
+                json={"identifier": "one@example.com", "password": "wrong"},
+            ).status_code,
+            429,
+        )
+
+
     def test_cors_health_response(self):
         os.environ["FABOS_CORS_ORIGINS"] = "http://localhost:5173"
         self.addCleanup(lambda: os.environ.pop("FABOS_CORS_ORIGINS", None))
