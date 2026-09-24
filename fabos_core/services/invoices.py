@@ -98,7 +98,7 @@ class InvoiceService:
    remaining=max(0,int(inv["total_cents"] or 0)-recorded)
    if amount>remaining:raise ValueError("Payment exceeds the invoice balance.")
    c.execute("INSERT INTO payments(id,invoice_id,amount_cents,method,reference,notes) VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),iid,amount,method,reference,notes));paid=recorded+amount;status="paid" if paid>=int(inv["total_cents"] or 0) else "partial";c.execute("UPDATE invoices SET paid_cents=?,status=? WHERE id=?",(paid,status,iid))
-   try:c.execute("INSERT INTO activity_journal(id,event_type,title,detail,page,entity_id) VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),'invoice.payment','Payment recorded','$%.2f • %s'%(amount/100.0,method or 'Payment'),'Invoices',iid)
+   try:c.execute("INSERT INTO activity_journal(id,event_type,title,detail,page,entity_id) VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),'invoice.payment','Payment recorded','$%.2f • %s'%(amount/100.0,method or 'Payment'),'Invoices',iid))
    except Exception:pass
    if status=="paid" and inv["order_id"]:
     fulfillment=c.execute("SELECT status FROM fulfillments WHERE order_id=?",(inv["order_id"],)).fetchone()
