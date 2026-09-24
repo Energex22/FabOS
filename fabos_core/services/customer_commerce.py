@@ -264,34 +264,43 @@ class CustomerCommerceService:
         prefix = "O-" + date.today().strftime("%Y%m") + "-"
         turnaround_days = int(float(self.shop_settings.get("default_turnaround_days", "7") or 7))
         due_at = (date.today() + timedelta(days=max(0, turnaround_days))).isoformat()
-        with self.database.connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT order_number FROM orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1", (prefix + "%",)).fetchone()
-            sequence = int(row[0].split("-")[-1]) + 1 if row else 1
-            order_number = prefix + ("%04d" % sequence)
-            conn.execute("""INSERT INTO orders
-                (id,order_number,customer_id,quote_id,status,due_at,total_cents,tax_cents,shipping_cents,shipping_address_json,checkout_notes,checkout_channel)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (order_id, order_number, customer["id"], quote_id, "pending", due_at, total_cents, tax_cents, shipping_cents, json.dumps(shipping_address), str(notes or "").strip(), "website"))
-            for item in resolved_items:
-                conn.execute(
-                    """INSERT INTO order_items
-                    (id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                    (
-                        str(uuid.uuid4()),
-                        order_id,
-                        item["product_id"],
-                        item["variant_id"],
-                        item["description"],
-                        item["quantity"],
-                        item["unit_price_cents"],
-                        item["material"],
-                        item["color"],
-                        item["estimated_minutes"],
-                        item["estimated_filament_g"],
-                    ),
-                )
-            conn.commit()
+        try:
+            with self.database.connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute("SELECT order_number FROM orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1", (prefix + "%",)).fetchone()
+                sequence = int(row[0].split("-")[-1]) + 1 if row else 1
+                order_number = prefix + ("%04d" % sequence)
+                conn.execute("""INSERT INTO orders
+                    (id,order_number,customer_id,quote_id,status,due_at,total_cents,tax_cents,shipping_cents,shipping_address_json,checkout_notes,checkout_channel)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (order_id, order_number, customer["id"], quote_id, "pending", due_at, total_cents, tax_cents, shipping_cents, json.dumps(shipping_address), str(notes or "").strip(), "website"))
+                for item in resolved_items:
+                    conn.execute(
+                        """INSERT INTO order_items
+                        (id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            str(uuid.uuid4()),
+                            order_id,
+                            item["product_id"],
+                            item["variant_id"],
+                            item["description"],
+                            item["quantity"],
+                            item["unit_price_cents"],
+                            item["material"],
+                            item["color"],
+                            item["estimated_minutes"],
+                            item["estimated_filament_g"],
+                        ),
+                    )
+                conn.commit()
+        except Exception:
+            # The quote is created before the order transaction so it can carry
+            # the resolved price snapshot. If the order transaction fails,
+            # remove the approved quote rather than leaving an orphan.
+            with self.database.connect() as cleanup:
+                cleanup.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
+                cleanup.commit()
+            raise
         row, saved_items = self._order_for_customer(user_id, order_id)
         return row, saved_items, subtotal_cents, shipping_cents, tax_cents, total_cents
 
