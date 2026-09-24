@@ -96,6 +96,30 @@ class PaymentRetryRefundTests(unittest.TestCase):
             provider._request("/checkout/sessions", {"mode": "payment"}, idempotency_key="payment-1")
         self.assertEqual(opened.call_args.args[0].headers.get("Idempotency-key"), "payment-1")
 
+    def test_refund_webhook_is_not_consumed_before_ledger_reconciliation(self):
+        class _Provider:
+            name = "stripe"
+            def parse_webhook(self, payload, signature=None):
+                return {
+                    "event_id": "evt_refund_retry",
+                    "event_type": "refund.created",
+                    "provider_payment_id": "pi_test",
+                    "payment_id": "payment-1",
+                    "order_id": "order-1",
+                    "invoice_id": "invoice-1",
+                    "status": "refunded",
+                    "amount_cents": 1800,
+                }
+
+        database = _Database()
+        service = object.__new__(PaymentService)
+        service.database = database
+        service._build_provider = lambda name=None: _Provider()
+        result = service.handle_webhook(b"{}", "signature", "stripe")
+        self.assertTrue(result["processed"])
+        with database.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM payment_webhook_events").fetchone()[0], 0)
+
     def test_partial_refund_sets_partially_refunded(self):
         application = _Application()
         with application.database.connect() as conn:

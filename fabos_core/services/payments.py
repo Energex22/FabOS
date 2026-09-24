@@ -223,6 +223,13 @@ class PaymentService:
     def handle_webhook(self,payload,signature=None,provider_name=None):
         provider=self._build_provider(provider_name);event=provider.parse_webhook(payload,signature);event_id=event.get("event_id")
         if not event_id: raise PaymentProviderError("Webhook event has no id")
+        # Refunds are reconciled by the refund-ledger path in payment_api.py.
+        # Do not consume the provider event here: if the FabOS payment transaction
+        # is not visible yet, a legitimate provider retry must remain able to
+        # reconcile the refund later. The ledger reference itself is idempotent.
+        if "refund" in str(event.get("event_type") or "").lower():
+            return {"processed": True, "duplicate": False, "event_id": event_id, "status": event.get("status")}
+
         # Claim the event before processing so concurrent deliveries cannot settle it twice.
         # If processing fails, release the claim so the provider can safely retry.
         with self.database.connect() as conn:
