@@ -90,6 +90,7 @@ class InvoiceService:
   amount=int(amount_cents)
   if amount<=0:raise ValueError("Payment must be greater than $0.")
   with self.db.connect() as c:
+   c.execute("BEGIN IMMEDIATE")
    inv=c.execute("SELECT * FROM invoices WHERE id=?",(iid,)).fetchone()
    if not inv:raise KeyError("Invoice not found.")
    if inv["status"]=="void":raise ValueError("Cannot record payment on a void invoice.")
