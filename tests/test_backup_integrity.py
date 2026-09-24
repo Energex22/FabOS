@@ -58,9 +58,6 @@ class BackupIntegrityTests(unittest.TestCase):
                     "backup me",
                 )
 
-
-if __name__ == "__main__":
-    unittest.main()
     def test_backup_verifier_accepts_integrity_checked_archive(self):
         from deployment.windows.verify_backup import verify_backup
         import zipfile
@@ -93,3 +90,7 @@ if __name__ == "__main__":
             self.assertFalse(ok)
             self.assertIn("unsafe archive path", message)
 
+
+
+if __name__ == "__main__":
+    unittest.main()
