@@ -102,10 +102,45 @@ class PaymentRetryRefundTests(unittest.TestCase):
             conn.execute("INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id) VALUES(?,?,?,?)", ("payment-1", "invoice-1", "pi_test", "order-1"))
             conn.execute("INSERT INTO payments VALUES(?,?,?,?,?,?)", ("ledger-1", "invoice-1", 5000, "stripe", "pi_test", "Gateway payment reconciled by FabOS"))
             conn.commit()
-        payload = '{"id":"evt_refund_1","type":"refund.created","data":{"object":{"id":"re_test","amount":1800,"payment_intent":"pi_test"}}}'
+        payload = '{"id":"evt_refund_1","type":"refund.created","data":{"object":{"id":"re_test","amount":1800,"payment_intent":"pi_test","status":"succeeded"}}}'
         result = _record_refund(application, "stripe", payload)
         self.assertTrue(result["recorded"])
         self.assertEqual(result["status"], "partially_refunded")
+
+    def test_pending_stripe_refund_is_not_recorded(self):
+        application = _Application()
+        with application.database.connect() as conn:
+            conn.execute("INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id) VALUES(?,?,?,?)", ("payment-1", "invoice-1", "pi_test", "order-1"))
+            conn.execute("INSERT INTO payments VALUES(?,?,?,?,?,?)", ("ledger-1", "invoice-1", 5000, "stripe", "pi_test", "Gateway payment reconciled by FabOS"))
+            conn.commit()
+        payload = '{"id":"evt_refund_pending","type":"refund.created","data":{"object":{"id":"re_pending","amount":1800,"payment_intent":"pi_test","status":"pending"}}}'
+        result = _record_refund(application, "stripe", payload)
+        self.assertIsNone(result)
+        with application.database.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM payments WHERE amount_cents<0").fetchone()[0], 0)
+
+    def test_charge_refunded_event_does_not_double_count_cumulative_amount(self):
+        application = _Application()
+        with application.database.connect() as conn:
+            conn.execute("INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id) VALUES(?,?,?,?)", ("payment-1", "invoice-1", "pi_test", "order-1"))
+            conn.execute("INSERT INTO payments VALUES(?,?,?,?,?,?)", ("ledger-1", "invoice-1", 5000, "stripe", "pi_test", "Gateway payment reconciled by FabOS"))
+            conn.commit()
+        payload = '{"id":"evt_charge_refunded","type":"charge.refunded","data":{"object":{"id":"ch_test","amount":5000,"amount_refunded":1800,"payment_intent":"pi_test"}}}'
+        result = _record_refund(application, "stripe", payload)
+        self.assertIsNone(result)
+        with application.database.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM payments WHERE amount_cents<0").fetchone()[0], 0)
+
+    def test_refund_updated_succeeded_is_recorded(self):
+        application = _Application()
+        with application.database.connect() as conn:
+            conn.execute("INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id) VALUES(?,?,?,?)", ("payment-1", "invoice-1", "pi_test", "order-1"))
+            conn.execute("INSERT INTO payments VALUES(?,?,?,?,?,?)", ("ledger-1", "invoice-1", 5000, "stripe", "pi_test", "Gateway payment reconciled by FabOS"))
+            conn.commit()
+        payload = '{"id":"evt_refund_updated","type":"refund.updated","data":{"object":{"id":"re_updated","amount":1800,"payment_intent":"pi_test","status":"succeeded"}}}'
+        result = _record_refund(application, "stripe", payload)
+        self.assertTrue(result["recorded"])
+        self.assertEqual(result["amount_cents"], 1800)
 
     def test_refund_rejects_provider_mismatch(self):
         application = _Application()
@@ -115,7 +150,7 @@ class PaymentRetryRefundTests(unittest.TestCase):
             conn.execute("INSERT INTO payments VALUES(?,?,?,?,?,?)",
                          ("ledger-1", "invoice-1", 5000, "square", "pi_shared", "Gateway payment reconciled by FabOS"))
             conn.commit()
-        payload = '{"id":"evt_refund_mismatch","type":"refund.created","data":{"object":{"id":"re_mismatch","amount":1000,"payment_intent":"pi_shared"}}}'
+        payload = '{"id":"evt_refund_mismatch","type":"refund.created","data":{"object":{"id":"re_mismatch","amount":1000,"payment_intent":"pi_shared","status":"succeeded"}}}'
         result = _record_refund(application, "stripe", payload)
         self.assertFalse(result["recorded"])
         self.assertEqual(result["reason"], "payment_provider_mismatch")
@@ -130,7 +165,7 @@ class PaymentRetryRefundTests(unittest.TestCase):
             conn.execute("INSERT INTO payments VALUES(?,?,?,?,?,?)",
                          ("ledger-1", "invoice-1", 5000, "stripe", "pi_failed", "Gateway payment reconciled by FabOS"))
             conn.commit()
-        payload = '{"id":"evt_refund_failed","type":"refund.created","data":{"object":{"id":"re_failed","amount":1000,"payment_intent":"pi_failed"}}}'
+        payload = '{"id":"evt_refund_failed","type":"refund.created","data":{"object":{"id":"re_failed","amount":1000,"payment_intent":"pi_failed","status":"succeeded"}}}'
         result = _record_refund(application, "stripe", payload)
         self.assertFalse(result["recorded"])
         self.assertEqual(result["reason"], "payment_not_refundable")
@@ -141,7 +176,7 @@ class PaymentRetryRefundTests(unittest.TestCase):
             conn.execute("INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id) VALUES(?,?,?,?)", ("payment-1", "invoice-1", "pi_test", "order-1"))
             conn.execute("INSERT INTO payments VALUES(?,?,?,?,?,?)", ("ledger-1", "invoice-1", 5000, "stripe", "pi_test", "Gateway payment reconciled by FabOS"))
             conn.commit()
-        payload = '{"id":"evt_refund_1","type":"refund.created","data":{"object":{"id":"re_test","amount":5000,"payment_intent":"pi_test"}}}'
+        payload = '{"id":"evt_refund_1","type":"refund.created","data":{"object":{"id":"re_test","amount":5000,"payment_intent":"pi_test","status":"succeeded"}}}'
         result = _record_refund(application, "stripe", payload)
         self.assertTrue(result["recorded"])
         self.assertEqual(result["status"], "refunded")
