@@ -13,6 +13,7 @@ Caddy.
 """
 import argparse
 import os
+from pathlib import Path
 try:
     from waitress import serve
 except ImportError:  # Keep source checkout usable before optional production deps are installed.
@@ -64,7 +65,32 @@ def _application_with_cors(core):
     return wrapped
 
 
-def run(host=None, port=None, threads=None, data_dir=None):
+def _load_env_file(env_file):
+    if not env_file:
+        return
+    path = Path(env_file).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError("FabOS environment file was not found: %s" % path)
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key or any(ch.isspace() for ch in key):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+def run(host=None, port=None, threads=None, data_dir=None, env_file=None):
+    _load_env_file(env_file)
     if data_dir:
         os.environ["FABOS_DATA_DIR"] = data_dir
     host = host or os.environ.get("FABOS_API_HOST", "127.0.0.1")
@@ -92,9 +118,10 @@ def _parse_args(argv=None):
     parser.add_argument("--port", type=int, default=None, help="Listen port (default: FABOS_API_PORT or 8000).")
     parser.add_argument("--threads", type=int, default=None, help="Waitress worker threads (default: FABOS_API_THREADS or 8).")
     parser.add_argument("--data-dir", default=None, help="FabOS data directory (overrides FABOS_DATA_DIR).")
+    parser.add_argument("--env-file", default=None, help="Optional KEY=VALUE environment file loaded before application startup.")
     return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
     args = _parse_args()
-    run(host=args.host, port=args.port, threads=args.threads, data_dir=args.data_dir)
+    run(host=args.host, port=args.port, threads=args.threads, data_dir=args.data_dir, env_file=args.env_file)
