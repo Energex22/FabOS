@@ -6,12 +6,12 @@ from fabos_core.services.admin_api import register_admin_routes
 
 
 def _record_refund(application, provider_name, payload):
-    """Reconcile a provider refund into FabOS's existing invoice ledger.
+    """Reconcile a completed provider refund into FabOS's invoice ledger.
 
     Refunds are stored as negative payment-ledger entries so InvoiceService.reconcile()
-    computes the customer's actual net paid amount. The provider refund id (when
-    available) is preferred over the webhook event id so multiple provider events for
-    the same refund remain idempotent.
+    computes the customer's actual net paid amount. Stripe refund objects carry the
+    incremental refund amount; charge.refunded events carry cumulative totals, so those
+    events are intentionally ignored here to prevent double-counting.
     """
     try:
         event = json.loads(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
@@ -26,16 +26,18 @@ def _record_refund(application, provider_name, payload):
     obj = ((event.get("data") or {}).get("object") or {})
     metadata = {}
     if provider_name == "stripe":
-        amount_cents = int(obj.get("amount") or obj.get("amount_refunded") or 0)
+        if event_type not in {"refund.created", "refund.updated"}:
+            return None
+        # A created Stripe refund may still be pending. Reconcile only once the
+        # provider reports the refund as successfully completed.
+        if str(obj.get("status") or "").strip().lower() != "succeeded":
+            return None
+        amount_cents = int(obj.get("amount") or 0)
         provider_payment_id = str(obj.get("payment_intent") or obj.get("charge") or "")
         metadata = obj.get("metadata") or {}
         payment_id = str(metadata.get("payment_id") or "")
-        refund_items = ((obj.get("refunds") or {}).get("data") or [])
-        refund_id = str(refund_items[0].get("id") or "") if refund_items else ""
-        if event_type == "refund.created":
-            refund_id = str(obj.get("id") or refund_id)
-            provider_payment_id = str(obj.get("payment_intent") or obj.get("charge") or provider_payment_id)
-        refund_reference = f"stripe-refund:{refund_id or event_id}"
+        refund_id = str(obj.get("id") or event_id)
+        refund_reference = f"stripe-refund:{refund_id}"
     elif provider_name == "square":
         refund = obj.get("refund") or obj
         amount_money = refund.get("amount_money") or {}
