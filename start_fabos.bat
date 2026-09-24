@@ -45,10 +45,6 @@ if errorlevel 1 echo Owner setup did not complete successfully.
 pause
 goto :menu
 
-:server
-if errorlevel 1 goto :desktop
-goto :menu
-
 :desktop
 call :launch_desktop 0
 pause
@@ -95,6 +91,20 @@ if errorlevel 1 (
 )
 echo FabOS started.
 exit /b 0
+
+:production
+echo.
+echo ============================================
+echo           FABVEX Production Setup
+echo ============================================
+echo.
+echo This securely configures the owner account, DuckDNS, and Stripe.
+echo Secrets are entered privately and saved to deployment\windows\server.env.
+echo.
+"%FABOS_PYTHON%" -m fabos_core.cli setup-production
+if errorlevel 1 echo Production setup did not complete successfully.
+pause
+goto :menu
 
 :server
 echo.
