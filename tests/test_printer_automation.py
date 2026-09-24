@@ -71,7 +71,7 @@ class PrinterAutomationTests(unittest.TestCase):
    pid=str(uuid.uuid4())
    with db.connect() as c:
     c.execute("""INSERT INTO printers
-      (id,name,status,connection_mode,octoprint_url,api_key_ref)
+      (id,name,status,octoprint_url,api_key_ref)
       VALUES(?,?,?,?,?,?)""",(pid,"Orphan Test","idle","http://octoprint","key"))
     c.commit()
 
