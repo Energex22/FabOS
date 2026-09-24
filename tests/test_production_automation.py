@@ -582,8 +582,6 @@ class ProductionAutomationTests(unittest.TestCase):
                 close()
 
 
-if __name__ == "__main__":
-    unittest.main()
 
     def test_manual_assignment_rejects_incompatible_material_and_offline_printer(self):
         app = FabOSApplication()
@@ -638,8 +636,6 @@ if __name__ == "__main__":
                 conn.commit()
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
     def test_manual_printer_assignment_rejects_build_volume_mismatch(self):
@@ -674,3 +670,6 @@ if __name__ == "__main__":
                 conn.execute("DELETE FROM printers WHERE id=?", (small_id,))
                 conn.commit()
 
+
+if __name__ == "__main__":
+    unittest.main()
