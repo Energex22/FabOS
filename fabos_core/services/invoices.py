@@ -41,6 +41,7 @@ class InvoiceService:
    c.execute("""INSERT INTO invoices(id,invoice_number,order_id,status,total_cents,paid_cents,due_at,subtotal_cents,tax_cents,shipping_cents,discount_cents) VALUES(?,?,?,'open',?,0,?,?,?,?,0)""",(iid,self._next_number(c),order_id,total,due,subtotal,tax,0));c.commit();return iid,True
  def reconcile(self,iid=None):
   with self.db.connect() as c:
+   c.execute("BEGIN IMMEDIATE")
    ids=[iid] if iid else [r["id"] for r in c.execute("SELECT id FROM invoices")]
    for invoice_id in ids:
     inv=c.execute("SELECT total_cents,status FROM invoices WHERE id=?",(invoice_id,)).fetchone()
@@ -77,6 +78,7 @@ class InvoiceService:
    items=c.execute("SELECT * FROM quote_items WHERE quote_id=? ORDER BY rowid",(inv["quote_id"],)).fetchall() if inv["quote_id"] else [];payments=c.execute("SELECT * FROM payments WHERE invoice_id=? ORDER BY paid_at DESC",(iid,)).fetchall();return inv,items,payments
  def update_charges(self,iid,tax_cents=0,shipping_cents=0,discount_cents=0,notes=""):
   with self.db.connect() as c:
+   c.execute("BEGIN IMMEDIATE")
    inv=c.execute("SELECT subtotal_cents,status FROM invoices WHERE id=?",(iid,)).fetchone()
    if not inv:raise KeyError("Invoice not found.")
    payment_table=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payment_transactions'").fetchone()
@@ -105,8 +107,8 @@ class InvoiceService:
     if fulfillment and fulfillment["status"] in ("delivered","picked_up"):c.execute("UPDATE orders SET status='completed' WHERE id=?",(inv["order_id"],))
    c.commit()
  def void(self,iid):
-  self.reconcile(iid)
   with self.db.connect() as c:
+   c.execute("BEGIN IMMEDIATE")
    inv=c.execute("SELECT paid_cents,status,total_cents FROM invoices WHERE id=?",(iid,)).fetchone()
    if not inv:raise KeyError("Invoice not found.")
    ledger_paid=int(c.execute("SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE invoice_id=?",(iid,)).fetchone()[0])

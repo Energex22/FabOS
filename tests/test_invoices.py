@@ -70,5 +70,22 @@ class InvoiceTests(unittest.TestCase):
    self.assertEqual(inv["paid_cents"],700)
    self.assertEqual(len(payments),1)
 
+ def test_invoice_mutators_serialize_state(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   oid=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("INSERT INTO orders(id,order_number,total_cents) VALUES(?,?,?)",(oid,"O-MUT",1000));c.commit()
+   svc=InvoiceService(db,Path(td));iid,_=svc.create_from_order(oid)
+   svc.record_payment(iid,500,"Cash")
+   svc.update_charges(iid,100,0,0,"note")
+   inv,_,_=svc.get(iid)
+   self.assertEqual(inv["paid_cents"],500)
+   self.assertEqual(inv["total_cents"],1100)
+   svc.reconcile(iid)
+   inv,_,_=svc.get(iid)
+   self.assertEqual(inv["paid_cents"],500)
+   self.assertEqual(inv["status"],"partial")
+
 
 if __name__=="__main__":unittest.main()
