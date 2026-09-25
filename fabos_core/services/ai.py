@@ -225,20 +225,26 @@ class AIService:
     def _record_message(self, conversation_id, role, content):
         if not self.database:
             return
-        with self.database.connect() as conn:
-            conn.execute("INSERT INTO ai_messages(id,conversation_id,role,content) VALUES(?,?,?,?)",
-                         (str(uuid.uuid4()), conversation_id, role, str(content or "")[:20000]))
-            conn.execute("UPDATE ai_conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (conversation_id,))
-            conn.commit()
+        try:
+            with self.database.connect() as conn:
+                conn.execute("INSERT INTO ai_messages(id,conversation_id,role,content) VALUES(?,?,?,?)",
+                             (str(uuid.uuid4()), conversation_id, role, str(content or "")[:20000]))
+                conn.execute("UPDATE ai_conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (conversation_id,))
+                conn.commit()
+        except Exception:
+            pass
 
     def _record_tool_event(self, conversation_id, user_id, name, arguments, result):
         if not self.database:
             return
-        with self.database.connect() as conn:
-            conn.execute("INSERT INTO ai_tool_events(id,conversation_id,user_id,tool_name,arguments_json,result_json) VALUES(?,?,?,?,?,?)",
-                         (str(uuid.uuid4()), conversation_id, user_id, name,
-                          json.dumps(arguments, default=str)[:12000], json.dumps(result, default=str)[:16000]))
-            conn.commit()
+        try:
+            with self.database.connect() as conn:
+                conn.execute("INSERT INTO ai_tool_events(id,conversation_id,user_id,tool_name,arguments_json,result_json) VALUES(?,?,?,?,?,?)",
+                             (str(uuid.uuid4()), conversation_id, user_id, name,
+                              json.dumps(arguments, default=str)[:12000], json.dumps(result, default=str)[:16000]))
+                conn.commit()
+        except Exception:
+            pass
 
     def chat(self, message, context=None, conversation_id=None, user_id=None):
         if not message or not str(message).strip():
