@@ -21,6 +21,9 @@ class ShopSettingsService:
         "notification_qc_required": "true", "notification_shipped": "true", "notification_low_inventory": "true",
         "console_lock_enabled": "true", "console_idle_timeout_minutes": "15", "console_local_only": "true",
         "marketing_enabled": "true", "marketing_require_approval": "true", "marketing_default_publish_mode": "manual", "marketing_timezone": "America/Chicago",
+        "marketing_etsy_shop_id": "", "marketing_etsy_credential_ref": "", "marketing_ebay_account_ref": "",
+        "marketing_facebook_page_id": "", "marketing_facebook_credential_ref": "", "marketing_instagram_account_ref": "",
+        "marketing_tiktok_account_ref": "", "marketing_pinterest_account_ref": "", "marketing_email_provider_ref": "",
         "production_automation_enabled": "true", "production_auto_assign": "true", "production_auto_start": "false", "production_automation_interval_seconds": "10",
     }
 
@@ -74,7 +77,9 @@ class ShopSettingsService:
         },
         "marketing": {
             "marketing_enabled": "Enable the marketing and sales hub", "marketing_require_approval": "Require owner/admin approval before external publishing",
-            "marketing_default_publish_mode": "Default channel publishing mode", "marketing_timezone": "Timezone used for scheduled marketing posts",
+            "marketing_default_publish_mode": "Default channel publishing mode", "marketing_timezone": "Timezone used for scheduled marketing posts", "marketing_etsy_shop_id": "Etsy shop identifier", "marketing_etsy_credential_ref": "Secret-store/environment reference for Etsy OAuth credentials",
+            "marketing_ebay_account_ref": "Secret-store/environment reference for eBay credentials", "marketing_facebook_page_id": "Facebook Page identifier", "marketing_facebook_credential_ref": "Secret-store/environment reference for Meta credentials",
+            "marketing_instagram_account_ref": "Instagram account reference", "marketing_tiktok_account_ref": "TikTok account reference", "marketing_pinterest_account_ref": "Pinterest account reference", "marketing_email_provider_ref": "Email provider configuration reference",
         },
         "production": {
             "default_slicer": "Default slicer", "cura_engine_path": "Cura engine executable", "cura_petg_profile_path": "PETG Cura profile", "cura_fdmprinter_path": "Cura printer definition", "cura_fdmextruder_path": "Cura extruder definition",
