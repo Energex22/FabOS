@@ -644,6 +644,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         output = tk.Text(card, height=20, wrap="word", bg=COLORS["panel"], fg=COLORS["text"], insertbackground=COLORS["text"])
         output.pack(fill="both", expand=True, padx=16, pady=(0, 10))
         output.insert("end", "Ask FabOS about products, pricing, operations, or marketing.\\n\\n")
+        conversation_id = {"value": None}
 
         row = tk.Frame(card, bg=COLORS["surface"])
         row.pack(fill="x", padx=16, pady=(0, 16))
@@ -656,15 +657,25 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                 return
             output.insert("end", "You: %s\\n" % message)
             output.see("end")
-            try:
-                response = self.core.ai.chat(message)
-            except Exception as exc:
-                response = "AI error: %s" % exc
-            output.insert("end", "FabOS AI: %s\\n\\n" % response)
-            output.see("end")
             entry.delete(0, "end")
 
-        self._button(row, "Ask FabOS AI", ask, True).pack(side="right")
+            def worker():
+                try:
+                    result = self.core.ai.chat(message, conversation_id=conversation_id["value"])
+                    if isinstance(result, dict):
+                        conversation_id["value"] = result.get("conversation_id") or conversation_id["value"]
+                        response = result.get("response", "")
+                    else:
+                        response = result
+                except Exception as exc:
+                    response = "AI error: %s" % exc
+                self.after(0, lambda: (output.insert("end", "FabOS AI: %s\\n\\n" % response),
+                                       output.see("end")))
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        ask_button = self._button(row, "Ask FabOS AI", ask, True)
+        ask_button.pack(side="right")
         entry.bind("<Return>", lambda _event: ask())
 
     def _render_workspace_error(self,page_name,exc):
