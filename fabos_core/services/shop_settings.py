@@ -20,6 +20,7 @@ class ShopSettingsService:
         "notification_order_received": "true", "notification_payment_received": "true", "notification_production_started": "true",
         "notification_qc_required": "true", "notification_shipped": "true", "notification_low_inventory": "true",
         "console_lock_enabled": "true", "console_idle_timeout_minutes": "15", "console_local_only": "true",
+        "marketing_enabled": "true", "marketing_require_approval": "true", "marketing_default_publish_mode": "manual", "marketing_timezone": "America/Chicago",
         "production_automation_enabled": "true", "production_auto_assign": "true", "production_auto_start": "false", "production_automation_interval_seconds": "10",
     }
 
@@ -71,6 +72,10 @@ class ShopSettingsService:
             "production_auto_start": "Automatically start eligible prints (keep off for physical printers until explicitly enabled)",
             "production_automation_interval_seconds": "Automation check interval in seconds",
         },
+        "marketing": {
+            "marketing_enabled": "Enable the marketing and sales hub", "marketing_require_approval": "Require owner/admin approval before external publishing",
+            "marketing_default_publish_mode": "Default channel publishing mode", "marketing_timezone": "Timezone used for scheduled marketing posts",
+        },
         "production": {
             "default_slicer": "Default slicer", "cura_engine_path": "Cura engine executable", "cura_petg_profile_path": "PETG Cura profile", "cura_fdmprinter_path": "Cura printer definition", "cura_fdmextruder_path": "Cura extruder definition",
         },
@@ -81,6 +86,7 @@ class ShopSettingsService:
         "storefront_default_visibility": {"draft", "review", "published", "retired"},
         "shipping_mode": {"calculated", "flat", "free"},
         "payment_provider": {"stripe", "square", "none"},
+        "marketing_default_publish_mode": {"manual", "webhook", "api"},
     }
     NUMERIC_KEYS = {
         "invoice_due_days", "default_tax_percent", "quote_valid_days", "machine_hourly_cost", "default_material_cost_per_g", "labor_hourly_rate",
