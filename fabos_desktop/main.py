@@ -581,7 +581,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
 
         toolbar = tk.Frame(card, bg=COLORS["surface"])
         toolbar.pack(fill="x", padx=16, pady=(0, 12))
-        self._button(toolbar, "Refresh", self._build_marketing_page, True).pack(side="left")
+        self._button(toolbar, "Refresh", lambda: self.show_page("Marketing"), True).pack(side="left")
 
         dashboard = self.core.marketing.dashboard()
         metrics = tk.Frame(card, bg=COLORS["surface"])
