@@ -37,8 +37,17 @@ class AIServiceTest(unittest.TestCase):
             "urllib.request.urlopen", return_value=FakeResponse()
         ):
             result = self.service.chat("Hello")
-        self.assertEqual(result, "Hello from FabOS")
+        self.assertEqual(result["response"], "Hello from FabOS")
+        self.assertTrue(result["conversation_id"])
 
+    def test_exposes_only_read_only_tools(self):
+        names = [item["function"]["name"] for item in self.service.tool_definitions()]
+        self.assertEqual(names, [
+            "search_products", "get_product", "business_snapshot",
+            "order_summary", "marketing_snapshot",
+        ])
+        self.assertNotIn("publish_post", names)
+        self.assertNotIn("change_price", names)
 
 if __name__ == "__main__":
     unittest.main()
