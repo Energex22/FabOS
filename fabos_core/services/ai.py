@@ -8,6 +8,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+import uuid
 
 
 class AIService:
@@ -207,23 +208,52 @@ class AIService:
         message = result.get("message", {}) if provider == "ollama" else result.get("choices", [{}])[0].get("message", {})
         return message, result
 
-    def chat(self, message, context=None):
+    def _conversation(self, conversation_id=None, user_id=None):
+        if not self.database:
+            return conversation_id or str(uuid.uuid4())
+        conversation_id = conversation_id or str(uuid.uuid4())
+        with self.database.connect() as conn:
+            exists = conn.execute("SELECT id FROM ai_conversations WHERE id=?", (conversation_id,)).fetchone()
+            if not exists:
+                conn.execute("INSERT INTO ai_conversations(id,user_id) VALUES(?,?)", (conversation_id, user_id))
+                conn.commit()
+        return conversation_id
+
+    def _record_message(self, conversation_id, role, content):
+        if not self.database:
+            return
+        with self.database.connect() as conn:
+            conn.execute("INSERT INTO ai_messages(id,conversation_id,role,content) VALUES(?,?,?,?)",
+                         (str(uuid.uuid4()), conversation_id, role, str(content or "")[:20000]))
+            conn.execute("UPDATE ai_conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?", (conversation_id,))
+            conn.commit()
+
+    def _record_tool_event(self, conversation_id, user_id, name, arguments, result):
+        if not self.database:
+            return
+        with self.database.connect() as conn:
+            conn.execute("INSERT INTO ai_tool_events(id,conversation_id,user_id,tool_name,arguments_json,result_json) VALUES(?,?,?,?,?,?)",
+                         (str(uuid.uuid4()), conversation_id, user_id, name,
+                          json.dumps(arguments, default=str)[:12000], json.dumps(result, default=str)[:16000]))
+            conn.commit()
+
+    def chat(self, message, context=None, conversation_id=None, user_id=None):
         if not message or not str(message).strip():
             raise ValueError("Message is required")
-        messages = [{"role": "system", "content": self._system_prompt()}]
+        conversation_id = self._conversation(conversation_id, user_id)\n        messages = [{"role": "system", "content": self._system_prompt()}]
         if context:
             safe_context = dict(context)
             if not self._setting("ai_allow_customer_data", "false").lower() in ("1", "true", "yes", "on"):
                 safe_context.pop("customer", None)
                 safe_context.pop("customers", None)
             messages.append({"role": "system", "content": "FabOS context:\n" + json.dumps(safe_context, default=str)[:12000]})
-        messages.append({"role": "user", "content": str(message).strip()[:12000]})
+        user_message = str(message).strip()[:12000]\n        messages.append({"role": "user", "content": user_message})\n        self._record_message(conversation_id, "user", user_message)
 
         for _ in range(self.MAX_TOOL_ROUNDS):
             response_message, _ = self._request(messages, use_tools=True)
             tool_calls = response_message.get("tool_calls") or []
             if not tool_calls:
-                return response_message.get("content", "") or ""
+                answer = response_message.get("content", "") or ""\n                self._record_message(conversation_id, "assistant", answer)\n                return {"conversation_id": conversation_id, "response": answer}
             assistant_message = {
                 "role": "assistant",
                 "content": response_message.get("content") or "",
@@ -235,7 +265,7 @@ class AIService:
                 name = function.get("name", "")
                 try:
                     arguments = json.loads(function.get("arguments") or "{}")
-                    output = self._tool_result(name, arguments)
+                    output = self._tool_result(name, arguments)\n                    self._record_tool_event(conversation_id, user_id, name, arguments, output)
                 except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
                     output = {"error": str(exc)}
                 tool_message = {
@@ -255,7 +285,7 @@ class AIService:
         images = self.products.images(product_id)
         if images:
             context["images"] = [dict(row) for row in images]
-        return self.chat(instruction, context)
+        result = self.chat(instruction, context)\n        return result["response"] if isinstance(result, dict) else result
 
     def marketing_assistant(self, product_id):
         return self.product_assistant(
