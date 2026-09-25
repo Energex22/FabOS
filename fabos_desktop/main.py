@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox, ttk, filedialog
+from tkinter import messagebox, ttk, filedialog, simpledialog
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -316,6 +316,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             ("Dashboard", "▦", "Dashboard"),
             ("Catalog", "◫", "Products"),
             ("Business", "$", "Quotes"),
+            ("Marketing", "✦", "Marketing"),
             ("Production", "▶", "Production"),
             ("Inventory", "◉", "Filament"),
             ("System", "⚙", "Settings"),
@@ -404,6 +405,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         "Orders": ("Business", ["Customers", "Quotes", "Orders", "Invoices", "Analytics"]),
         "Invoices": ("Business", ["Customers", "Quotes", "Orders", "Invoices", "Analytics"]),
         "Analytics": ("Business", ["Customers", "Quotes", "Orders", "Invoices", "Analytics"]),
+        "Marketing": ("Marketing", ["Marketing"]),
         "Production": ("Production", ["Production", "Printers", "QC"]),
         "Printers": ("Production", ["Production", "Printers", "QC"]),
         "QC": ("Production", ["Production", "Printers", "QC"]),
@@ -522,6 +524,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             "Orders": "Track approved customer work through delivery",
             "Invoices": "Billing and payment records",
             "Analytics": "Profitability, tracked costs and manufacturing performance",
+            "Marketing": "Campaigns, posts, channels and marketplace sales",
             "Production": "Schedule and monitor manufacturing jobs",
             "Printers": "Live OctoPrint status, temperatures and printer control",
             "QC": "Inspect completed prints before orders become ready",
@@ -555,6 +558,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                 "Printers": self._build_printers_page,
                 "Filament": self._build_filament_page,
                 "Analytics": self._build_analytics_page,
+                "Marketing": self._build_marketing_page,
                 "Invoices": self._build_invoices_page,
                 "Backup & Health": self._build_backup_health_page,
                 "Activity": self._build_activity_page,
@@ -570,6 +574,59 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             try:self.core.error_log.error("Workspace build failed",exc,{"page":page_name})
             except Exception:pass
             self._render_workspace_error(page_name,exc)
+
+    def _build_marketing_page(self):
+        card = self._card(self.content, "Marketing & Sales Hub")
+        card.pack(fill="both", expand=True, padx=4, pady=4)
+
+        toolbar = tk.Frame(card, bg=COLORS["surface"])
+        toolbar.pack(fill="x", padx=16, pady=(0, 12))
+        self._button(toolbar, "Refresh", self._build_marketing_page, True).pack(side="left")
+
+        dashboard = self.core.marketing.dashboard()
+        metrics = tk.Frame(card, bg=COLORS["surface"])
+        metrics.pack(fill="x", padx=16, pady=(0, 12))
+        values = [
+            ("ACTIVE CHANNELS", dashboard["active_channels"], COLORS["green"]),
+            ("SCHEDULED POSTS", dashboard["scheduled_posts"], COLORS["blue"]),
+            ("PUBLISHED POSTS", dashboard["published_posts"], COLORS["mint"]),
+            ("FAILED POSTS", dashboard["failed_posts"], COLORS["red"]),
+        ]
+        for title, value, accent in values:
+            self._metric_card(metrics, title, value, accent, "Marketing")
+            metrics.winfo_children()[-1].pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        body = tk.Frame(card, bg=COLORS["surface"])
+        body.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+
+        left = self._card(body, "Channels")
+        left.pack(side="left", fill="both", expand=True, padx=(0, 8))
+        channel_table = ttk.Treeview(left, columns=("name","type","active","mode"), show="headings", style="Dark.Treeview")
+        for col, label, width in (("name","Channel",150),("type","Type",90),("active","Enabled",70),("mode","Publish Mode",100)):
+            channel_table.heading(col, text=label)
+            channel_table.column(col, width=width, anchor="w")
+        channel_table.pack(fill="both", expand=True, padx=12, pady=12)
+        for row in self.core.marketing.channels():
+            channel_table.insert("", "end", values=(row["name"], row["channel_type"], "Yes" if row["active"] else "No", row["publish_mode"]))
+
+        right = self._card(body, "Recent Posts")
+        right.pack(side="right", fill="both", expand=True, padx=(8, 0))
+        post_table = ttk.Treeview(right, columns=("title","status","scheduled"), show="headings", style="Dark.Treeview")
+        for col, label, width in (("title","Post",190),("status","Status",90),("scheduled","Scheduled",150)):
+            post_table.heading(col, text=label)
+            post_table.column(col, width=width, anchor="w")
+        post_table.pack(fill="both", expand=True, padx=12, pady=12)
+        for row in self.core.marketing.posts(limit=50):
+            post_table.insert("", "end", values=(row["title"] or "Untitled", row["status"], row["scheduled_at"] or "—"))
+
+        sales = self.core.marketing.external_sales_summary(30)
+        if sales:
+            sales_card = self._card(card, "Marketplace Sales — Last 30 Days")
+            sales_card.pack(fill="x", padx=16, pady=(0, 16))
+            for row in sales:
+                tk.Label(sales_card, text="%s: %d orders • $%.2f" % (
+                    row["channel"] or "Unknown", row["orders"], row["revenue_cents"] / 100.0
+                ), bg=COLORS["surface"], fg=COLORS["text"], font=("Segoe UI", 9)).pack(anchor="w", padx=16, pady=3)
 
     def _render_workspace_error(self,page_name,exc):
         self._clear_content()
