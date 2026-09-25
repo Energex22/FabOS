@@ -116,11 +116,13 @@ echo This starts the FastAPI/Uvicorn server on the configured
 echo FABOS_API_HOST/FABOS_API_PORT values (default: 127.0.0.1:8000).
 echo Press Ctrl+C to stop the server.
 echo.
-where python >nul 2>nul
-if errorlevel 1 (
-    echo ERROR: Python was not found on PATH.
-    pause
-    goto :menu
+if /I "%FABOS_PYTHON%"=="python" (
+    where python >nul 2>nul
+    if errorlevel 1 (
+        echo ERROR: Python was not found on PATH.
+        pause
+        goto :menu
+    )
 )
 "%FABOS_PYTHON%" -m fabos_core.cli serve
 echo.
@@ -134,11 +136,13 @@ echo ============================================
 echo              FabOS Test Suite
 echo ============================================
 echo.
-where python >nul 2>nul
-if errorlevel 1 (
-    echo ERROR: Python was not found on PATH.
-    pause
-    goto :menu
+if /I "%FABOS_PYTHON%"=="python" (
+    where python >nul 2>nul
+    if errorlevel 1 (
+        echo ERROR: Python was not found on PATH.
+        pause
+        goto :menu
+    )
 )
 "%FABOS_PYTHON%" -m unittest discover -s tests -v
 echo.
@@ -171,11 +175,13 @@ echo ============================================
 echo          Install Image Support
 echo ============================================
 echo.
-where python >nul 2>nul
-if errorlevel 1 (
-    echo ERROR: Python was not found on PATH.
-    pause
-    goto :menu
+if /I "%FABOS_PYTHON%"=="python" (
+    where python >nul 2>nul
+    if errorlevel 1 (
+        echo ERROR: Python was not found on PATH.
+        pause
+        goto :menu
+    )
 )
 "%FABOS_PYTHON%" -m pip install "Pillow==9.5.0"
 echo.
