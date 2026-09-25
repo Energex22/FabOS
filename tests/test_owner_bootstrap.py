@@ -99,14 +99,17 @@ class ProductionSetupCommandTests(OwnerBootstrapTests):
         with tempfile.TemporaryDirectory() as temp:
             env_file=Path(temp)/"server.env"
             with patch.dict(os.environ,{"FABOS_ENV_FILE":str(env_file)}), patch("builtins.input",return_value="test"), patch.object(
-                getpass,"getpass",side_effect=["pk_test_example","sk_test_example"]
+                getpass,"getpass",side_effect=["pk_test_example","sk_test_example","whsec_example"]
             ):
                 _setup_stripe()
             text=env_file.read_text(encoding="utf-8")
             self.assertIn("STRIPE_MODE=test",text)
             self.assertIn("STRIPE_PUBLISHABLE_KEY=pk_test_example",text)
             self.assertIn("STRIPE_SECRET_KEY=sk_test_example",text)
+            self.assertIn("STRIPE_WEBHOOK_SECRET=whsec_example",text)
+            self.assertIn("FABOS_PAYMENT_PROVIDER=stripe",text)
             self.assertIn("https://fabvex.duckdns.org/orders.html",text)
+            self.assertIn("https://fabvex.duckdns.org/checkout.html",text)
 
     def test_dns_setup_updates_duckdns_and_writes_settings(self):
         import getpass
