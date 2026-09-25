@@ -78,7 +78,9 @@ CREATE INDEX IF NOT EXISTS idx_marketing_posts_status ON marketing_posts(status,
 CREATE INDEX IF NOT EXISTS idx_marketing_posts_product ON marketing_posts(product_id);
 CREATE INDEX IF NOT EXISTS idx_marketing_campaigns_status ON marketing_campaigns(status);
 CREATE TABLE IF NOT EXISTS marketing_sales_snapshots(id TEXT PRIMARY KEY,channel_type TEXT NOT NULL,orders INTEGER NOT NULL DEFAULT 0,revenue_cents INTEGER NOT NULL DEFAULT 0,period_start TEXT,period_end TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-INSERT OR IGNORE INTO shop_settings(key,value) VALUES('marketing_enabled','true'),('marketing_require_approval','true'),('marketing_default_publish_mode','manual'),('marketing_timezone','America/Chicago');"""),
+INSERT OR IGNORE INTO shop_settings(key,value) VALUES('marketing_enabled','true'),('marketing_require_approval','true'),('marketing_default_publish_mode','manual'),('marketing_timezone','America/Chicago');
+INSERT OR IGNORE INTO marketing_channels(id,name,channel_type,active,publish_mode) VALUES
+('channel_website','FABVEX Website','website',1,'api'),('channel_etsy','Etsy', 'etsy',0,'api'),('channel_ebay','eBay','ebay',0,'api'),('channel_facebook','Facebook','facebook',0,'api'),('channel_instagram','Instagram','instagram',0,'api'),('channel_tiktok','TikTok','tiktok',0,'api'),('channel_pinterest','Pinterest','pinterest',0,'api');"""),
 
 (47,"""CREATE TABLE IF NOT EXISTS marketing_external_orders(id TEXT PRIMARY KEY,channel_id TEXT REFERENCES marketing_channels(id) ON DELETE SET NULL,external_order_id TEXT NOT NULL,order_status TEXT NOT NULL DEFAULT 'new',customer_name TEXT,customer_email TEXT,total_cents INTEGER NOT NULL DEFAULT 0,currency TEXT NOT NULL DEFAULT 'USD',items_json TEXT NOT NULL DEFAULT '[]',raw_json TEXT NOT NULL DEFAULT '{}',ordered_at TEXT,imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_marketing_external_order ON marketing_external_orders(channel_id,external_order_id);
