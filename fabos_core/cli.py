@@ -30,6 +30,32 @@ def _write_env(values):
     print(f"Saved production settings to: {path.resolve()}")
     return path
 
+def _load_private_env():
+    path=_env_file_path()
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped=line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key,value=stripped.split("=",1)
+        key=key.strip()
+        if key and key not in os.environ:
+            os.environ[key]=value.strip().strip('"').strip("'")
+
+def _setup_data_dir():
+    _load_private_env()
+    current=os.environ.get("FABOS_DATA_DIR","").strip()
+    if not current:
+        default_existing=Path.home()/"WireVault FabOS Data"
+        current=str(default_existing if default_existing.exists() else Path("C:/FabVex/Data"))
+    data_dir=input(f"FabOS data directory [{current}]: ").strip() or current
+    path=Path(os.path.expandvars(os.path.expanduser(data_dir))).resolve()
+    path.mkdir(parents=True,exist_ok=True)
+    _write_env({"FABOS_DATA_DIR":str(path)})
+    os.environ["FABOS_DATA_DIR"]=str(path)
+    print(f"FabOS production data directory: {path}")
+
 def _setup_dns():
     print("\nDuckDNS setup")
     domain=(input("DuckDNS hostname [fabvex.duckdns.org]: ").strip() or "fabvex.duckdns.org").lower()
@@ -98,6 +124,7 @@ def _setup_stripe():
     print("Use Stripe test cards first; switch to live only after the end-to-end checkout and webhook are verified.")
 
 def _setup_owner():
+    _load_private_env()
     app=FabOSApplication()
     with app.database.connect() as connection:
         owner=connection.execute(
@@ -155,6 +182,7 @@ def main():
         print("4. All of the above")
         print("5. Back")
         choice=input("Select an option: ").strip()
+        if choice in {"4"}: _setup_data_dir()
         if choice in {"1","4"}: _setup_owner()
         if choice in {"2","4"}: _setup_dns()
         if choice in {"3","4"}: _setup_stripe()
