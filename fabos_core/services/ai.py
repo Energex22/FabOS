@@ -212,11 +212,14 @@ class AIService:
         if not self.database:
             return conversation_id or str(uuid.uuid4())
         conversation_id = conversation_id or str(uuid.uuid4())
-        with self.database.connect() as conn:
-            exists = conn.execute("SELECT id FROM ai_conversations WHERE id=?", (conversation_id,)).fetchone()
-            if not exists:
-                conn.execute("INSERT INTO ai_conversations(id,user_id) VALUES(?,?)", (conversation_id, user_id))
-                conn.commit()
+        try:
+            with self.database.connect() as conn:
+                exists = conn.execute("SELECT id FROM ai_conversations WHERE id=?", (conversation_id,)).fetchone()
+                if not exists:
+                    conn.execute("INSERT INTO ai_conversations(id,user_id) VALUES(?,?)", (conversation_id, user_id))
+                    conn.commit()
+        except Exception:
+            pass
         return conversation_id
 
     def _record_message(self, conversation_id, role, content):
