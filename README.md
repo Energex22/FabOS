@@ -8,7 +8,7 @@ FabOS also exposes a customer-facing HTTP API consumed by
 [FabOS-Web](https://github.com/Energex22/FabOS-Web), the public FABVEX
 storefront. Customers never need to know the internal system is called FabOS.
 
-Current version: `0.16.0-beta.6` (`fabos_core.__version__`). Python 3.8
+Current version: `0.16.0-beta.7` (`fabos_core.__version__`). Python 3.8
 compatible.
 
 ## Quick start
