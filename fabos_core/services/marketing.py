@@ -175,4 +175,60 @@ class MarketingService:
             channels = c.execute("SELECT COUNT(*) FROM marketing_channels WHERE active=1").fetchone()[0]
         return {"active_campaigns": campaigns, "scheduled_posts": scheduled,
                 "published_posts": published, "failed_posts": failed, "active_channels": channels,
-                "sales": self.sales_summary(30)}
+                "sales": self.sales_summary(30), "external_sales": self.external_sales_summary(30)}
+
+
+    def import_external_sale(self, channel_id, external_order_id, order_status="new",
+                             customer_name="", customer_email="", total_cents=0, currency="USD",
+                             items=None, raw=None, ordered_at=None):
+        if not channel_id or not external_order_id:
+            raise ValueError("channel_id and external_order_id are required")
+        sale_id = _id("sale")
+        with self.db.connect() as conn:
+            existing = conn.execute(
+                "SELECT id FROM marketing_external_orders WHERE channel_id=? AND external_order_id=?",
+                (channel_id, str(external_order_id))).fetchone()
+            if existing:
+                sale_id = existing["id"]
+                conn.execute("""UPDATE marketing_external_orders SET order_status=?,customer_name=?,
+                                customer_email=?,total_cents=?,currency=?,items_json=?,raw_json=?,
+                                ordered_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                             (order_status, customer_name, customer_email, int(total_cents or 0), currency,
+                              json.dumps(items or []), json.dumps(raw or {}), ordered_at, sale_id))
+            else:
+                conn.execute("""INSERT INTO marketing_external_orders
+                    (id,channel_id,external_order_id,order_status,customer_name,customer_email,
+                     total_cents,currency,items_json,raw_json,ordered_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    (sale_id, channel_id, str(external_order_id), order_status, customer_name,
+                     customer_email, int(total_cents or 0), currency, json.dumps(items or []),
+                     json.dumps(raw or {}), ordered_at))
+            conn.commit()
+        return self.external_sale(sale_id)
+
+    def external_sale(self, sale_id):
+        with self.db.connect() as conn:
+            return conn.execute("SELECT * FROM marketing_external_orders WHERE id=?", (sale_id,)).fetchone()
+
+    def external_sales(self, channel_id=None, limit=100):
+        sql = "SELECT * FROM marketing_external_orders"
+        args = []
+        if channel_id:
+            sql += " WHERE channel_id=?"
+            args.append(channel_id)
+        sql += " ORDER BY COALESCE(ordered_at,imported_at) DESC LIMIT ?"
+        args.append(max(1, min(int(limit), 500)))
+        with self.db.connect() as conn:
+            return conn.execute(sql, tuple(args)).fetchall()
+
+    def external_sales_summary(self, days=30):
+        with self.db.connect() as conn:
+            rows = conn.execute("""SELECT c.channel_type channel,COUNT(*) orders,
+                                          COALESCE(SUM(s.total_cents),0) revenue_cents
+                                   FROM marketing_external_orders s
+                                   LEFT JOIN marketing_channels c ON c.id=s.channel_id
+                                   WHERE s.order_status NOT IN ('cancelled','refunded')
+                                     AND date(COALESCE(s.ordered_at,s.imported_at))>=date('now',?)
+                                   GROUP BY c.channel_type ORDER BY revenue_cents DESC""",
+                                ("-%d days" % int(days),)).fetchall()
+        return [dict(row) for row in rows]
