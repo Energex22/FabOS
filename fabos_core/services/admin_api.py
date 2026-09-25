@@ -272,3 +272,83 @@ def register_admin_routes(app, get_application, administrator_user):
             if not conn.execute("SELECT 1 FROM orders WHERE id=?", (order_id,)).fetchone():
                 raise HTTPException(status_code=404, detail="Order not found")
         return {"items": [dict(row) for row in application.price_history.order_items(order_id)]}
+
+
+    @app.get("/api/v1/admin/marketing/dashboard")
+    def marketing_dashboard(user=Depends(administrator_user), application=Depends(get_application)):
+        return application.marketing.dashboard()
+
+    @app.get("/api/v1/admin/marketing/channels")
+    def marketing_channels(user=Depends(administrator_user), application=Depends(get_application)):
+        return {"channels": [dict(row) for row in application.marketing.channels()]}
+
+    @app.put("/api/v1/admin/marketing/channels/{channel_id}")
+    def update_marketing_channel(channel_id: str, payload: dict, user=Depends(administrator_user), application=Depends(get_application)):
+        data = dict(payload or {})
+        data["channel_id"] = channel_id
+        try:
+            row = application.marketing.save_channel(**data)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"channel": dict(row)}
+
+    @app.post("/api/v1/admin/marketing/channels")
+    def create_marketing_channel(payload: dict, user=Depends(administrator_user), application=Depends(get_application)):
+        try:
+            row = application.marketing.save_channel(**dict(payload or {}))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"channel": dict(row)}
+
+    @app.get("/api/v1/admin/marketing/campaigns")
+    def marketing_campaigns(status: Optional[str] = None, user=Depends(administrator_user), application=Depends(get_application)):
+        return {"campaigns": [dict(row) for row in application.marketing.campaigns(status)]}
+
+    @app.post("/api/v1/admin/marketing/campaigns")
+    def create_marketing_campaign(payload: dict, user=Depends(administrator_user), application=Depends(get_application)):
+        try:
+            row = application.marketing.save_campaign(**dict(payload or {}))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"campaign": dict(row)}
+
+    @app.get("/api/v1/admin/marketing/posts")
+    def marketing_posts(status: Optional[str] = None, limit: int = 100, user=Depends(administrator_user), application=Depends(get_application)):
+        return {"posts": [dict(row) for row in application.marketing.posts(status, limit)]}
+
+    @app.post("/api/v1/admin/marketing/posts")
+    def create_marketing_post(payload: dict, user=Depends(administrator_user), application=Depends(get_application)):
+        try:
+            row = application.marketing.create_post(**dict(payload or {}))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"post": dict(row)}
+
+    @app.post("/api/v1/admin/marketing/posts/{post_id}/approve")
+    def approve_marketing_post(post_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        post = application.marketing.post(post_id)
+        if not post:
+            raise HTTPException(status_code=404, detail="Post not found")
+        if not post[1]:
+            raise HTTPException(status_code=409, detail="Post has no channels")
+        with application.database.connect() as conn:
+            conn.execute("UPDATE marketing_posts SET status='scheduled',updated_at=CURRENT_TIMESTAMP WHERE id=?", (post_id,))
+            conn.execute("UPDATE marketing_post_channels SET status='scheduled' WHERE post_id=? AND status='draft'", (post_id,))
+            conn.commit()
+        return {"approved": True, "post_id": post_id}
+
+    @app.post("/api/v1/admin/marketing/posts/queue-due")
+    def queue_due_marketing_posts(user=Depends(administrator_user), application=Depends(get_application)):
+        return {"queued": application.marketing.queue_due_posts()}
+
+    @app.get("/api/v1/admin/marketing/posts/{post_id}")
+    def get_marketing_post(post_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        post = application.marketing.post(post_id)
+        if not post:
+            raise HTTPException(status_code=404, detail="Post not found")
+        row, channels = post
+        return {"post": dict(row), "channels": [dict(channel) for channel in channels]}
+
+    @app.get("/api/v1/admin/marketing/sales")
+    def marketing_sales(days: int = 30, user=Depends(administrator_user), application=Depends(get_application)):
+        return {"days": max(1, min(days, 3650)), "channels": application.marketing.sales_summary(max(1, min(days, 3650)))}
