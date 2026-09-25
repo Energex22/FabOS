@@ -317,6 +317,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             ("Catalog", "◫", "Products"),
             ("Business", "$", "Quotes"),
             ("Marketing", "✦", "Marketing"),
+            ("AI Assistant", "AI", "AI Assistant"),
             ("Production", "▶", "Production"),
             ("Inventory", "◉", "Filament"),
             ("System", "⚙", "Settings"),
@@ -406,6 +407,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
         "Invoices": ("Business", ["Customers", "Quotes", "Orders", "Invoices", "Analytics"]),
         "Analytics": ("Business", ["Customers", "Quotes", "Orders", "Invoices", "Analytics"]),
         "Marketing": ("Marketing", ["Marketing"]),
+        "AI Assistant": ("AI Assistant", ["AI Assistant"]),
         "Production": ("Production", ["Production", "Printers", "QC"]),
         "Printers": ("Production", ["Production", "Printers", "QC"]),
         "QC": ("Production", ["Production", "Printers", "QC"]),
@@ -525,6 +527,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
             "Invoices": "Billing and payment records",
             "Analytics": "Profitability, tracked costs and manufacturing performance",
             "Marketing": "Campaigns, posts, channels and marketplace sales",
+            "AI Assistant": "AI help for operations, products and marketing",
             "Production": "Schedule and monitor manufacturing jobs",
             "Printers": "Live OctoPrint status, temperatures and printer control",
             "QC": "Inspect completed prints before orders become ready",
@@ -559,6 +562,7 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                 "Filament": self._build_filament_page,
                 "Analytics": self._build_analytics_page,
                 "Marketing": self._build_marketing_page,
+                "AI Assistant": self._build_ai_page,
                 "Invoices": self._build_invoices_page,
                 "Backup & Health": self._build_backup_health_page,
                 "Activity": self._build_activity_page,
@@ -627,6 +631,41 @@ class FabOSDesktop(SystemReliabilityMixin, ProductPrintMixin, InvoiceMixin, Inve
                 tk.Label(sales_card, text="%s: %d orders • $%.2f" % (
                     row["channel"] or "Unknown", row["orders"], row["revenue_cents"] / 100.0
                 ), bg=COLORS["surface"], fg=COLORS["text"], font=("Segoe UI", 9)).pack(anchor="w", padx=16, pady=3)
+
+    def _build_ai_page(self):
+        card = self._card(self.content, "FabOS AI Assistant")
+        card.pack(fill="both", expand=True, padx=4, pady=4)
+        status = self.core.ai.status()
+        tk.Label(card, text="Provider: %s   •   Model: %s   •   %s" % (
+            status["provider"], status["model"] or "not set",
+            "Configured" if status["configured"] else "Not configured"
+        ), bg=COLORS["surface"], fg=COLORS["muted"], font=("Segoe UI", 9)).pack(anchor="w", padx=16, pady=(0, 10))
+
+        output = tk.Text(card, height=20, wrap="word", bg=COLORS["panel"], fg=COLORS["text"], insertbackground=COLORS["text"])
+        output.pack(fill="both", expand=True, padx=16, pady=(0, 10))
+        output.insert("end", "Ask FabOS about products, pricing, operations, or marketing.\\n\\n")
+
+        row = tk.Frame(card, bg=COLORS["surface"])
+        row.pack(fill="x", padx=16, pady=(0, 16))
+        entry = ttk.Entry(row)
+        entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        def ask():
+            message = entry.get().strip()
+            if not message:
+                return
+            output.insert("end", "You: %s\\n" % message)
+            output.see("end")
+            try:
+                response = self.core.ai.chat(message)
+            except Exception as exc:
+                response = "AI error: %s" % exc
+            output.insert("end", "FabOS AI: %s\\n\\n" % response)
+            output.see("end")
+            entry.delete(0, "end")
+
+        self._button(row, "Ask FabOS AI", ask, True).pack(side="right")
+        entry.bind("<Return>", lambda _event: ask())
 
     def _render_workspace_error(self,page_name,exc):
         self._clear_content()
