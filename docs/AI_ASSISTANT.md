@@ -49,3 +49,11 @@ The next major step is tool calling with explicit permissions. That would let th
 - prepare a marketing campaign.
 
 Each action should be represented as a typed FabOS operation with validation, audit logging, and owner approval for consequential actions.
+
+## Safe tool mode
+
+The assistant now exposes a bounded read-only tool layer for product search/details, operational snapshots, recent order summaries, and marketing summaries. Tool calls are limited to three rounds per request and are recorded in the AI audit tables when the database has migration 49 applied.
+
+AI still cannot publish posts, change prices, issue refunds, send customer messages, create production jobs, delete records, or spend money. Those actions require dedicated FabOS workflows and explicit owner approval; the AI approval setting remains enabled by default.
+
+Conversations receive a local ID so the desktop/API clients can maintain continuity. Customer information is excluded from AI context by default via ai_allow_customer_data=false.
