@@ -274,6 +274,24 @@ def register_admin_routes(app, get_application, administrator_user):
         return {"items": [dict(row) for row in application.price_history.order_items(order_id)]}
 
 
+    @app.get("/api/v1/admin/ai/status")
+    def ai_status(user=Depends(administrator_user), application=Depends(get_application)):
+        return application.ai.status()
+
+    @app.post("/api/v1/admin/ai/chat")
+    def ai_chat(payload: dict, user=Depends(administrator_user), application=Depends(get_application)):
+        try:
+            return {"response": application.ai.chat(payload.get("message", ""), payload.get("context"))}
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/v1/admin/ai/products/{product_id}/marketing")
+    def ai_product_marketing(product_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        try:
+            return {"product_id": product_id, "response": application.ai.marketing_assistant(product_id)}
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/api/v1/admin/marketing/dashboard")
     def marketing_dashboard(user=Depends(administrator_user), application=Depends(get_application)):
         return application.marketing.dashboard()
