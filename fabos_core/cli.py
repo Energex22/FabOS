@@ -61,19 +61,41 @@ def _setup_stripe():
         raise SystemExit("Stripe mode must be test or live.")
     publishable=getpass.getpass("Stripe publishable key (hidden): ").strip()
     secret=getpass.getpass("Stripe secret key (hidden): ").strip()
+    webhook_secret=getpass.getpass("Stripe webhook signing secret (optional; whsec_...): ").strip()
     expected_prefix="pk_test_" if mode=="test" else "pk_live_"
     secret_prefix="sk_test_" if mode=="test" else "sk_live_"
     if not publishable.startswith(expected_prefix) or not secret.startswith(secret_prefix):
         raise SystemExit(f"The keys do not match Stripe {mode} mode.")
-    _write_env({
+    if webhook_secret and not webhook_secret.startswith("whsec_"):
+        raise SystemExit("Stripe webhook signing secret must start with whsec_.")
+    env_path=_env_file_path()
+    public_host="fabvex.duckdns.org"
+    if env_path.exists():
+        existing_text=env_path.read_text(encoding="utf-8")
+        for line in existing_text.splitlines():
+            if line.startswith("DUCKDNS_DOMAIN="):
+                subdomain=line.split("=",1)[1].strip().strip('"').strip("'")
+                if subdomain:
+                    public_host=f"{subdomain}.duckdns.org"
+                break
+    values={
+        "FABOS_PAYMENT_PROVIDER":"stripe",
         "STRIPE_MODE":mode,
         "STRIPE_PUBLISHABLE_KEY":publishable,
         "STRIPE_SECRET_KEY":secret,
-        "STRIPE_SUCCESS_URL":"https://fabvex.duckdns.org/orders.html",
-        "STRIPE_CANCEL_URL":"https://fabvex.duckdns.org/checkout.html",
-    })
-    print(f"Stripe {mode} mode is configured.")
-    print("Use Stripe test cards first; switch to live only after the end-to-end checkout is verified.")
+        "STRIPE_SUCCESS_URL":f"https://{public_host}/orders.html",
+        "STRIPE_CANCEL_URL":f"https://{public_host}/checkout.html",
+    }
+    if webhook_secret:
+        values["STRIPE_WEBHOOK_SECRET"]=webhook_secret
+    _write_env(values)
+    print(f"Stripe {mode} mode is configured for {public_host}.")
+    if webhook_secret:
+        print("Stripe webhook signing secret is configured.")
+    else:
+        print("WARNING: Stripe webhook signing secret is not configured yet.")
+        print(f"Create a Stripe webhook endpoint at https://{public_host}/api/v1/webhooks/payments/stripe and run Stripe setup again with its whsec_ signing secret before accepting live payments.")
+    print("Use Stripe test cards first; switch to live only after the end-to-end checkout and webhook are verified.")
 
 def _setup_owner():
     app=FabOSApplication()
