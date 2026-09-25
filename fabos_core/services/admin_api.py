@@ -312,6 +312,13 @@ def register_admin_routes(app, get_application, administrator_user):
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"campaign": dict(row)}
 
+    @app.get("/api/v1/admin/marketing/products/{product_id}/variants")
+    def generate_marketing_variants(product_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        try:
+            return {"product_id": product_id, "variants": application.marketing.generate_post_variants(product_id)}
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.get("/api/v1/admin/marketing/posts")
     def marketing_posts(status: Optional[str] = None, limit: int = 100, user=Depends(administrator_user), application=Depends(get_application)):
         return {"posts": [dict(row) for row in application.marketing.posts(status, limit)]}
