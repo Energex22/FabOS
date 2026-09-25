@@ -20,6 +20,7 @@ class ShopSettingsService:
         "notification_order_received": "true", "notification_payment_received": "true", "notification_production_started": "true",
         "notification_qc_required": "true", "notification_shipped": "true", "notification_low_inventory": "true",
         "console_lock_enabled": "true", "console_idle_timeout_minutes": "15", "console_local_only": "true",
+        "ai_provider": "disabled", "ai_model": "", "ai_endpoint": "", "ai_api_key_env": "FABOS_AI_API_KEY", "ai_allow_customer_data": "false", "ai_require_action_approval": "true",
         "marketing_enabled": "true", "marketing_require_approval": "true", "marketing_default_publish_mode": "manual", "marketing_timezone": "America/Chicago",
         "marketing_etsy_shop_id": "", "marketing_etsy_credential_ref": "", "marketing_ebay_account_ref": "",
         "marketing_facebook_page_id": "", "marketing_facebook_credential_ref": "", "marketing_instagram_account_ref": "",
@@ -75,6 +76,7 @@ class ShopSettingsService:
             "production_auto_start": "Automatically start eligible prints (keep off for physical printers until explicitly enabled)",
             "production_automation_interval_seconds": "Automation check interval in seconds",
         },
+        "ai": {"ai_provider": "AI provider: disabled, openai_compatible, or ollama", "ai_model": "AI model name", "ai_endpoint": "AI API endpoint", "ai_api_key_env": "Environment variable containing the AI API key", "ai_allow_customer_data": "Allow customer data to be included in AI context", "ai_require_action_approval": "Require approval before AI-triggered business actions"},
         "marketing": {
             "marketing_enabled": "Enable the marketing and sales hub", "marketing_require_approval": "Require owner/admin approval before external publishing",
             "marketing_default_publish_mode": "Default channel publishing mode", "marketing_timezone": "Timezone used for scheduled marketing posts", "marketing_etsy_shop_id": "Etsy shop identifier", "marketing_etsy_credential_ref": "Secret-store/environment reference for Etsy OAuth credentials",
@@ -92,6 +94,7 @@ class ShopSettingsService:
         "shipping_mode": {"calculated", "flat", "free"},
         "payment_provider": {"stripe", "square", "none"},
         "marketing_default_publish_mode": {"manual", "webhook", "api"},
+        "ai_provider": {"disabled", "openai_compatible", "ollama"},
     }
     NUMERIC_KEYS = {
         "invoice_due_days", "default_tax_percent", "quote_valid_days", "machine_hourly_cost", "default_material_cost_per_g", "labor_hourly_rate",
