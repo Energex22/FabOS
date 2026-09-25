@@ -8,7 +8,7 @@ FabOS also exposes a customer-facing HTTP API consumed by
 [FabOS-Web](https://github.com/Energex22/FabOS-Web), the public FABVEX
 storefront. Customers never need to know the internal system is called FabOS.
 
-Current version: `0.16.0-beta.5` (`fabos_core.__version__`). Python 3.8
+Current version: `0.16.0-beta.6` (`fabos_core.__version__`). Python 3.8
 compatible.
 
 ## Quick start
@@ -138,6 +138,8 @@ re-run the pre-launch checklist in FabOS-Web's `deployment/windows/README.md`.
 | [`docs/security/SECURITY.md`](docs/security/SECURITY.md) | Security model |
 | [`docs/testing/TEST_PLAN.md`](docs/testing/TEST_PLAN.md) | Test strategy |
 | [`docs/PLUGIN_SDK.md`](docs/PLUGIN_SDK.md) | Plugin interface |
+| [`docs/MARKETING_HUB.md`](docs/MARKETING_HUB.md) | Marketing channels, campaigns, posts, marketplace sales, and owner setup |
+| [`docs/AI_ASSISTANT.md`](docs/AI_ASSISTANT.md) | AI provider setup, safety defaults, and marketing assistance |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Planned work |
 | [`deployment/windows/README.md`](deployment/windows/README.md) | Backups and host hardening |
 
