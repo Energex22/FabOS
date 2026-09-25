@@ -20,7 +20,7 @@ echo  4. Run Test Suite
 echo  5. Run Beta Readiness Self-Test
 echo  6. Install Image Support (Pillow)
 echo  7. Set Up / Change Owner Account
-echo  8. Production Setup (Owner / DNS / Stripe)
+echo  8. Production Setup (Data / Owner / DNS / Stripe)
 echo  9. Exit
 echo.
 choice /C 123456789 /N /M "Select an option: "
@@ -98,7 +98,7 @@ echo ============================================
 echo           FABVEX Production Setup
 echo ============================================
 echo.
-echo This securely configures the owner account, DuckDNS, and Stripe.
+echo This securely configures the production data directory, owner account, DuckDNS, and Stripe.
 echo Secrets are entered privately and saved to deployment\windows\server.env.
 echo.
 "%FABOS_PYTHON%" -m fabos_core.cli setup-production
