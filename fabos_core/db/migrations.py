@@ -90,6 +90,32 @@ CREATE TABLE IF NOT EXISTS marketing_post_templates(id TEXT PRIMARY KEY,name TEX
 (48,"""INSERT OR IGNORE INTO shop_settings(key,value) VALUES
 ('ai_provider','disabled'),('ai_model',''),('ai_endpoint',''),('ai_api_key_env','FABOS_AI_API_KEY'),
 ('ai_allow_customer_data','false'),('ai_require_action_approval','true');"""),
+
+(49,"""CREATE TABLE IF NOT EXISTS ai_conversations(
+id TEXT PRIMARY KEY,
+user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+title TEXT NOT NULL DEFAULT 'FabOS AI conversation',
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS ai_messages(
+id TEXT PRIMARY KEY,
+conversation_id TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
+role TEXT NOT NULL,
+content TEXT NOT NULL DEFAULT '',
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS ai_tool_events(
+id TEXT PRIMARY KEY,
+conversation_id TEXT REFERENCES ai_conversations(id) ON DELETE SET NULL,
+user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+tool_name TEXT NOT NULL,
+arguments_json TEXT NOT NULL DEFAULT '{}',
+result_json TEXT NOT NULL DEFAULT '{}',
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_tool_events_conversation ON ai_tool_events(conversation_id,created_at);"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:
