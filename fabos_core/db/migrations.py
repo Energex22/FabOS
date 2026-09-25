@@ -86,6 +86,10 @@ INSERT OR IGNORE INTO marketing_channels(id,name,channel_type,active,publish_mod
 CREATE UNIQUE INDEX IF NOT EXISTS idx_marketing_external_order ON marketing_external_orders(channel_id,external_order_id);
 CREATE INDEX IF NOT EXISTS idx_marketing_external_status ON marketing_external_orders(order_status,ordered_at);
 CREATE TABLE IF NOT EXISTS marketing_post_templates(id TEXT PRIMARY KEY,name TEXT NOT NULL,channel_type TEXT NOT NULL DEFAULT 'other',template TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);"""),
+
+(48,"""INSERT OR IGNORE INTO shop_settings(key,value) VALUES
+('ai_provider','disabled'),('ai_model',''),('ai_endpoint',''),('ai_api_key_env','FABOS_AI_API_KEY'),
+('ai_allow_customer_data','false'),('ai_require_action_approval','true');"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:
