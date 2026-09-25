@@ -83,6 +83,24 @@ class MarketingService:
         with self.db.connect() as c:
             return c.execute("SELECT * FROM marketing_campaigns WHERE id=?", (campaign_id,)).fetchone()
 
+    def generate_post_variants(self, product_id):
+        product = self.products.get(product_id) if self.products else None
+        if not product:
+            raise ValueError("Product not found")
+        name = product["name"]
+        description = (product["description"] or "").strip()
+        price_cents = int(product["price_cents"] or 0) if "price_cents" in product.keys() else 0
+        price = "$%.2f" % (price_cents / 100.0)
+        base = description or ("A new FABVEX 3D-printed product: %s." % name)
+        return {
+            "facebook": {"title": name, "body": "New from FABVEX: %s\\n\\n%s\\n\\nAvailable for %s." % (name, base, price)},
+            "instagram": {"title": name, "body": "%s ✨\\n\\n%s\\n\\n#FABVEX #3DPrinting #MadeToOrder" % (name, base)},
+            "tiktok": {"title": name, "body": "Meet the %s from FABVEX. %s #FABVEX #3DPrinting" % (name, base)},
+            "pinterest": {"title": name, "body": "%s — %s. FABVEX 3D-printed design." % (name, base)},
+            "etsy": {"title": name, "body": base},
+            "ebay": {"title": name, "body": base},
+        }
+
     def create_post(self, body="", title="", product_id=None, campaign_id=None, channel_ids=None,
                     media_json=None, scheduled_at=None, status="draft"):
         if status not in STATUSES:
