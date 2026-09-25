@@ -352,3 +352,17 @@ def register_admin_routes(app, get_application, administrator_user):
     @app.get("/api/v1/admin/marketing/sales")
     def marketing_sales(days: int = 30, user=Depends(administrator_user), application=Depends(get_application)):
         return {"days": max(1, min(days, 3650)), "channels": application.marketing.sales_summary(max(1, min(days, 3650)))}
+
+
+    @app.get("/api/v1/admin/marketing/sales/external")
+    def marketing_external_sales(channel_id: Optional[str] = None, limit: int = 100,
+                                  user=Depends(administrator_user), application=Depends(get_application)):
+        return {"sales": [dict(row) for row in application.marketing.external_sales(channel_id, limit)]}
+
+    @app.post("/api/v1/admin/marketing/sales/external")
+    def import_marketing_external_sale(payload: dict, user=Depends(administrator_user), application=Depends(get_application)):
+        try:
+            sale = application.marketing.import_external_sale(**dict(payload or {}))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"sale": dict(sale)}
