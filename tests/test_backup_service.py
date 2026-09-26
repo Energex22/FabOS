@@ -60,6 +60,19 @@ class BackupServiceTests(unittest.TestCase):
             self.assertTrue(result["valid"])
             self.assertEqual(result["bytes"], newest.stat().st_size)
 
+    def test_restore_rejects_invalid_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fabos.sqlite3"
+            backups = root / "Backups"
+            self._seed_db(source)
+            bad = backups / "bad.sqlite3"
+            backups.mkdir()
+            sqlite3.connect(bad).close()
+            service = BackupService(source, backups)
+            with self.assertRaises(ValueError):
+                service.restore(bad)
+
 
 if __name__ == "__main__":
     unittest.main()
