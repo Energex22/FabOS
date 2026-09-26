@@ -9,7 +9,27 @@ import uuid
 from datetime import datetime, timezone
 
 
-CHANNELS = ("website", "etsy", "ebay", "facebook", "instagram", "tiktok", "pinterest", "email", "other")
+CHANNELS = ("website", "etsy", "ebay", "facebook", "instagram", "tiktok", "pinterest", "email",
+            "amazon", "shopify", "walmart", "google_business", "linkedin", "threads", "other")
+
+PROVIDER_CATALOG = {
+    "website": {"name": "FABVEX Website", "credential_env": None, "supports_publish": True, "supports_sales_import": True},
+    "etsy": {"name": "Etsy", "credential_env": "FABOS_ETSY_CREDENTIALS", "supports_publish": True, "supports_sales_import": True},
+    "ebay": {"name": "eBay", "credential_env": "FABOS_EBAY_CREDENTIALS", "supports_publish": True, "supports_sales_import": True},
+    "facebook": {"name": "Facebook", "credential_env": "FABOS_META_CREDENTIALS", "supports_publish": True, "supports_sales_import": True},
+    "instagram": {"name": "Instagram", "credential_env": "FABOS_META_CREDENTIALS", "supports_publish": True, "supports_sales_import": True},
+    "tiktok": {"name": "TikTok", "credential_env": "FABOS_TIKTOK_CREDENTIALS", "supports_publish": True, "supports_sales_import": True},
+    "pinterest": {"name": "Pinterest", "credential_env": "FABOS_PINTEREST_CREDENTIALS", "supports_publish": True, "supports_sales_import": True},
+    "email": {"name": "Email", "credential_env": "FABOS_EMAIL_CREDENTIALS", "supports_publish": True, "supports_sales_import": False},
+    "amazon": {"name": "Amazon Marketplace", "credential_env": "FABOS_AMAZON_CREDENTIALS", "supports_publish": True, "supports_sales_import": True},
+    "shopify": {"name": "Shopify", "credential_env": "FABOS_SHOPIFY_CREDENTIALS", "supports_publish": True, "supports_sales_import": True},
+    "walmart": {"name": "Walmart Marketplace", "credential_env": "FABOS_WALMART_CREDENTIALS", "supports_publish": True, "supports_sales_import": True},
+    "google_business": {"name": "Google Business Profile", "credential_env": "FABOS_GOOGLE_BUSINESS_CREDENTIALS", "supports_publish": True, "supports_sales_import": False},
+    "linkedin": {"name": "LinkedIn", "credential_env": "FABOS_LINKEDIN_CREDENTIALS", "supports_publish": True, "supports_sales_import": False},
+    "threads": {"name": "Threads", "credential_env": "FABOS_META_CREDENTIALS", "supports_publish": True, "supports_sales_import": False},
+    "other": {"name": "Other", "credential_env": None, "supports_publish": False, "supports_sales_import": True},
+}
+
 STATUSES = ("draft", "scheduled", "publishing", "published", "failed", "cancelled")
 
 
@@ -22,6 +42,34 @@ class MarketingService:
         self.db = database
         self.products = products
         self.shop_settings = shop_settings
+
+    def provider_catalog(self):
+        import os
+        return {
+            channel_type: dict(meta, credential_configured=bool(meta.get("credential_env") and os.environ.get(meta["credential_env"])))
+            for channel_type, meta in PROVIDER_CATALOG.items()
+        }
+
+    def connection_status(self):
+        providers = self.provider_catalog()
+        rows = {row["channel_type"]: row for row in self.channels()}
+        result = []
+        for channel_type, meta in providers.items():
+            row = rows.get(channel_type)
+            configured = bool(row and (row["account_label"] or row["profile_url"] or row["credential_ref"]))
+            credential_ready = bool(meta["credential_configured"] or channel_type == "website")
+            result.append({
+                "channel_type": channel_type,
+                "name": meta["name"],
+                "enabled": bool(row and int(row["active"])),
+                "configured": configured,
+                "credential_ready": credential_ready,
+                "ready_for_api": bool(row and int(row["active"]) and configured and credential_ready and meta["supports_publish"]),
+                "supports_publish": meta["supports_publish"],
+                "supports_sales_import": meta["supports_sales_import"],
+                "credential_env": meta["credential_env"],
+            })
+        return result
 
     def channels(self, active_only=False):
         sql = "SELECT * FROM marketing_channels"
