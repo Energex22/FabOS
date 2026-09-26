@@ -1,5 +1,6 @@
-from fabos_core.services.payments import PaymentProviderError, PaymentProviderNotConfigured
 """Write-side HTTP handlers for customer commerce."""
+
+from fabos_core.services.payments import PaymentProviderError, PaymentProviderNotConfigured
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import os
