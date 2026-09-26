@@ -300,7 +300,8 @@ class AIService:
         images = self.products.images(product_id)
         if images:
             context["images"] = [dict(row) for row in images]
-        result = self.chat(instruction, context)\n        return result["response"] if isinstance(result, dict) else result
+        result = self.chat(instruction, context)
+        return result["response"] if isinstance(result, dict) else result
 
     def marketing_assistant(self, product_id):
         return self.product_assistant(
