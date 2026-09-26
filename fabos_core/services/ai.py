@@ -279,7 +279,8 @@ class AIService:
                 name = function.get("name", "")
                 try:
                     arguments = json.loads(function.get("arguments") or "{}")
-                    output = self._tool_result(name, arguments)\n                    self._record_tool_event(conversation_id, user_id, name, arguments, output)
+                    output = self._tool_result(name, arguments)
+                    self._record_tool_event(conversation_id, user_id, name, arguments, output)
                 except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
                     output = {"error": str(exc)}
                 tool_message = {
