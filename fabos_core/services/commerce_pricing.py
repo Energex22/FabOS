@@ -100,6 +100,8 @@ class CommercePricingService:
             "subtotal_cents": subtotal,
             "tax_percent": tax_percent,
             "tax_cents": tax,
+            "tax_state": self.shop_settings.get("tax_state", "MO"),
+            "tax_rate_source": self.shop_settings.get("tax_rate_source", "state_default"),
             "shipping_mode": (shipping_mode or self.shop_settings.get("shipping_mode", "flat") or "flat").strip().lower(),
             "shipping_weight_g": total_weight if shipping_weight_g in (None, "", 0) else float(shipping_weight_g),
             "shipping_cents": shipping,
