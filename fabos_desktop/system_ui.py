@@ -245,20 +245,33 @@ class SystemReliabilityMixin:
             if browse:self._button(right,'Browse',lambda:browse(var)).pack(side='left',padx=(6,0))
             return var
 
+        def add_combo(parent,label,key,values,help_text=''):
+            card=self._card(parent)
+            card.pack(fill='x',pady=(0,8))
+            row=tk.Frame(card,bg=self._c('surface'));row.pack(fill='x',padx=14,pady=10)
+            left=tk.Frame(row,bg=self._c('surface'));left.pack(side='left',fill='x',expand=True)
+            tk.Label(left,text=label,bg=self._c('surface'),fg=self._c('text'),font=('Segoe UI',9,'bold')).pack(anchor='w')
+            if help_text: tk.Label(left,text=help_text,bg=self._c('surface'),fg=self._c('muted'),font=('Segoe UI',8),wraplength=360,justify='left').pack(anchor='w',pady=(2,0))
+            var=tk.StringVar(value=settings.get(key,''))
+            self._settings_vars[key]=var
+            ttk.Combobox(row,textvariable=var,values=values,state='readonly',width=27).pack(side='right',ipady=3)
+            return var
+
         # Business identity
         add_entry(business,'Shop / Business Name','shop_name','Printed at the top of exported invoices.')
         add_entry(business,'Owner / Contact Name','shop_owner_name','Internal business contact.')
         add_entry(business,'Business Email','shop_email','Used on invoices and future customer communications.')
         add_entry(business,'Business Phone','shop_phone','Displayed on invoice exports.')
         add_entry(business,'Business Address','shop_address','Single-line address displayed on invoice exports.')
+        add_combo(business,'Business State','shop_state',sorted(self.core.shop_settings.US_STATE_CODES),'Business jurisdiction.')
+        add_combo(business,'Tax State','tax_state',sorted(self.core.shop_settings.US_STATE_CODES),'Default tax jurisdiction.')
+        add_entry(business,'Default Sales Tax (%)','default_tax_percent','Missouri starts at 4.225%; local/destination rules can be added later.')
         add_entry(business,'Customer Update Signature','customer_update_signature',
                   'Optional ending automatically appended to generated customer messages.')
 
         # Pricing and billing
         add_entry(pricing,'Invoice Prefix','invoice_prefix','Example: INV creates INV-YYYYMM-0001.')
         add_entry(pricing,'Invoice Due Days','invoice_due_days','Default number of days before a new invoice is due.')
-        add_entry(pricing,'Default Sales Tax (%)','default_tax_percent',
-                  'Automatically applied to newly created invoices. Enter 0 if tax is handled manually.')
         add_entry(pricing,'Quote Valid Days','quote_valid_days','Default quote-expiration window.')
         add_entry(pricing,'Machine Cost / Hour ($)','machine_hourly_cost',
                   'Used in manufacturing cost and profitability calculations.')
