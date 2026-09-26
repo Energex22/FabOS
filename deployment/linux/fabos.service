@@ -1,0 +1,24 @@
+[Unit]
+Description=FabOS API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fabos
+Group=fabos
+WorkingDirectory=/opt/fabos
+EnvironmentFile=/etc/fabos/server.env
+Environment=FABOS_API_HOST=127.0.0.1
+Environment=FABOS_API_PORT=8000
+ExecStart=/opt/fabos/.venv/bin/python -m fabos_core.cli serve
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fabos
+
+[Install]
+WantedBy=multi-user.target
