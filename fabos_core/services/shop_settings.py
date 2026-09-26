@@ -89,6 +89,11 @@ class ShopSettingsService:
     }
 
     BOOL_KEYS = {key for group in META.values() for key in group if key.endswith("_enabled") or key.endswith("_required")}
+    US_STATE_CODES = {
+        "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+        "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+        "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"
+    }
     ENUMS = {
         "storefront_default_visibility": {"draft", "review", "published", "retired"},
         "shipping_mode": {"calculated", "flat", "free"},
@@ -124,6 +129,10 @@ class ShopSettingsService:
         if key not in self.DEFAULTS:
             raise KeyError("Unknown shop setting: %s" % key)
         value = str(value)
+        if key in {"shop_state", "tax_state"} and value.upper() not in self.US_STATE_CODES:
+            raise ValueError("Invalid US state code for %s" % key)
+        if key in {"shop_state", "tax_state"}:
+            value = value.upper()
         if key in self.ENUMS and value not in self.ENUMS[key]:
             raise ValueError("Invalid value for %s" % key)
         if key in self.NUMERIC_KEYS:
