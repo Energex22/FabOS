@@ -105,6 +105,25 @@ class PaymentSecurityTests(unittest.TestCase):
         self.assertEqual(expected, base64_hmac_sha256(secret, message))
         self.assertNotEqual(expected, base64_hmac_sha256(secret, message + "x"))
 
+    def test_live_stripe_checkout_rejects_non_https_redirect_urls(self):
+        previous_key = os.environ.get("STRIPE_SECRET_KEY")
+        previous_success = os.environ.get("STRIPE_SUCCESS_URL")
+        previous_cancel = os.environ.get("STRIPE_CANCEL_URL")
+        os.environ["STRIPE_SECRET_KEY"] = "sk_live_example"
+        os.environ["STRIPE_SUCCESS_URL"] = "http://shop.example/orders.html"
+        os.environ["STRIPE_CANCEL_URL"] = "https://shop.example/checkout.html"
+        try:
+            provider = StripePaymentProvider()
+            with self.assertRaises(PaymentProviderError):
+                provider.create_checkout(payment_id="p1", amount_cents=1000, currency="USD", metadata={"order_id": "o1"})
+        finally:
+            if previous_key is None: os.environ.pop("STRIPE_SECRET_KEY", None)
+            else: os.environ["STRIPE_SECRET_KEY"] = previous_key
+            if previous_success is None: os.environ.pop("STRIPE_SUCCESS_URL", None)
+            else: os.environ["STRIPE_SUCCESS_URL"] = previous_success
+            if previous_cancel is None: os.environ.pop("STRIPE_CANCEL_URL", None)
+            else: os.environ["STRIPE_CANCEL_URL"] = previous_cancel
+
     def test_stripe_provider_detects_test_and_live_mode(self):
         previous_key = os.environ.get("STRIPE_SECRET_KEY")
         try:
