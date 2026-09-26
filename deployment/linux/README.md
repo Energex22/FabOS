@@ -26,7 +26,7 @@ Run the setup commands in order:
 `python -m fabos_core.cli setup-stripe`
 `python -m fabos_core.cli production-check`
 
-`production-check` is read-only and fails closed when required production settings, HTTPS Stripe URLs, the webhook secret, persistent storage, or database integrity are missing.
+`production-check` is read-only and fails closed when required production settings, HTTPS Stripe URLs, the webhook secret, persistent storage, or database integrity are missing. It also blocks production while the bootstrap `owner-password` remains active.
 
 ## Backups
 
