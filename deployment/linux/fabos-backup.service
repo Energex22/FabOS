@@ -1,0 +1,18 @@
+[Unit]
+Description=FabOS daily database backup
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=fabos
+Group=fabos
+WorkingDirectory=/opt/fabos
+EnvironmentFile=/etc/fabos/server.env
+ExecStart=/opt/fabos/.venv/bin/python -m fabos_core.cli backup
+ExecStartPost=/opt/fabos/.venv/bin/python -m fabos_core.cli backup-check
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fabos
+UMask=0027
