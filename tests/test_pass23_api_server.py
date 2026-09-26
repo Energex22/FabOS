@@ -18,7 +18,7 @@ class _Auth:
     def __init__(self):
         self.calls = 0
 
-    def login(self, identifier, password):
+    def login(self, identifier, password, ip_address=None, user_agent=None):
         self.calls += 1
         return None
 
@@ -65,7 +65,6 @@ class Pass23APIServerTests(unittest.TestCase):
             ).status_code,
             429,
         )
-
 
     def test_cors_health_response(self):
         os.environ["FABOS_CORS_ORIGINS"] = "http://localhost:5173"
