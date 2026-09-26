@@ -1,3 +1,4 @@
+from fabos_core.services.payments import PaymentProviderError, PaymentProviderNotConfigured
 """Write-side HTTP handlers for customer commerce."""
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -365,6 +366,10 @@ def register_customer_write_routes(app, get_application, current_user):
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except PaymentProviderNotConfigured as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except PaymentProviderError as exc:
+            raise HTTPException(status_code=502, detail="Payment provider request failed") from exc
 
     @app.post("/api/v1/admin/quote-requests/{quote_id}/product")
     def promote_custom_quote_to_product(quote_id: str, payload: CustomProductRequest, user=Depends(current_user), application=Depends(get_application)):
