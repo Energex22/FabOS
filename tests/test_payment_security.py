@@ -105,6 +105,21 @@ class PaymentSecurityTests(unittest.TestCase):
         self.assertEqual(expected, base64_hmac_sha256(secret, message))
         self.assertNotEqual(expected, base64_hmac_sha256(secret, message + "x"))
 
+    def test_stripe_provider_detects_test_and_live_mode(self):
+        previous_key = os.environ.get("STRIPE_SECRET_KEY")
+        try:
+            os.environ["STRIPE_SECRET_KEY"] = "sk_test_example"
+            self.assertTrue(StripePaymentProvider().test_mode)
+            self.assertFalse(StripePaymentProvider().live_mode)
+            os.environ["STRIPE_SECRET_KEY"] = "sk_live_example"
+            self.assertTrue(StripePaymentProvider().live_mode)
+            self.assertFalse(StripePaymentProvider().test_mode)
+        finally:
+            if previous_key is None:
+                os.environ.pop("STRIPE_SECRET_KEY", None)
+            else:
+                os.environ["STRIPE_SECRET_KEY"] = previous_key
+
     def test_stripe_webhook_uses_client_reference_as_order_id(self):
         previous_key = os.environ.get("STRIPE_SECRET_KEY")
         previous_webhook = os.environ.get("STRIPE_WEBHOOK_SECRET")
