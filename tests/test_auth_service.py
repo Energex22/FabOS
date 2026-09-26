@@ -96,6 +96,20 @@ class AuthServiceTests(unittest.TestCase):
         self.assertTrue(self.auth.logout(token))
         self.assertIsNone(self.auth.authenticate(token))
 
+    def test_login_records_client_context(self):
+        result = self.auth.login(
+            "customer@example.com",
+            "correct horse battery staple",
+            ip_address="192.0.2.10",
+            user_agent="TestBrowser/1.0",
+        )
+        row = self.database.connection.execute(
+            "SELECT ip_address,user_agent FROM auth_sessions WHERE user_id='u1'"
+        ).fetchone()
+        self.assertIsNotNone(result)
+        self.assertEqual(row["ip_address"], "192.0.2.10")
+        self.assertEqual(row["user_agent"], "TestBrowser/1.0")
+
     def test_password_change_revokes_existing_sessions(self):
         first = self.auth.login("customer@example.com", "correct horse battery staple")
         self.assertIsNotNone(first)
