@@ -275,7 +275,14 @@ def main():
     app=FabOSApplication()
     if a.cmd=='init': print(app.settings.database_path)
     elif a.cmd=='summary': print(json.dumps(app.summary(),indent=2))
-    elif a.cmd=='backup': print(app.backups.create())
+    elif a.cmd=='backup':
+        created=app.backups.create()
+        try:
+            keep=max(1,int(app.shop_settings.get('backup_retention','30') or 30))
+        except (TypeError,ValueError):
+            keep=30
+        removed=app.backups.prune(keep=keep)
+        print(json.dumps({'created':str(created),'retention':keep,'pruned':[str(path) for path in removed]},indent=2))
     elif a.cmd=='backup-check':
         result=app.backups.test_latest()
         print(json.dumps(result,default=str,indent=2))
