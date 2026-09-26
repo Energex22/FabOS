@@ -9,7 +9,16 @@ class ReliabilityBackupTests(unittest.TestCase):
  def test_backup_create_integrity_and_restore(self):
   with tempfile.TemporaryDirectory() as td:
    td=Path(td);db=td/"live.sqlite3";backups=td/"backups"
-   c=sqlite3.connect(str(db));c.execute("CREATE TABLE sample(value TEXT)");c.execute("INSERT INTO sample VALUES('before')");c.commit();c.close()
+   c=sqlite3.connect(str(db))
+   c.executescript("""
+    CREATE TABLE products(id TEXT PRIMARY KEY);
+    CREATE TABLE orders(id TEXT PRIMARY KEY);
+    CREATE TABLE print_jobs(id TEXT PRIMARY KEY);
+    CREATE TABLE app_migrations(version INTEGER PRIMARY KEY);
+    CREATE TABLE sample(value TEXT);
+   """)
+   c.execute("INSERT INTO sample VALUES('before')")
+   c.commit();c.close()
    svc=BackupService(db,backups)
    b=svc.create("test")
    self.assertTrue(b.exists());self.assertEqual(svc.integrity(b),"ok")
