@@ -228,6 +228,13 @@ def _production_check():
     if data_path:
         backup_dir=data_path/"Backups"
         add("Backup directory",backup_dir.exists(),str(backup_dir))
+        if backup_dir.exists() and db_path.exists():
+            try:
+                backup_service=BackupService(db_path,backup_dir)
+                backup_result=backup_service.test_latest()
+                add("Latest backup valid",bool(backup_result.get("valid")),str(backup_result.get("detail") or "valid"))
+            except Exception as exc:
+                add("Latest backup valid",False,str(exc))
 
     failures=sum(1 for item in checks if item["status"]=="fail")
     result={"ready":failures==0,"failures":failures,"checks":checks}
