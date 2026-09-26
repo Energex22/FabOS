@@ -36,7 +36,7 @@ class AIService:
             "model": self._setting("ai_model", ""),
             "endpoint": self._setting("ai_endpoint", ""),
             "configured": self._configured(provider),
-            "tools": [item["name"] for item in self.tool_definitions()],
+            "tools": [item["function"]["name"] for item in self.tool_definitions()],
             "action_approval_required": self._setting("ai_require_action_approval", "true").lower() in ("1", "true", "yes", "on"),
         }
 
