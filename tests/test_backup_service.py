@@ -115,6 +115,21 @@ class BackupServiceTests(unittest.TestCase):
 
             self.assertEqual(list(backups.glob("fabos_*.sqlite3")), [])
 
+    def test_create_daily_replaces_invalid_existing_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fabos.sqlite3"
+            backups = root / "Backups"
+            self._seed_db(source)
+            service = BackupService(source, backups)
+            backups.mkdir()
+            stamp = __import__("datetime").datetime.now().strftime("%Y%m%d")
+            bad = backups / ("fabos_%s_bad.sqlite3" % stamp)
+            bad.write_bytes(b"not sqlite")
+            target = service.create_daily_if_needed()
+            self.assertIsNotNone(target)
+            self.assertTrue(service.validate_backup(target)["valid"])
+
     def test_create_does_not_overwrite_same_second_backup(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
