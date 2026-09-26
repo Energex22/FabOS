@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fabos_core.cli import _production_check
+from fabos_core.services.auth import AuthService
+from fabos_core.services.backup import BackupService
 
 
 class ProductionPreflightTests(unittest.TestCase):
@@ -25,9 +27,19 @@ class ProductionPreflightTests(unittest.TestCase):
             data_dir = Path(td)
             db_path = data_dir / "fabos.sqlite3"
             with sqlite3.connect(db_path) as conn:
-                conn.execute("CREATE TABLE smoke (id INTEGER PRIMARY KEY)")
+                conn.execute("CREATE TABLE products (id TEXT PRIMARY KEY)")
+                conn.execute("CREATE TABLE orders (id TEXT PRIMARY KEY)")
+                conn.execute("CREATE TABLE print_jobs (id TEXT PRIMARY KEY)")
+                conn.execute("CREATE TABLE app_migrations (version INTEGER PRIMARY KEY)")
+                conn.execute("CREATE TABLE users (id TEXT PRIMARY KEY, password_hash TEXT, role TEXT, account_type TEXT, active INTEGER)")
+                conn.execute(
+                    "INSERT INTO users VALUES(?,?,?,?,?)",
+                    ("owner", AuthService(None, None).hash_password("secure-owner-password"), "owner", "administrator", 1),
+                )
                 conn.commit()
-            (data_dir / "Backups").mkdir()
+            backups = data_dir / "Backups"
+            backups.mkdir()
+            BackupService(db_path, backups).create("preflight")
             env = {
                 "FABOS_DATA_DIR": str(data_dir),
                 "FABOS_PAYMENT_PROVIDER": "stripe",
