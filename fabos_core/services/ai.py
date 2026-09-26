@@ -249,20 +249,25 @@ class AIService:
     def chat(self, message, context=None, conversation_id=None, user_id=None):
         if not message or not str(message).strip():
             raise ValueError("Message is required")
-        conversation_id = self._conversation(conversation_id, user_id)\n        messages = [{"role": "system", "content": self._system_prompt()}]
+        conversation_id = self._conversation(conversation_id, user_id)
+        messages = [{"role": "system", "content": self._system_prompt()}]
         if context:
             safe_context = dict(context)
             if not self._setting("ai_allow_customer_data", "false").lower() in ("1", "true", "yes", "on"):
                 safe_context.pop("customer", None)
                 safe_context.pop("customers", None)
             messages.append({"role": "system", "content": "FabOS context:\n" + json.dumps(safe_context, default=str)[:12000]})
-        user_message = str(message).strip()[:12000]\n        messages.append({"role": "user", "content": user_message})\n        self._record_message(conversation_id, "user", user_message)
+        user_message = str(message).strip()[:12000]
+        messages.append({"role": "user", "content": user_message})
+        self._record_message(conversation_id, "user", user_message)
 
         for _ in range(self.MAX_TOOL_ROUNDS):
             response_message, _ = self._request(messages, use_tools=True)
             tool_calls = response_message.get("tool_calls") or []
             if not tool_calls:
-                answer = response_message.get("content", "") or ""\n                self._record_message(conversation_id, "assistant", answer)\n                return {"conversation_id": conversation_id, "response": answer}
+                answer = response_message.get("content", "") or ""
+                self._record_message(conversation_id, "assistant", answer)
+                return {"conversation_id": conversation_id, "response": answer}
             assistant_message = {
                 "role": "assistant",
                 "content": response_message.get("content") or "",
