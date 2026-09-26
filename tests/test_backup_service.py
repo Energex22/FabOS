@@ -73,6 +73,19 @@ class BackupServiceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 service.restore(bad)
 
+    def test_create_removes_partial_backup_when_sqlite_backup_fails(self):
+        service = BackupService(self.database_path, self.backup_dir)
+        original = sqlite3.Connection.backup
+        try:
+            def fail_backup(*args, **kwargs):
+                raise sqlite3.DatabaseError("simulated backup failure")
+            sqlite3.Connection.backup = fail_backup
+            with self.assertRaises(sqlite3.DatabaseError):
+                service.create("failed")
+        finally:
+            sqlite3.Connection.backup = original
+        self.assertEqual(list(self.backup_dir.glob("fabos_*.sqlite3")), [])
+
     def test_create_does_not_overwrite_same_second_backup(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
