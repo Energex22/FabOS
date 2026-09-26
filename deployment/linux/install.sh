@@ -7,6 +7,8 @@ DATA_DIR="${DATA_DIR:-/var/lib/fabos}"
 ENV_DIR="/etc/fabos"
 ENV_FILE="${ENV_DIR}/server.env"
 SERVICE_FILE="/etc/systemd/system/fabos.service"
+BACKUP_SERVICE_FILE="/etc/systemd/system/fabos-backup.service"
+BACKUP_TIMER_FILE="/etc/systemd/system/fabos-backup.timer"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root (sudo)."
@@ -65,6 +67,8 @@ EOF
 fi
 
 install -m 644 "$FABOS_DIR/deployment/linux/fabos.service" "$SERVICE_FILE"
+install -m 644 "$FABOS_DIR/deployment/linux/fabos-backup.service" "$BACKUP_SERVICE_FILE"
+install -m 644 "$FABOS_DIR/deployment/linux/fabos-backup.timer" "$BACKUP_TIMER_FILE"
 
 runuser -u fabos -- bash -c "cd '$WEB_DIR' && npm ci && npm test && npm run build"
 chown -R fabos:fabos "$WEB_DIR"
@@ -72,6 +76,7 @@ chown -R fabos:fabos "$WEB_DIR"
 "$FABOS_DIR/.venv/bin/python" -m fabos_core.cli init
 systemctl daemon-reload
 systemctl enable fabos.service
+systemctl enable fabos-backup.timer
 
 echo
 echo "FabOS Linux installation prepared."
@@ -81,5 +86,6 @@ echo "  $FABOS_DIR/.venv/bin/python -m fabos_core.cli setup-dns"
 echo "  $FABOS_DIR/.venv/bin/python -m fabos_core.cli setup-stripe"
 echo "  $FABOS_DIR/.venv/bin/python -m fabos_core.cli production-check"
 echo "  systemctl start fabos.service"
+echo "  systemctl start fabos-backup.timer"
 echo
 echo "Install/configure Caddy using deployment/linux/Caddyfile."
