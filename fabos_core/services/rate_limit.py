@@ -16,8 +16,9 @@ def request_client_key(request):
     X-Forwarded-For is used for the real remote client. Direct external access to
     the API port must remain blocked; otherwise forwarded headers are spoofable.
     """
+    real_ip = (request.headers.get("x-real-ip") or "").strip()
     forwarded = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
-    return forwarded or (request.client.host if request.client else "unknown")
+    return real_ip or forwarded or (request.client.host if request.client else "unknown")
 
 
 class RateLimiter:
