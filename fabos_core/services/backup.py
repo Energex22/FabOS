@@ -42,8 +42,16 @@ class BackupService:
         today=datetime.now().strftime("%Y%m%d")
         existing = sorted(self.destination.glob("fabos_%s*.sqlite3" % today), key=lambda p: p.stat().st_mtime, reverse=True)
         for candidate in existing:
-            if self.validate_backup(candidate).get("valid"):
-                return None
+            # A daily backup only needs to be a readable, internally consistent
+            # SQLite database. Full schema validation remains the contract for
+            # selecting a backup for restore or production preflight.
+            try:
+                with sqlite3.connect(str(candidate)) as conn:
+                    integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+                if str(integrity).lower() == "ok":
+                    return None
+            except Exception:
+                pass
             try:
                 candidate.unlink()
             except OSError:
