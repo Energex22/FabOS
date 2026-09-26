@@ -1,8 +1,8 @@
 class ShopSettingsService:
     DEFAULTS = {
         "shop_name": "WireVault FabOS", "shop_owner_name": "", "shop_email": "", "shop_phone": "",
-        "shop_address": "", "business_hours": "", "timezone": "America/Chicago", "currency_code": "USD", "currency_symbol": "$",
-        "invoice_prefix": "INV", "invoice_due_days": "14", "default_tax_percent": "0", "quote_valid_days": "14",
+        "shop_address": "", "shop_city": "", "shop_state": "MO", "shop_postal_code": "", "business_hours": "", "timezone": "America/Chicago", "currency_code": "USD", "currency_symbol": "$",
+        "invoice_prefix": "INV", "invoice_due_days": "14", "tax_state": "MO", "tax_rate_source": "state_default", "default_tax_percent": "4.225", "quote_valid_days": "14",
         "machine_hourly_cost": "0.35", "default_packaging_cost": "0.50", "target_margin_percent": "60",
         "minimum_order_cents": "0", "rush_multiplier": "1.00", "quantity_discount_enabled": "false", "quantity_discount_percent": "0",
         "default_material_cost_per_g": "0", "labor_hourly_rate": "0", "setup_labor_hourly_rate": "0",
@@ -24,17 +24,17 @@ class ShopSettingsService:
         "marketing_enabled": "true", "marketing_require_approval": "true", "marketing_default_publish_mode": "manual", "marketing_timezone": "America/Chicago",
         "marketing_etsy_shop_id": "", "marketing_etsy_credential_ref": "", "marketing_ebay_account_ref": "",
         "marketing_facebook_page_id": "", "marketing_facebook_credential_ref": "", "marketing_instagram_account_ref": "",
-        "marketing_tiktok_account_ref": "", "marketing_pinterest_account_ref": "", "marketing_email_provider_ref": "",
+        "marketing_tiktok_account_ref": "", "marketing_pinterest_account_ref": "", "marketing_email_provider_ref": "", "marketing_amazon_account_ref": "", "marketing_shopify_account_ref": "", "marketing_walmart_account_ref": "", "marketing_google_business_account_ref": "", "marketing_linkedin_account_ref": "", "marketing_threads_account_ref": "",
         "production_automation_enabled": "true", "production_auto_assign": "true", "production_auto_start": "false", "production_automation_interval_seconds": "10",
     }
 
     META = {
         "business": {
             "shop_name": "Business display name", "shop_owner_name": "Owner/contact name", "shop_email": "Business email", "shop_phone": "Business phone",
-            "shop_address": "Business mailing address", "business_hours": "Customer-facing business hours", "timezone": "Business timezone", "currency_code": "Currency code", "currency_symbol": "Currency display symbol",
+            "shop_address": "Business mailing address", "business_hours": "Customer-facing business hours", "timezone": "Business timezone", "shop_city": "Business city", "shop_state": "Business state/province code", "shop_postal_code": "Business ZIP/postal code", "currency_code": "Currency code", "currency_symbol": "Currency display symbol",
         },
         "sales": {
-            "invoice_prefix": "Invoice number prefix", "invoice_due_days": "Default invoice due period", "default_tax_percent": "Default tax percentage", "quote_valid_days": "Quote validity period",
+            "invoice_prefix": "Invoice number prefix", "invoice_due_days": "Default invoice due period", "tax_state": "Tax jurisdiction state/province code", "tax_rate_source": "Tax-rate mode used by the pricing engine", "default_tax_percent": "Default tax percentage when no destination-specific rate is available", "quote_valid_days": "Quote validity period",
             "minimum_order_cents": "Minimum order amount in cents", "default_turnaround_days": "Normal turnaround in days", "rush_turnaround_days": "Rush turnaround in days",
         },
         "pricing": {
@@ -81,7 +81,7 @@ class ShopSettingsService:
             "marketing_enabled": "Enable the marketing and sales hub", "marketing_require_approval": "Require owner/admin approval before external publishing",
             "marketing_default_publish_mode": "Default channel publishing mode", "marketing_timezone": "Timezone used for scheduled marketing posts", "marketing_etsy_shop_id": "Etsy shop identifier", "marketing_etsy_credential_ref": "Secret-store/environment reference for Etsy OAuth credentials",
             "marketing_ebay_account_ref": "Secret-store/environment reference for eBay credentials", "marketing_facebook_page_id": "Facebook Page identifier", "marketing_facebook_credential_ref": "Secret-store/environment reference for Meta credentials",
-            "marketing_instagram_account_ref": "Instagram account reference", "marketing_tiktok_account_ref": "TikTok account reference", "marketing_pinterest_account_ref": "Pinterest account reference", "marketing_email_provider_ref": "Email provider configuration reference",
+            "marketing_instagram_account_ref": "Instagram account reference", "marketing_tiktok_account_ref": "TikTok account reference", "marketing_pinterest_account_ref": "Pinterest account reference", "marketing_email_provider_ref": "Email provider configuration reference", "marketing_amazon_account_ref": "Amazon Seller account reference", "marketing_shopify_account_ref": "Shopify store reference", "marketing_walmart_account_ref": "Walmart Marketplace account reference", "marketing_google_business_account_ref": "Google Business Profile reference", "marketing_linkedin_account_ref": "LinkedIn page/profile reference", "marketing_threads_account_ref": "Threads account reference",
         },
         "production": {
             "default_slicer": "Default slicer", "cura_engine_path": "Cura engine executable", "cura_petg_profile_path": "PETG Cura profile", "cura_fdmprinter_path": "Cura printer definition", "cura_fdmextruder_path": "Cura extruder definition",
