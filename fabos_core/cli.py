@@ -186,7 +186,11 @@ def _production_check():
             try:
                 with sqlite3.connect(str(db_path)) as conn:
                     result=conn.execute("PRAGMA integrity_check").fetchone()[0]
+                    tables={row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 add("SQLite integrity",str(result).lower()=="ok",str(result))
+                required_tables={"products","orders","print_jobs","app_migrations","users"}
+                missing=sorted(required_tables-tables)
+                add("Core database schema",not missing,"complete" if not missing else "missing: "+", ".join(missing))
             except Exception as exc:
                 add("SQLite integrity",False,str(exc))
             try:
