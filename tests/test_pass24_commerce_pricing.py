@@ -25,6 +25,8 @@ class StubSettings:
         "shipping_calculated_base_cents": "299",
         "shipping_calculated_per_kg_cents": "400",
         "currency_symbol": "$",
+        "tax_state": "MO",
+        "tax_rate_source": "state_default",
     }
 
     def get(self, key, default=None):
@@ -42,6 +44,8 @@ class Pass24CommercePricingTests(unittest.TestCase):
         self.assertEqual(result["shipping_cents"], 599)
         self.assertEqual(result["total_cents"], 3305)
         self.assertEqual(result["items"][0]["unit_price_cents"], 1250)
+        self.assertEqual(result["tax_state"], "MO")
+        self.assertEqual(result["tax_rate_source"], "state_default")
 
     def test_calculated_shipping_uses_server_known_weight(self):
         result = self.service.estimate(
