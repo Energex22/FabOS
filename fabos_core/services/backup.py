@@ -7,6 +7,8 @@ class BackupService:
         self.source=Path(source);self.destination=Path(destination)
 
     def create(self,label=""):
+        if not self.source.is_file():
+            raise FileNotFoundError("FabOS source database does not exist: %s" % self.source)
         self.destination.mkdir(parents=True,exist_ok=True)
         stamp=datetime.now().strftime("%Y%m%d_%H%M%S")
         safe="".join(ch for ch in str(label) if ch.isalnum() or ch in ("-","_"))[:30]
