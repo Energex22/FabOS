@@ -54,6 +54,18 @@ class MarketingServiceTest(unittest.TestCase):
         self.service.queue_due_posts()  # future-dated/no scheduled_at means no-op
         self.assertEqual(self.service.post(post["id"])[0]["status"], "scheduled")
 
+    def test_provider_catalog_includes_marketplaces(self):
+        catalog = self.service.provider_catalog()
+        for channel_type in ("etsy", "ebay", "amazon", "shopify", "walmart", "facebook", "instagram", "tiktok", "pinterest", "google_business", "linkedin", "threads"):
+            self.assertIn(channel_type, catalog)
+            self.assertTrue(catalog[channel_type]["supports_publish"])
+
+    def test_connection_status_reports_disabled_unconfigured_provider(self):
+        rows = {row["channel_type"]: row for row in self.service.connection_status()}
+        self.assertFalse(rows["amazon"]["enabled"])
+        self.assertFalse(rows["amazon"]["configured"])
+        self.assertFalse(rows["amazon"]["ready_for_api"])
+
     def test_sales_summary_groups_channels(self):
         self.conn.executemany(
             "INSERT INTO orders(id,total_cents,checkout_channel,status,created_at) VALUES(?,?,?,?,datetime('now'))",
