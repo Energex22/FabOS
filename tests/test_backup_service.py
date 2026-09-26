@@ -73,6 +73,19 @@ class BackupServiceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 service.restore(bad)
 
+    def test_prune_keeps_requested_number_of_backups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fabos.sqlite3"
+            backups = root / "Backups"
+            self._seed_db(source)
+            service = BackupService(source, backups)
+            for label in ("one", "two", "three"):
+                service.create(label)
+            removed = service.prune(keep=2)
+            self.assertEqual(len(removed), 1)
+            self.assertEqual(len(service.list()), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
