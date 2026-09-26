@@ -8,11 +8,11 @@ class AdministrationSettingsTests(unittest.TestCase):
     def test_settings_cover_business_storefront_payments_reliability_and_full_cost_pricing(self):
         defaults = ShopSettingsService.DEFAULTS
         for key in (
-            "shop_name", "default_tax_percent", "machine_hourly_cost", "default_material_cost_per_g",
+            "shop_name", "shop_state", "tax_state", "default_tax_percent", "machine_hourly_cost", "default_material_cost_per_g",
             "labor_hourly_rate", "setup_labor_hourly_rate", "post_process_labor_hourly_rate", "qc_labor_hourly_rate",
             "default_packaging_cost", "overhead_percent", "target_margin_percent", "payment_fee_percent",
             "payment_fee_fixed_cents", "quantity_discount_percent", "storefront_enabled", "custom_upload_max_mb",
-            "payment_provider", "shipping_mode", "backup_enabled", "notification_order_received", "default_turnaround_days",
+            "payment_provider", "shipping_mode", "marketing_amazon_account_ref", "marketing_shopify_account_ref", "marketing_walmart_account_ref", "backup_enabled", "notification_order_received", "default_turnaround_days",
         ):
             self.assertIn(key, defaults)
 
