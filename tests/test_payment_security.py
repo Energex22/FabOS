@@ -253,6 +253,48 @@ class PaymentSecurityTests(unittest.TestCase):
 
 
 
+    def test_unknown_paid_webhook_is_rejected_and_released(self):
+        from fabos_core.services.payments import PaymentService
+
+        class _Provider:
+            name = "stripe"
+
+            def parse_webhook(self, payload, signature=None):
+                return {
+                    "event_id": "evt_unknown",
+                    "event_type": "payment_intent.succeeded",
+                    "provider_payment_id": "pi_unknown",
+                    "payment_id": "",
+                    "order_id": "missing-order",
+                    "invoice_id": "",
+                    "metadata": {},
+                    "status": "paid",
+                    "amount_cents": 5000,
+                }
+
+        class _WebhookDatabase:
+            def __init__(self):
+                self.connection = sqlite3.connect(":memory:")
+                self.connection.row_factory = sqlite3.Row
+                self.connection.execute(
+                    "CREATE TABLE payment_webhook_events(id TEXT PRIMARY KEY, provider TEXT, event_type TEXT, payment_id TEXT)"
+                )
+
+            def connect(self):
+                return self.connection
+
+        service = PaymentService.__new__(PaymentService)
+        service.database = _WebhookDatabase()
+        provider = _Provider()
+        service._build_provider = lambda name=None: provider
+
+        with self.assertRaises(PaymentProviderError):
+            service.handle_webhook("{}", "signature", "stripe")
+
+        with service.database.connect() as conn:
+            remaining = conn.execute("SELECT COUNT(*) FROM payment_webhook_events").fetchone()[0]
+        self.assertEqual(remaining, 0)
+
     def test_payment_record_carries_provider_and_order_identity(self):
         application = _Application()
         with application.database.connect() as conn:
