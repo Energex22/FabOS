@@ -32,6 +32,22 @@ class AdministrationSettingsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             service.set_validated("target_margin_percent", "100.1")
 
+
+    def test_migration_versions_are_monotonic_and_marketplace_defaults_follow_ai_schema(self):
+        import re
+        migrations = (Path(__file__).resolve().parents[1] / "fabos_core" / "db" / "migrations.py").read_text(encoding="utf-8")
+        versions = [int(value) for value in re.findall(r"^\((\d+),\"\"\"", migrations, flags=re.MULTILINE)]
+        self.assertEqual(versions, sorted(versions))
+        self.assertLess(versions.index(49), versions.index(50))
+        self.assertIn("marketing_channels(id,name,channel_type,active,publish_mode)", migrations)
+
+    def test_admin_marketing_panel_defines_tab_before_building_widgets(self):
+        source = (Path(__file__).resolve().parents[1] / "fabos_desktop" / "admin_panel_v22.py").read_text(encoding="utf-8")
+        self.assertIn('marketing_tab = tk.Frame(tabs, bg=self._c("bg"))', source)
+        self.assertIn('tabs.add(marketing_tab, text="Marketing & Sales")', source)
+        self.assertNotIn('(channels.get(provider["channel_type"]) or {}).get', source)
+        self.assertNotIn('current["publish_mode"]', source)
+
     def test_application_wires_settings_permission_and_pricing_services(self):
         text = (Path(__file__).resolve().parents[1] / "fabos_core" / "application.py").read_text(encoding="utf-8")
         self.assertIn("self.permissions=PermissionService(", text)
