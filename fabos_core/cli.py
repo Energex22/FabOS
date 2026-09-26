@@ -2,6 +2,8 @@ import argparse,json,os,getpass
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import urlopen
+from urllib.parse import urlparse
+import sqlite3
 from fabos_core.application import FabOSApplication
 
 DEFAULT_ENV_FILE=Path("deployment/windows/server.env")
@@ -160,9 +162,68 @@ def _setup_owner():
     app.auth.set_password(owner["id"],password)
     print("Owner setup complete. The default owner credential is no longer usable.")
 
+
+def _production_check():
+    """Read-only deployment preflight; never creates data or contacts payment APIs."""
+    _load_private_env()
+    checks=[]
+    def add(name, ok, detail):
+        checks.append({"name":name,"status":"pass" if ok else "fail","detail":detail})
+
+    data_dir=os.environ.get("FABOS_DATA_DIR","").strip()
+    if not data_dir:
+        add("Persistent data directory",False,"FABOS_DATA_DIR is not configured")
+        data_path=None
+    else:
+        data_path=Path(os.path.expandvars(os.path.expanduser(data_dir))).resolve()
+        add("Persistent data directory",data_path.exists(),str(data_path))
+    if data_path:
+        db_path=data_path/"fabos.sqlite3"
+        add("Production database",db_path.exists(),str(db_path))
+        if db_path.exists():
+            try:
+                with sqlite3.connect(str(db_path)) as conn:
+                    result=conn.execute("PRAGMA integrity_check").fetchone()[0]
+                add("SQLite integrity",str(result).lower()=="ok",str(result))
+            except Exception as exc:
+                add("SQLite integrity",False,str(exc))
+
+    required={"FABOS_PAYMENT_PROVIDER":"stripe","STRIPE_SECRET_KEY":None,
+              "STRIPE_SUCCESS_URL":None,"STRIPE_CANCEL_URL":None}
+    for key,expected in required.items():
+        value=os.environ.get(key,"").strip()
+        ok=bool(value) and (expected is None or value.lower()==expected)
+        add(key,ok,"configured" if ok else "missing or invalid")
+    secret=os.environ.get("STRIPE_SECRET_KEY","").strip()
+    mode=os.environ.get("STRIPE_MODE","").strip().lower()
+    if secret:
+        detected="live" if secret.startswith("sk_live_") else ("test" if secret.startswith("sk_test_") else "unknown")
+        add("Stripe key format",detected in ("test","live"),f"detected {detected} mode")
+        if mode:
+            add("Stripe mode agreement",mode==detected,f"configured={mode}, key={detected}")
+    for key in ("STRIPE_SUCCESS_URL","STRIPE_CANCEL_URL"):
+        value=os.environ.get(key,"").strip()
+        parsed=urlparse(value)
+        add(f"{key} URL",parsed.scheme=="https" and bool(parsed.netloc),value or "missing")
+    webhook=os.environ.get("STRIPE_WEBHOOK_SECRET","").strip()
+    add("Stripe webhook secret",webhook.startswith("whsec_"),"configured" if webhook else "missing")
+
+    host=os.environ.get("FABOS_API_HOST","127.0.0.1").strip()
+    add("API bind address",host in ("127.0.0.1","localhost","::1"),host)
+    docs=os.environ.get("FABOS_API_DOCS","false").strip().lower()
+    add("API docs disabled",docs not in ("1","true","yes","on"),docs)
+    if data_path:
+        backup_dir=data_path/"Backups"
+        add("Backup directory",backup_dir.exists(),str(backup_dir))
+
+    failures=sum(1 for item in checks if item["status"]=="fail")
+    result={"ready":failures==0,"failures":failures,"checks":checks}
+    print(json.dumps(result,indent=2))
+    return 0 if failures==0 else 1
+
 def main():
     p=argparse.ArgumentParser(); s=p.add_subparsers(dest='cmd',required=True)
-    for x in ['init','summary','backup','serve','setup-owner','setup-dns','setup-stripe','setup-production']: s.add_parser(x)
+    for x in ['init','summary','backup','serve','setup-owner','setup-dns','setup-stripe','setup-production','production-check']: s.add_parser(x)
     i=s.add_parser('import-data'); i.add_argument('path')
     a=p.parse_args()
     if a.cmd=='setup-owner':
@@ -174,6 +235,8 @@ def main():
     if a.cmd=='setup-stripe':
         _setup_stripe()
         return
+    if a.cmd=='production-check':
+        return _production_check()
     if a.cmd=='setup-production':
         print("\nFABVEX Production Setup")
         print("1. Owner account")
