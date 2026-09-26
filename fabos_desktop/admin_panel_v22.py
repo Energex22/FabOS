@@ -48,6 +48,69 @@ def _open_admin_center(self):
     tabs.add(permissions_tab, text="Roles & Permissions")
     tabs.add(settings_tab, text="Business Settings")
 
+    # Marketing & Sales
+    mbar = tk.Frame(marketing_tab, bg=self._c('bg'))
+    mbar.pack(fill='x', pady=(4, 10))
+    self._button(mbar, "Refresh", lambda: load_marketing(), True).pack(side="left")
+    self._button(mbar, "Save Marketplace Settings", lambda: save_marketing()).pack(side="left", padx=7)
+    tk.Label(marketing_tab, text="Enable only the channels you actually use. Credentials stay outside the database and are referenced by name.",
+             bg=self._c('bg'), fg=self._c('muted'), font=("Segoe UI", 9), justify="left").pack(anchor="w", pady=(0,8))
+    marketing_rows = {}
+    marketing_body = self._card(marketing_tab, "Marketplace & Social Channels")
+    marketing_body.pack(fill="both", expand=True)
+    marketing_canvas = tk.Canvas(marketing_body, bg=self._c('surface'), highlightthickness=0)
+    marketing_scroll = ttk.Scrollbar(marketing_body, orient="vertical", command=marketing_canvas.yview)
+    marketing_inner = tk.Frame(marketing_canvas, bg=self._c('surface'))
+    marketing_inner.bind("<Configure>", lambda e: marketing_canvas.configure(scrollregion=marketing_canvas.bbox("all")))
+    marketing_canvas.create_window((0,0), window=marketing_inner, anchor="nw")
+    marketing_canvas.configure(yscrollcommand=marketing_scroll.set)
+    marketing_canvas.pack(side="left", fill="both", expand=True)
+    marketing_scroll.pack(side="right", fill="y")
+
+    def load_marketing():
+        for child in marketing_inner.winfo_children():
+            child.destroy()
+        marketing_rows.clear()
+        channels = {row["channel_type"]: row for row in self.core.marketing.channels()}
+        for provider in self.core.marketing.connection_status():
+            row = tk.Frame(marketing_inner, bg=self._c('surface_alt'))
+            row.pack(fill="x", padx=12, pady=5)
+            enabled = tk.BooleanVar(value=provider["enabled"])
+            account = tk.StringVar(value=(channels.get(provider["channel_type"]) or {}).get("account_label") or "")
+            ref = tk.StringVar(value=(channels.get(provider["channel_type"]) or {}).get("credential_ref") or "")
+            marketing_rows[provider["channel_type"]] = (enabled, account, ref)
+            tk.Checkbutton(row, text=provider["name"], variable=enabled, bg=self._c('surface_alt'), fg=self._c('text'),
+                           activebackground=self._c('surface_alt'), activeforeground=self._c('text'),
+                           selectcolor=self._c('surface')).pack(side="left", padx=8, pady=8)
+            tk.Entry(row, textvariable=account, width=22, bg=self._c('surface'), fg=self._c('text'),
+                     insertbackground=self._c('text'), relief="flat").pack(side="left", padx=6, ipady=4)
+            tk.Label(row, text="Account label", bg=self._c('surface_alt'), fg=self._c('muted')).pack(side="left")
+            tk.Entry(row, textvariable=ref, width=28, bg=self._c('surface'), fg=self._c('text'),
+                     insertbackground=self._c('text'), relief="flat").pack(side="left", padx=6, ipady=4)
+            tk.Label(row, text="Credential reference", bg=self._c('surface_alt'), fg=self._c('muted')).pack(side="left")
+            status = "Ready" if provider["ready_for_api"] else ("Configured" if provider["configured"] else "Not configured")
+            tk.Label(row, text=status, bg=self._c('surface_alt'),
+                     fg=self._c('green') if provider["ready_for_api"] else self._c('orange')).pack(side="right", padx=10)
+
+    def save_marketing():
+        try:
+            existing = {row["channel_type"]: row for row in self.core.marketing.channels()}
+            for channel_type, (enabled, account, ref) in marketing_rows.items():
+                current = existing.get(channel_type)
+                if not current:
+                    continue
+                self.core.marketing.save_channel(channel_id=current["id"], name=current["name"],
+                    channel_type=channel_type, active=enabled.get(), publish_mode=current["publish_mode"],
+                    account_label=account.get().strip(), profile_url=current["profile_url"] or "",
+                    webhook_url=current["webhook_url"] or "", credential_ref=ref.get().strip(),
+                    notes=current["notes"] or "")
+            load_marketing()
+            messagebox.showinfo("Marketing & Sales", "Marketplace settings saved.", parent=win)
+        except Exception as exc:
+            messagebox.showerror("Marketing & Sales", str(exc), parent=win)
+
+    load_marketing()
+
     # Users
     toolbar = tk.Frame(users_tab, bg=self._c("bg"))
     toolbar.pack(fill="x", pady=(4, 10))
