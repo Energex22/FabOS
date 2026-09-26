@@ -74,17 +74,37 @@ class BackupServiceTests(unittest.TestCase):
                 service.restore(bad)
 
     def test_create_removes_partial_backup_when_sqlite_backup_fails(self):
-        service = BackupService(self.database_path, self.backup_dir)
-        original = sqlite3.Connection.backup
-        try:
-            def fail_backup(*args, **kwargs):
+        from unittest.mock import patch
+
+        class FakeSource:
+            def backup(self, destination):
                 raise sqlite3.DatabaseError("simulated backup failure")
-            sqlite3.Connection.backup = fail_backup
-            with self.assertRaises(sqlite3.DatabaseError):
-                service.create("failed")
-        finally:
-            sqlite3.Connection.backup = original
-        self.assertEqual(list(self.backup_dir.glob("fabos_*.sqlite3")), [])
+            def close(self):
+                pass
+
+        class FakeDestination:
+            def close(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fabos.sqlite3"
+            source.touch()
+            backups = root / "Backups"
+            service = BackupService(source, backups)
+
+            def fake_connect(path):
+                if Path(path) == source:
+                    return FakeSource()
+                target = Path(path)
+                target.touch()
+                return FakeDestination()
+
+            with patch("fabos_core.services.backup.sqlite3.connect", side_effect=fake_connect):
+                with self.assertRaises(sqlite3.DatabaseError):
+                    service.create("failed")
+
+            self.assertEqual(list(backups.glob("fabos_*.sqlite3")), [])
 
     def test_create_does_not_overwrite_same_second_backup(self):
         with tempfile.TemporaryDirectory() as directory:
