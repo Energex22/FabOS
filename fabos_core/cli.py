@@ -5,6 +5,7 @@ from urllib.request import urlopen
 from urllib.parse import urlparse
 import sqlite3
 from fabos_core.application import FabOSApplication
+from fabos_core.services.auth import AuthService
 
 DEFAULT_ENV_FILE=Path("deployment/windows/server.env")
 
@@ -187,6 +188,18 @@ def _production_check():
                 add("SQLite integrity",str(result).lower()=="ok",str(result))
             except Exception as exc:
                 add("SQLite integrity",False,str(exc))
+            try:
+                with sqlite3.connect(str(db_path)) as conn:
+                    conn.row_factory=sqlite3.Row
+                    owner=conn.execute(
+                        "SELECT id,password_hash FROM users WHERE lower(COALESCE(role,''))='owner' "
+                        "AND lower(COALESCE(account_type,''))='administrator' AND active=1 LIMIT 1"
+                    ).fetchone()
+                add("Active owner account",owner is not None,"configured" if owner else "missing")
+                bootstrap_used=bool(owner and AuthService(None,None).verify_password("owner-password",owner["password_hash"]))
+                add("Bootstrap owner password disabled",not bootstrap_used,"default bootstrap password is still active" if bootstrap_used else "changed")
+            except Exception as exc:
+                add("Owner security",False,str(exc))
 
     required={"FABOS_PAYMENT_PROVIDER":"stripe","STRIPE_SECRET_KEY":None,
               "STRIPE_SUCCESS_URL":None,"STRIPE_CANCEL_URL":None}
