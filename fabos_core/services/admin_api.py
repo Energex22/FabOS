@@ -296,6 +296,10 @@ def register_admin_routes(app, get_application, administrator_user):
     def marketing_dashboard(user=Depends(administrator_user), application=Depends(get_application)):
         return application.marketing.dashboard()
 
+    @app.get("/api/v1/admin/marketing/providers")
+    def marketing_providers(user=Depends(administrator_user), application=Depends(get_application)):
+        return {"providers": application.marketing.connection_status()}
+
     @app.get("/api/v1/admin/marketing/channels")
     def marketing_channels(user=Depends(administrator_user), application=Depends(get_application)):
         return {"channels": [dict(row) for row in application.marketing.channels()]}
