@@ -91,6 +91,19 @@ CREATE TABLE IF NOT EXISTS marketing_post_templates(id TEXT PRIMARY KEY,name TEX
 ('ai_provider','disabled'),('ai_model',''),('ai_endpoint',''),('ai_api_key_env','FABOS_AI_API_KEY'),
 ('ai_allow_customer_data','false'),('ai_require_action_approval','true');"""),
 
+(50,"""INSERT OR IGNORE INTO shop_settings(key,value) VALUES
+('shop_city',''),('shop_state','MO'),('shop_postal_code',''),('tax_state','MO'),
+('tax_rate_source','state_default'),('default_tax_percent','4.225'),
+('marketing_amazon_account_ref',''),('marketing_shopify_account_ref',''),
+('marketing_walmart_account_ref',''),('marketing_google_business_account_ref',''),
+('marketing_linkedin_account_ref',''),('marketing_threads_account_ref','');
+INSERT OR IGNORE INTO marketing_channels(id,name,channel_type,active,publish_mode) VALUES
+('channel_amazon','Amazon Marketplace','amazon',0,'api'),
+('channel_shopify','Shopify','shopify',0,'api'),
+('channel_walmart','Walmart Marketplace','walmart',0,'api'),
+('channel_google_business','Google Business Profile','google_business',0,'api'),
+('channel_linkedin','LinkedIn','linkedin',0,'api'),
+('channel_threads','Threads','threads',0,'api');"""),
 (49,"""CREATE TABLE IF NOT EXISTS ai_conversations(
 id TEXT PRIMARY KEY,
 user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
