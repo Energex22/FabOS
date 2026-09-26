@@ -279,7 +279,7 @@ class PaymentSecurityTests(unittest.TestCase):
                 self.connection.execute(
                     "CREATE TABLE payment_webhook_events(id TEXT PRIMARY KEY, provider TEXT, event_type TEXT, payment_id TEXT)"
                 )
-                self.connection.execute("CREATE TABLE payment_transactions(id TEXT PRIMARY KEY, provider_payment_id TEXT, created_at TEXT)")
+                self.connection.execute("CREATE TABLE payment_transactions(id TEXT PRIMARY KEY, provider_payment_id TEXT, order_id TEXT, created_at TEXT)")
 
             def connect(self):
                 return self.connection
