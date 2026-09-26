@@ -5,7 +5,7 @@ FabOS now includes a provider-neutral marketing workspace foundation.
 ## What it manages
 - Products as the source of truth for marketing posts.
 - Campaigns with dates and budgets.
-- Channel connections for the FABVEX website, Etsy, eBay, Facebook, Instagram, TikTok, Pinterest, email, and future channels.
+- Channel connections for the FABVEX website, Etsy, eBay, Facebook, Instagram, TikTok, Pinterest, Amazon, Shopify, Walmart Marketplace, Google Business Profile, LinkedIn, Threads, email, and future channels.
 - Draft, approval, scheduling, publishing, and failure states.
 - Per-channel post status and external IDs.
 - External marketplace sales ingestion and normalized sales reporting.
@@ -36,6 +36,14 @@ Normal flow:
 8. Provider adapters can import marketplace orders into marketing_external_orders.
 
 External publishing remains approval-gated by default.
+
+## Marketplace setup model
+
+The owner can enable only the channels they actually use. New channels are created disabled by default, so adding support does not publish anything automatically.
+
+Provider credentials are never stored in the FabOS database. Each provider has a documented environment-variable/secret-store reference (for example FABOS_ETSY_CREDENTIALS or FABOS_AMAZON_CREDENTIALS). The Administration Center can show whether an account is configured and whether the required credential reference is available. External publishing remains approval-gated unless the owner deliberately changes the setting.
+
+The provider catalog is intentionally extensible: adding a new marketplace does not require changing product, order, pricing, tax, or production tables.
 
 ## Current limitation
 The normalized channel and sales interfaces are in place, but provider-specific OAuth/API adapters are intentionally isolated from the core so credentials and platform API changes cannot destabilize FabOS. Manual mode is usable immediately; webhook/api modes are integration seams for provider connectors.
