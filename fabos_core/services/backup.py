@@ -17,8 +17,17 @@ class BackupService:
             target=self.destination/("fabos_%s%s_%d.sqlite3"%(stamp,suffix,counter))
             counter += 1
         s=sqlite3.connect(str(self.source));d=sqlite3.connect(str(target))
-        try:s.backup(d)
-        finally:d.close();s.close()
+        try:
+            s.backup(d)
+        except Exception:
+            try:
+                target.unlink()
+            except OSError:
+                pass
+            raise
+        finally:
+            d.close()
+            s.close()
         return target
 
     def create_daily_if_needed(self):
