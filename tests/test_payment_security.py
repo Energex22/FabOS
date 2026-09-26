@@ -196,6 +196,20 @@ class PaymentSecurityTests(unittest.TestCase):
             else:
                 os.environ["STRIPE_WEBHOOK_SECRET"] = previous_webhook
 
+    def test_square_pending_refund_is_not_recorded(self):
+        application = _Application()
+        self._seed_payment(application)
+        payload = json.dumps({
+            "id": "evt_square_pending",
+            "type": "refund.created",
+            "data": {"object": {"refund": {"id": "sq_refund", "status": "PENDING", "amount_money": {"amount": 1800}, "payment_id": "sq_payment"}}},
+        })
+        result = _record_refund(application, "square", payload)
+        self.assertIsNone(result)
+        with application.database.connect() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM payments WHERE invoice_id=? AND amount_cents<0", ("invoice-1",)).fetchone()[0]
+        self.assertEqual(count, 0)
+
     def test_stripe_refund_is_recorded_as_negative_ledger_entry(self):
         application = _Application()
         self._seed_payment(application)
