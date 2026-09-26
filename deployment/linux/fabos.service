@@ -14,6 +14,8 @@ Environment=FABOS_API_PORT=8000
 ExecStart=/opt/fabos/.venv/bin/python -m fabos_core.cli serve
 Restart=on-failure
 RestartSec=5
+UMask=0027
+LimitNOFILE=65536
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
