@@ -7,6 +7,15 @@ from fabos_core.services.backup import BackupService
 
 
 class BackupServiceTests(unittest.TestCase):
+    def test_create_rejects_missing_source_database(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "missing.sqlite3"
+            service = BackupService(source, root / "Backups")
+            with self.assertRaises(FileNotFoundError):
+                service.create("missing")
+            self.assertFalse((root / "Backups").exists())
+
     def _seed_db(self, path: Path):
         conn = sqlite3.connect(path)
         conn.executescript("""
