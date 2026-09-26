@@ -47,6 +47,8 @@ def _open_admin_center(self):
     tabs.add(users_tab, text="Users & Accounts")
     tabs.add(permissions_tab, text="Roles & Permissions")
     tabs.add(settings_tab, text="Business Settings")
+    marketing_tab = tk.Frame(tabs, bg=self._c("bg"))
+    tabs.add(marketing_tab, text="Marketing & Sales")
 
     # Marketing & Sales
     mbar = tk.Frame(marketing_tab, bg=self._c('bg'))
@@ -67,6 +69,14 @@ def _open_admin_center(self):
     marketing_canvas.pack(side="left", fill="both", expand=True)
     marketing_scroll.pack(side="right", fill="y")
 
+    def _row_value(row, key, default=""):
+        if row is None:
+            return default
+        try:
+            return row[key]
+        except (KeyError, IndexError, TypeError):
+            return default
+
     def load_marketing():
         for child in marketing_inner.winfo_children():
             child.destroy()
@@ -76,8 +86,9 @@ def _open_admin_center(self):
             row = tk.Frame(marketing_inner, bg=self._c('surface_alt'))
             row.pack(fill="x", padx=12, pady=5)
             enabled = tk.BooleanVar(value=provider["enabled"])
-            account = tk.StringVar(value=(channels.get(provider["channel_type"]) or {}).get("account_label") or "")
-            ref = tk.StringVar(value=(channels.get(provider["channel_type"]) or {}).get("credential_ref") or "")
+            channel_row = channels.get(provider["channel_type"])
+            account = tk.StringVar(value=_row_value(channel_row, "account_label") or "")
+            ref = tk.StringVar(value=_row_value(channel_row, "credential_ref") or "")
             marketing_rows[provider["channel_type"]] = (enabled, account, ref)
             tk.Checkbutton(row, text=provider["name"], variable=enabled, bg=self._c('surface_alt'), fg=self._c('text'),
                            activebackground=self._c('surface_alt'), activeforeground=self._c('text'),
@@ -100,10 +111,10 @@ def _open_admin_center(self):
                 if not current:
                     continue
                 self.core.marketing.save_channel(channel_id=current["id"], name=current["name"],
-                    channel_type=channel_type, active=enabled.get(), publish_mode=current["publish_mode"],
-                    account_label=account.get().strip(), profile_url=current["profile_url"] or "",
-                    webhook_url=current["webhook_url"] or "", credential_ref=ref.get().strip(),
-                    notes=current["notes"] or "")
+                    channel_type=channel_type, active=enabled.get(), publish_mode=_row_value(current, "publish_mode", "manual"),
+                    account_label=account.get().strip(), profile_url=_row_value(current, "profile_url"),
+                    webhook_url=_row_value(current, "webhook_url"), credential_ref=ref.get().strip(),
+                    notes=_row_value(current, "notes"))
             load_marketing()
             messagebox.showinfo("Marketing & Sales", "Marketplace settings saved.", parent=win)
         except Exception as exc:
