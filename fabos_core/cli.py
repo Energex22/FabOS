@@ -223,7 +223,7 @@ def _production_check():
 
 def main():
     p=argparse.ArgumentParser(); s=p.add_subparsers(dest='cmd',required=True)
-    for x in ['init','summary','backup','serve','setup-owner','setup-dns','setup-stripe','setup-production','production-check']: s.add_parser(x)
+    for x in ['init','summary','backup','backup-check','serve','setup-owner','setup-dns','setup-stripe','setup-production','production-check']: s.add_parser(x)
     i=s.add_parser('import-data'); i.add_argument('path')
     a=p.parse_args()
     if a.cmd=='setup-owner':
@@ -255,6 +255,10 @@ def main():
     if a.cmd=='init': print(app.settings.database_path)
     elif a.cmd=='summary': print(json.dumps(app.summary(),indent=2))
     elif a.cmd=='backup': print(app.backups.create())
+    elif a.cmd=='backup-check':
+        result=app.backups.test_latest()
+        print(json.dumps(result,default=str,indent=2))
+        return 0 if result.get('valid') else 1
     elif a.cmd=='serve':
         import uvicorn
         from fabos_core.api import create_app
