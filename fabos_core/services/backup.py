@@ -35,15 +35,19 @@ class BackupService:
 
     def restore(self,backup_path):
         src=Path(backup_path)
-        if not src.exists():raise FileNotFoundError(src)
+        if not src.exists():
+            raise FileNotFoundError(src)
+        if src.resolve() == self.source.resolve():
+            raise ValueError("Cannot restore the live database from itself")
+        validation=self.validate_backup(src)
+        if not validation.get("valid"):
+            raise ValueError("Selected backup is not a valid FabOS database: "+str(validation.get("detail") or "unknown error"))
         # Preserve current DB immediately before restore.
         safety=self.create("pre_restore")
         source=sqlite3.connect(str(src));dest=sqlite3.connect(str(self.source))
         try:
-            check=source.execute("PRAGMA integrity_check").fetchone()[0]
-            if str(check).lower()!="ok":
-                raise ValueError("Selected backup failed SQLite integrity check: "+str(check))
             source.backup(dest)
+            dest.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         finally:
             dest.close();source.close()
         return safety
