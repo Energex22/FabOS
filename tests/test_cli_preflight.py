@@ -18,6 +18,8 @@ class ProductionPreflightTests(unittest.TestCase):
                 "FABOS_PAYMENT_PROVIDER": "stripe",
                 "FABOS_API_HOST": "127.0.0.1",
                 "FABOS_API_DOCS": "false",
+                "FABOS_ALLOWED_HOSTS": "fabvex.example",
+                "FABOS_CORS_ORIGINS": "https://fabvex.example",
             }
             with patch.dict(os.environ, env, clear=False):
                 self.assertEqual(_production_check(), 1)
