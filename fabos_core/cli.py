@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import sqlite3
 from fabos_core.application import FabOSApplication
 from fabos_core.services.auth import AuthService
+from fabos_core.services.backup import BackupService
 
 DEFAULT_ENV_FILE=Path("deployment/windows/server.env")
 
