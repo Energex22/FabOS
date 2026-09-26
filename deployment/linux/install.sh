@@ -58,7 +58,7 @@ fi
 
 install -m 644 "$FABOS_DIR/deployment/linux/fabos.service" "$SERVICE_FILE"
 
-sudo -u fabos bash -c "cd '$WEB_DIR' && npm ci && npm test && npm run build"
+runuser -u fabos -- bash -c "cd '$WEB_DIR' && npm ci && npm test && npm run build"
 chown -R fabos:fabos "$WEB_DIR"
 
 "$FABOS_DIR/.venv/bin/python" -m fabos_core.cli init
