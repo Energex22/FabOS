@@ -12,6 +12,10 @@ class BackupService:
         safe="".join(ch for ch in str(label) if ch.isalnum() or ch in ("-","_"))[:30]
         suffix=("_"+safe) if safe else ""
         target=self.destination/("fabos_%s%s.sqlite3"%(stamp,suffix))
+        counter=1
+        while target.exists():
+            target=self.destination/("fabos_%s%s_%d.sqlite3"%(stamp,suffix,counter))
+            counter += 1
         s=sqlite3.connect(str(self.source));d=sqlite3.connect(str(target))
         try:s.backup(d)
         finally:d.close();s.close()
@@ -80,6 +84,12 @@ class BackupService:
         return self.validate_backup(rows[0]["path"])
 
     def prune(self,keep=30):
+        try:
+            keep=int(keep)
+        except (TypeError,ValueError) as exc:
+            raise ValueError("Backup retention must be an integer") from exc
+        if keep < 1:
+            raise ValueError("Backup retention must be at least 1")
         files=sorted(self.destination.glob("fabos_*.sqlite3"),
                      key=lambda p:p.stat().st_mtime,reverse=True)
         removed=[]
