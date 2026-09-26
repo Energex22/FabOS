@@ -116,7 +116,7 @@ class PaymentSecurityTests(unittest.TestCase):
         try:
             provider = StripePaymentProvider()
             with self.assertRaises(PaymentProviderNotConfigured):
-                provider.create_checkout(payment_id="p1, amount_cents=1000, currency="USD", metadata={"order_id": "o1"})
+                provider.create_checkout(payment_id="p1", amount_cents=1000, currency="USD", metadata={"order_id": "o1"})
         finally:
             if previous_key is None: os.environ.pop("STRIPE_SECRET_KEY", None)
             else: os.environ["STRIPE_SECRET_KEY"] = previous_key
