@@ -46,7 +46,7 @@ def _record_refund(application, provider_name, payload):
         provider_payment_id = str(refund.get("payment_id") or "")
         payment_id = ""
         refund_reference = f"square-refund:{refund.get('id') or event_id}"
-        if str(refund.get("status") or "").upper() not in {"COMPLETED", "PENDING"}:
+        if str(refund.get("status") or "").upper() != "COMPLETED":
             return None
     else:
         return None
