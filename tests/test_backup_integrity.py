@@ -58,6 +58,12 @@ class BackupIntegrityTests(unittest.TestCase):
                     "backup me",
                 )
 
+    def test_windows_backup_wrapper_verifies_archive_before_retention(self):
+        script = Path("deployment/windows/backup.ps1").read_text(encoding="utf-8")
+        self.assertIn("$verifyScript = Join-Path $scriptDir \"verify_backup.py\"", script)
+        self.assertIn("& $PythonExe $verifyScript $archivePath", script)
+        self.assertIn("Remove-Item -LiteralPath $archivePath -Force", script)
+
     def test_backup_verifier_accepts_integrity_checked_archive(self):
         from deployment.windows.verify_backup import verify_backup
         import zipfile
