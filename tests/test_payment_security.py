@@ -9,6 +9,7 @@ import unittest
 from fabos_core.services.payment_api import _record_refund
 from fabos_core.services.payments import (
     PaymentProviderError,
+    PaymentProviderNotConfigured,
     StripePaymentProvider,
     _verify_stripe_signature,
     base64_hmac_sha256,
@@ -114,8 +115,8 @@ class PaymentSecurityTests(unittest.TestCase):
         os.environ["STRIPE_CANCEL_URL"] = "https://shop.example/checkout.html"
         try:
             provider = StripePaymentProvider()
-            with self.assertRaises(PaymentProviderError):
-                provider.create_checkout(payment_id="p1", amount_cents=1000, currency="USD", metadata={"order_id": "o1"})
+            with self.assertRaises(PaymentProviderNotConfigured):
+                provider.create_checkout(payment_id="p1, amount_cents=1000, currency="USD", metadata={"order_id": "o1"})
         finally:
             if previous_key is None: os.environ.pop("STRIPE_SECRET_KEY", None)
             else: os.environ["STRIPE_SECRET_KEY"] = previous_key
