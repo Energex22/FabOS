@@ -13,9 +13,15 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-for cmd in python3 git npm; do
+for cmd in python3 git npm runuser; do
   command -v "$cmd" >/dev/null || { echo "Missing required command: $cmd"; exit 1; }
 done
+
+command -v node >/dev/null || { echo "Missing required command: node"; exit 1; }
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+if [[ "$NODE_MAJOR" -ne 24 ]]; then echo "Node.js 24 is required by FabOS-Web (found $NODE_MAJOR)."; exit 1; fi
+NPM_MAJOR="$(npm --version | cut -d. -f1)"
+if [[ "$NPM_MAJOR" -ne 11 ]]; then echo "npm 11 is required by FabOS-Web (found $NPM_MAJOR)."; exit 1; fi
 
 id fabos >/dev/null 2>&1 || useradd --system --home "$FABOS_DIR" --shell /usr/sbin/nologin fabos
 mkdir -p "$FABOS_DIR" "$DATA_DIR" "$ENV_DIR"
@@ -47,6 +53,8 @@ FABOS_API_THREADS=8
 FABOS_PAYMENT_PROVIDER=stripe
 FABOS_API_DOCS=false
 FABOS_TRUSTED_PROXIES=127.0.0.1
+FABOS_ALLOWED_HOSTS=fabvex.duckdns.org
+FABOS_CORS_ORIGINS=https://fabvex.duckdns.org
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 STRIPE_SUCCESS_URL=https://fabvex.duckdns.org/orders.html
