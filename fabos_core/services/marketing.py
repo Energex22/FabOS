@@ -141,7 +141,7 @@ class MarketingService:
         price = "$%.2f" % (price_cents / 100.0)
         base = description or ("A new FABVEX 3D-printed product: %s." % name)
         return {
-            "facebook": {"title": name, "body": "New from FABVEX: %s\\n\\n%s\\n\\nAvailable for %s." % (name, base, price)},
+            "facebook": {"title": name, "body": "New from FABVEX: %s\n\n%s\n\nAvailable for %s." % (name, base, price)},
             "instagram": {"title": name, "body": "%s ✨\\n\\n%s\\n\\n#FABVEX #3DPrinting #MadeToOrder" % (name, base)},
             "tiktok": {"title": name, "body": "Meet the %s from FABVEX. %s #FABVEX #3DPrinting" % (name, base)},
             "pinterest": {"title": name, "body": "%s — %s. FABVEX 3D-printed design." % (name, base)},
