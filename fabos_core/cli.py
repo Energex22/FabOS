@@ -31,6 +31,13 @@ def _write_env(values):
     ]
     lines.extend(f"{key}={value}" for key,value in sorted(existing.items()))
     path.write_text("\n".join(lines)+"\n",encoding="utf-8")
+    if os.name == "posix":
+        os.chmod(path, 0o640)
+        try:
+            import grp
+            os.chown(path, os.getuid(), grp.getgrnam("fabos").gr_gid)
+        except (KeyError, PermissionError, OSError):
+            pass
     print(f"Saved production settings to: {path.resolve()}")
     return path
 
