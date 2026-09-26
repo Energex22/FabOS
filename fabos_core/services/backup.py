@@ -18,8 +18,11 @@ class BackupService:
         while target.exists():
             target=self.destination/("fabos_%s%s_%d.sqlite3"%(stamp,suffix,counter))
             counter += 1
-        s=sqlite3.connect(str(self.source));d=sqlite3.connect(str(target))
+        s = None
+        d = None
         try:
+            s = sqlite3.connect(str(self.source))
+            d = sqlite3.connect(str(target))
             s.backup(d)
         except Exception:
             try:
@@ -28,15 +31,23 @@ class BackupService:
                 pass
             raise
         finally:
-            d.close()
-            s.close()
+            if d is not None:
+                d.close()
+            if s is not None:
+                s.close()
         return target
 
     def create_daily_if_needed(self):
         self.destination.mkdir(parents=True,exist_ok=True)
         today=datetime.now().strftime("%Y%m%d")
-        if any(self.destination.glob("fabos_%s*.sqlite3"%today)):
-            return None
+        existing = sorted(self.destination.glob("fabos_%s*.sqlite3" % today), key=lambda p: p.stat().st_mtime, reverse=True)
+        for candidate in existing:
+            if self.validate_backup(candidate).get("valid"):
+                return None
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
         return self.create("startup")
 
     def list(self):
