@@ -73,6 +73,31 @@ class BackupServiceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 service.restore(bad)
 
+    def test_create_does_not_overwrite_same_second_backup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fabos.sqlite3"
+            backups = root / "Backups"
+            self._seed_db(source)
+            service = BackupService(source, backups)
+            first = service.create("same")
+            second = service.create("same")
+            self.assertNotEqual(first, second)
+            self.assertTrue(first.exists())
+            self.assertTrue(second.exists())
+            self.assertEqual(len(service.list()), 2)
+
+    def test_prune_rejects_invalid_retention(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "fabos.sqlite3"
+            self._seed_db(source)
+            service = BackupService(source, root / "Backups")
+            with self.assertRaises(ValueError):
+                service.prune(keep=0)
+            with self.assertRaises(ValueError):
+                service.prune(keep="not-a-number")
+
     def test_prune_keeps_requested_number_of_backups(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
