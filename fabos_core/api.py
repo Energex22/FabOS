@@ -285,7 +285,12 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         blocked = next((key for key in limiter_keys if not app.state.auth_rate_limiter.allow(key)), None)
         if blocked:
             raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.", headers={"Retry-After": str(app.state.auth_rate_limiter.retry_after(blocked))})
-        result = application.auth.login(payload.identifier, payload.password)
+        result = application.auth.login(
+            payload.identifier,
+            payload.password,
+            ip_address=client,
+            user_agent=(request.headers.get("user-agent") or "")[:1000],
+        )
         if not result:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         summary = result["user"]
@@ -303,7 +308,12 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
                 detail="Too many team login attempts. Try again later.",
                 headers={"Retry-After": str(app.state.team_auth_rate_limiter.retry_after(blocked))},
             )
-        result = application.auth.login(payload.identifier, payload.password)
+        result = application.auth.login(
+            payload.identifier,
+            payload.password,
+            ip_address=client,
+            user_agent=(request.headers.get("user-agent") or "")[:1000],
+        )
         if not result:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         account = result["user"]["user"]
