@@ -226,6 +226,10 @@ def _production_check():
     add("API bind address",host in ("127.0.0.1","localhost","::1"),host)
     docs=os.environ.get("FABOS_API_DOCS","false").strip().lower()
     add("API docs disabled",docs not in ("1","true","yes","on"),docs)
+    allowed_hosts=[item.strip() for item in os.environ.get("FABOS_ALLOWED_HOSTS","").split(",") if item.strip()]
+    add("Allowed hosts configured",bool(allowed_hosts) and "*" not in allowed_hosts,",".join(allowed_hosts) or "missing")
+    cors_origins=[item.strip() for item in os.environ.get("FABOS_CORS_ORIGINS","").split(",") if item.strip()]
+    add("CORS origins configured",bool(cors_origins) and "*" not in cors_origins,",".join(cors_origins) or "missing")
     if data_path:
         backup_dir=data_path/"Backups"
         add("Backup directory",backup_dir.exists(),str(backup_dir))
