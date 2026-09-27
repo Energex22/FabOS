@@ -73,22 +73,32 @@ class OwnerSetupCommandTests(OwnerBootstrapTests):
     def test_owner_setup_command_changes_default_credentials(self):
         import builtins
         import getpass
+        from pathlib import Path
         from unittest.mock import patch
         from fabos_core.cli import main
 
-        app = self.app
-        app._ensure_owner_account()
-        with patch.object(builtins, "input", return_value="fabvex-admin"), patch.object(
-            getpass, "getpass", side_effect=["a-strong-owner-password", "a-strong-owner-password"]
-        ), patch("sys.argv", ["fabos", "setup-owner"]), patch(
-            "fabos_core.cli.FabOSApplication", return_value=app
-        ):
-            main()
-        user = app.auth.accounts.get_by_username("fabvex-admin")
-        self.assertIsNotNone(user)
-        self.assertIsNone(app.auth.accounts.get_by_username("owner"))
-        self.assertIsNotNone(app.auth.login("fabvex-admin", "a-strong-owner-password"))
-        self.assertIsNone(app.auth.login("fabvex-admin", "owner-password"))
+        with tempfile.TemporaryDirectory() as temp:
+            data_dir = Path(temp)
+            env_file = data_dir / "server.env"
+            env = {
+                "FABOS_DATA_DIR": str(data_dir),
+                "FABOS_ENV_FILE": str(env_file),
+            }
+            with patch.dict(os.environ, env, clear=False), patch.object(
+                builtins, "input", return_value="fabvex-admin"
+            ), patch.object(
+                getpass, "getpass", side_effect=["a-strong-owner-password", "a-strong-owner-password"]
+            ), patch("sys.argv", ["fabos", "setup-owner"]):
+                main()
+
+            db = Database(data_dir / "fabos.sqlite3")
+            accounts = AccountService(db)
+            auth = AuthService(db, accounts)
+            user = accounts.get_by_username("fabvex-admin")
+            self.assertIsNotNone(user)
+            self.assertIsNone(accounts.get_by_username("owner"))
+            self.assertIsNotNone(auth.login("fabvex-admin", "a-strong-owner-password"))
+            self.assertIsNone(auth.login("fabvex-admin", "owner-password"))
 
 class ProductionSetupCommandTests(OwnerBootstrapTests):
     def test_stripe_setup_writes_test_mode_settings(self):
