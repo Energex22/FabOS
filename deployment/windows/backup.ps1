@@ -50,9 +50,21 @@ if ($LASTEXITCODE -ne 0) {
 
 $dataDir = if ($env:FABOS_DATA_DIR) { [Environment]::ExpandEnvironmentVariables($env:FABOS_DATA_DIR) } else { Join-Path $HOME "WireVault FabOS Data" }
 $backupDir = Join-Path $dataDir "Backups"
-$backups = Get-ChildItem -Path $backupDir -Filter "fabos-backup-*.zip" -File | Sort-Object LastWriteTime -Descending
 if ($Keep -lt 1) { $Keep = 1 }
-$backups | Select-Object -Skip $Keep | Remove-Item -Force
+
+# Re-verify existing archives before retention so an older corrupt archive can
+# never displace a verified recovery point.
+$verifiedBackups = @()
+foreach ($candidate in (Get-ChildItem -Path $backupDir -Filter "fabos-backup-*.zip" -File | Sort-Object LastWriteTime -Descending)) {
+    & $PythonExe $verifyScript $candidate.FullName | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $verifiedBackups += $candidate
+    } else {
+        Remove-Item -LiteralPath $candidate.FullName -Force -ErrorAction SilentlyContinue
+        Write-Warning "Removed invalid FabOS backup archive: $($candidate.FullName)"
+    }
+}
+$verifiedBackups | Select-Object -Skip $Keep | Remove-Item -Force
 
 Write-Host "FabOS backup complete and verified: $archivePath"
-Write-Host "Retained $([Math]::Min($Keep, $backups.Count)) verified backup archive(s)."
+Write-Host "Retained $([Math]::Min($Keep, $verifiedBackups.Count)) verified backup archive(s)."
