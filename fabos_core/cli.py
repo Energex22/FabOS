@@ -5,6 +5,9 @@ from urllib.request import urlopen
 from urllib.parse import urlparse
 import sqlite3
 from fabos_core.application import FabOSApplication
+from fabos_core.config import load_settings,ensure_directories
+from fabos_core.db.database import Database
+from fabos_core.db.migrations import migrate
 from fabos_core.services.auth import AuthService
 from fabos_core.services.backup import BackupService
 
