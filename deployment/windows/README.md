@@ -61,11 +61,11 @@ Always set, on every deployment path:
 
 - `FABOS_API_HOST=127.0.0.1` so the API is not directly exposed to the network.
 
-The remaining variables depend on **which server process is running**, because
-the two entry points read different settings. See the table in the repository
-README under "Two API entry points".
+The Windows production launcher uses the canonical FastAPI entry point
+`deployment/windows/run_api_service.py`, which runs Uvicorn locally behind Caddy.
+The legacy Waitress entry point is not used by the storefront production launcher.
 
-When running `python -m fabos_core.cli serve` (FastAPI):
+When running the Windows FastAPI service:
 
 - `FABOS_ALLOWED_HOSTS=your-public-domain` to reject unexpected HTTP Host headers.
 - `FABOS_CORS_ORIGINS=https://your-public-domain` using the exact storefront
@@ -76,14 +76,7 @@ When running `python -m fabos_core.cli serve` (FastAPI):
 
 If more than one public hostname is intentionally served, list them comma-separated. Do not use a wildcard unless the deployment genuinely requires it.
 
-When running `python -m fabos_api.server` (Waitress, used by
-`Start-FabVex-Production.ps1` in FabOS-Web):
-
-- `FABOS_API_ALLOW_ORIGIN=https://your-public-domain`, or leave it unset for a
-  same-origin deployment where it has no effect.
-- `FABOS_API_THREADS` to size the request thread pool. Defaults to 8.
-
-`FABOS_CORS_ORIGINS`, `FABOS_ALLOWED_HOSTS`, and `FABOS_API_DOCS` are **not read
-by this server** and setting them there does nothing. Host-header filtering on
-this path has to come from Caddy, which only answers for the hostnames in its
-site blocks.
+The `--threads` setting accepted by the Windows launcher is retained for
+compatibility with existing startup commands; the canonical FastAPI service
+currently runs a single Uvicorn worker because FabOS uses a single SQLite
+application data store.
