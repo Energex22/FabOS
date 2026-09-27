@@ -63,6 +63,9 @@ class BackupIntegrityTests(unittest.TestCase):
         self.assertIn("$verifyScript = Join-Path $scriptDir \"verify_backup.py\"", script)
         self.assertIn("& $PythonExe $verifyScript $archivePath", script)
         self.assertIn("Remove-Item -LiteralPath $archivePath -Force", script)
+        self.assertIn("$verifiedBackups = @()", script)
+        self.assertIn("foreach ($candidate in", script)
+        self.assertIn("Removed invalid FabOS backup archive", script)
 
     def test_backup_verifier_accepts_integrity_checked_archive(self):
         from deployment.windows.verify_backup import verify_backup
