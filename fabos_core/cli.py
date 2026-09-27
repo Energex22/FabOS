@@ -135,18 +135,46 @@ def _setup_stripe():
     print("Use Stripe test cards first; switch to live only after the end-to-end checkout and webhook are verified.")
 
 def _setup_owner():
+    """Create or replace the designated owner credential during first-run setup."""
     _load_private_env()
-    app=FabOSApplication()
-    with app.database.connect() as connection:
+    settings=load_settings()
+    ensure_directories(settings)
+    database=Database(settings.database_path)
+    database.initialize()
+    backups=BackupService(settings.database_path,settings.backup_dir)
+    migrate(database,backups)
+    auth=AuthService(database,None)
+    with database.connect() as connection:
         owner=connection.execute(
             "SELECT id,username FROM users WHERE lower(COALESCE(role,''))='owner' "
             "AND lower(COALESCE(account_type,''))='administrator' AND active=1 LIMIT 1"
         ).fetchone()
-    if owner is None:
-        raise SystemExit("No active owner account exists. Run the normal initialization first.")
-    username=(input("Owner username [owner]: ").strip() or "owner")
+        if owner is None:
+            admins=connection.execute(
+                "SELECT id,username FROM users WHERE lower(COALESCE(account_type,''))='administrator' "
+                "AND active=1 ORDER BY created_at,id"
+            ).fetchall()
+            if len(admins)==1:
+                owner=admins[0]
+                connection.execute(
+                    "UPDATE users SET role='owner',account_type='administrator',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (owner["id"],),
+                )
+                connection.commit()
+            elif admins:
+                raise SystemExit("Multiple administrators exist and no owner is configured. Configure the owner explicitly first.")
+            else:
+                password_hash=auth.hash_password("owner-password")
+                connection.execute(
+                    "INSERT INTO users(id,username,password_hash,role,active,account_type) VALUES(?,?,?,?,?,?)",
+                    ("owner","owner",password_hash,"owner",1,"administrator"),
+                )
+                connection.commit()
+                owner={"id":"owner","username":"owner"}
+
+    username=(input(f"Owner username [{owner['username']}]: ").strip() or owner["username"])
     if username != owner["username"]:
-        with app.database.connect() as connection:
+        with database.connect() as connection:
             taken=connection.execute(
                 "SELECT 1 FROM users WHERE lower(username)=lower(?) AND id<>? LIMIT 1",
                 (username,owner["id"]),
@@ -168,9 +196,8 @@ def _setup_owner():
             print("Passwords do not match.")
             continue
         break
-    app.auth.set_password(owner["id"],password)
+    auth.set_password(owner["id"],password)
     print("Owner setup complete. The default owner credential is no longer usable.")
-
 
 def _production_check():
     """Read-only deployment preflight; never creates data or contacts payment APIs."""
