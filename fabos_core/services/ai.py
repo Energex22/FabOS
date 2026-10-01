@@ -341,3 +341,37 @@ class AIService:
             "Facebook/Instagram/TikTok/Pinterest captions, 5-10 relevant hashtags, and a clear call to action. "
             "Do not invent materials, dimensions, certifications, licensing rights, shipping times, or capabilities.",
         )
+
+
+    def design_spec_from_images(self, images, reference_note=""):
+        """Extract a constrained CAD spec from reference images without executing model code."""
+        if not images:
+            raise ValueError("At least one reference image is required")
+        prompt = (
+            "Analyze these reference images for a 3D-printable part. Return JSON only using the same "
+            "CAD schema as design_spec_from_prompt. Do not invent exact dimensions from pixels. "
+            "Use only dimensions explicitly supplied in the reference note; if scale is insufficient, "
+            "put missing measurements in metadata.missing_dimensions and set metadata.scale_confirmed=false. "
+            "Describe visible geometry/features in metadata.features. Allowed shapes: box, plate, cylinder, "
+            "ring, bracket, mounting_plate. All dimensions are millimeters."
+        )
+        if reference_note:
+            prompt += "\nReference measurements/context: " + str(reference_note).strip()[:4000]
+        content = [{"type": "text", "text": prompt}]
+        for item in images[:4]:
+            content.append({"type": "image_url", "image_url": {"url": item}})
+        messages = [
+            {"role": "system", "content": "You are a dimensional CAD reference analyzer. JSON only."},
+            {"role": "user", "content": content},
+        ]
+        response, _ = self._request(messages, use_tools=False)
+        raw = response.get("content", "")
+        if isinstance(raw, list):
+            raw = "".join(str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in raw)
+        raw = str(raw).strip()
+        if raw.startswith("```"):
+            raw = raw.replace("```json", "", 1).replace("```", "", 1).strip()
+        result = json.loads(raw)
+        if not isinstance(result, dict):
+            raise ValueError("AI CAD image response was not an object")
+        return result
