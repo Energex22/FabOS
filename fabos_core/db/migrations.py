@@ -129,6 +129,21 @@ INSERT OR IGNORE INTO marketing_channels(id,name,channel_type,active,publish_mod
 ('channel_google_business','Google Business Profile','google_business',0,'api'),
 ('channel_linkedin','LinkedIn','linkedin',0,'api'),
 ('channel_threads','Threads','threads',0,'api');"""),
+(51,"""CREATE TABLE IF NOT EXISTS cad_generation_jobs(
+ id TEXT PRIMARY KEY,
+ user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+ status TEXT NOT NULL DEFAULT 'completed',
+ prompt TEXT NOT NULL DEFAULT '',
+ spec_json TEXT NOT NULL DEFAULT '{}',
+ verification_json TEXT NOT NULL DEFAULT '{}',
+ artifacts_json TEXT NOT NULL DEFAULT '[]',
+ error TEXT,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_cad_generation_jobs_user ON cad_generation_jobs(user_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_cad_generation_jobs_status ON cad_generation_jobs(status,created_at);"""),
+
 ]
 def migrate(db,backup=None):
  with db.connect() as c:
