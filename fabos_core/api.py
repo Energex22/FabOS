@@ -7,7 +7,8 @@ Administrator routes are separately protected and are not part of the customer U
 
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import re
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -123,7 +124,7 @@ class LoginRequest(BaseModel):
 class CadGenerationRequest(BaseModel):
     prompt: Optional[str] = Field(default=None, max_length=12000)
     spec: Optional[Dict[str, Any]] = None
-    output_formats: list[str] = Field(default_factory=lambda: ["stl", "step"])
+    output_formats: List[str] = Field(default_factory=lambda: ["stl", "step"])
 
 class StorefrontUpdate(BaseModel):
     visibility: str = Field(default="draft", min_length=1, max_length=20)
