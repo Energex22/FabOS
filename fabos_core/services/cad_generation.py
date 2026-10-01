@@ -270,6 +270,17 @@ class CadGenerationService:
         except Exception:
             return
 
+    def _job_payload(self, row):
+        data = dict(row) if hasattr(row, "keys") else dict(row)
+        for field in ("spec_json", "verification_json", "artifacts_json"):
+            raw = data.get(field)
+            try:
+                data[field[:-5] if field.endswith("_json") else field] = json.loads(raw) if raw else None
+            except (TypeError, ValueError):
+                data[field[:-5] if field.endswith("_json") else field] = None
+            data.pop(field, None)
+        return data
+
     def list_jobs(self, owner_id, limit=50):
         if not owner_id:
             return []
