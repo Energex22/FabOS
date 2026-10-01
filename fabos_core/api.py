@@ -1,14 +1,12 @@
-import json
-import base64
-"""
-
-import jsonHTTP API boundary for the customer-facing web application.
+"""HTTP API boundary for the customer-facing web application.
 
 The API delegates business rules to the existing internal services. It intentionally
 serializes only customer-safe fields and never exposes the internal order dossier.
 Administrator routes are separately protected and are not part of the customer UI.
 """
 
+import json
+import base64
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
