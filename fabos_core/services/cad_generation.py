@@ -205,7 +205,7 @@ class CadGenerationService:
             circles = []
             for face in shape.Faces():
                 try:
-                    if hasattr(face, "radius"):
+                    if face.geomType() == "CYLINDER":
                         circles.append(face)
                 except Exception:
                     continue
@@ -214,7 +214,7 @@ class CadGenerationService:
                 best = None
                 for face in circles:
                     try:
-                        radius = float(face.radius())
+                        radius = float(face._geomAdaptor().Radius())
                         center = face.Center()
                         error = abs(radius - target_r)
                         candidate = (error, float(center.x), float(center.y), radius)
