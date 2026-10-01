@@ -292,6 +292,37 @@ class AIService:
                 messages.append(tool_message)
         raise RuntimeError("AI exceeded the safe tool-call limit")
 
+    def design_spec_from_prompt(self, prompt):
+        """Convert a natural-language part request into a constrained CAD spec.
+
+        The model is only asked for structured dimensions/features. FabOS validates
+        the returned specification before any geometry is executed.
+        """
+        if not str(prompt or "").strip():
+            raise ValueError("Design prompt is required")
+        system = (
+            "You convert 3D-printing part descriptions into a strict JSON CAD specification. "
+            "Return JSON only. Allowed shapes: box, plate, cylinder, ring, bracket, mounting_plate. "
+            "All dimensions are millimeters. Never invent a measurement when the user supplied one; "
+            "use conservative primitive defaults only when a dimension is genuinely omitted. "
+            "JSON schema: {shape:string, dimensions:{width?:number,depth?:number,height:number, "
+            "diameter?:number,outer_diameter?:number,inner_diameter?:number}, "
+            "holes:[{diameter:number,x:number,y:number}], metadata:{}}. "
+            "Do not include code, formulas, comments, or unsupported fields."
+        )
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": str(prompt).strip()[:12000]}]
+        response, _ = self._request(messages, use_tools=False)
+        content = response.get("content", "")
+        if isinstance(content, list):
+            content = "".join(str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in content)
+        content = str(content).strip()
+        if content.startswith("```"):
+            content = content.replace("```json", "", 1).replace("```", "", 1).strip()
+        result = json.loads(content)
+        if not isinstance(result, dict):
+            raise ValueError("AI CAD response was not an object")
+        return result
+
     def product_assistant(self, product_id, instruction="Create useful marketing copy for this product."):
         product = self.products.get(product_id)
         if not product:
