@@ -227,14 +227,14 @@ class CadGenerationService:
                 diameter_ok = bool(best and best[0] <= 0.01)
                 location_ok = False
                 if best:
-                    location_ok = abs(best[1] - requested["x"]) <= 0.05 and abs(best[2] - requested["y"]) <= 0.05
+                    location_ok = abs(best[2] - requested["x"]) <= 0.05 and abs(best[3] - requested["y"]) <= 0.05
                 hole_checks.append({
                     "requested_diameter_mm": round(requested["diameter"], 4),
-                    "actual_diameter_mm": round(best[3] * 2, 4) if best else None,
+                    "actual_diameter_mm": round(best[4] * 2, 4) if best else None,
                     "requested_x_mm": round(requested["x"], 4),
                     "requested_y_mm": round(requested["y"], 4),
-                    "actual_x_mm": round(best[1], 4) if best else None,
-                    "actual_y_mm": round(best[2], 4) if best else None,
+                    "actual_x_mm": round(best[2], 4) if best else None,
+                    "actual_y_mm": round(best[3], 4) if best else None,
                     "diameter_pass": diameter_ok,
                     "location_pass": location_ok,
                     "pass": diameter_ok and location_ok,
