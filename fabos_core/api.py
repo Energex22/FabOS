@@ -1,4 +1,5 @@
 import json
+import base64
 """HTTP API boundary for the customer-facing web application.
 
 The API delegates business rules to the existing internal services. It intentionally
@@ -12,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import re
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -364,6 +365,33 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         ]
         return {"job_id": result["job_id"], "spec": result["spec"],
                 "verification": result["verification"], "artifacts": artifacts}
+
+    @app.post("/api/v1/customer/cad/analyze-reference")
+    async def customer_cad_analyze_reference(
+        reference_note: str = "",
+        files: List[UploadFile] = File(default=[]),
+        user: Any = Depends(customer_user),
+        application: FabOSApplication = Depends(get_application),
+    ):
+        if not files:
+            raise HTTPException(status_code=400, detail="Upload at least one reference image")
+        if len(files) > 4:
+            raise HTTPException(status_code=400, detail="A maximum of 4 reference images is supported")
+        images = []
+        for uploaded in files:
+            content_type = str(uploaded.content_type or "").lower()
+            if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+                raise HTTPException(status_code=400, detail="Only PNG, JPEG, and WebP reference images are supported")
+            raw = await uploaded.read(5 * 1024 * 1024 + 1)
+            if len(raw) > 5 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Each reference image must be 5 MB or smaller")
+            images.append("data:%s;base64,%s" % (content_type, base64.b64encode(raw).decode("ascii")))
+        try:
+            result = application.ai.design_spec_from_images(images, reference_note=reference_note)
+            return {"spec": result, "scale_confirmed": bool((result.get("metadata") or {}).get("scale_confirmed")),
+                    "missing_dimensions": (result.get("metadata") or {}).get("missing_dimensions", [])}
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Reference analysis failed: %s" % exc) from exc
 
     @app.post("/api/v1/customer/cad/preflight")
     def customer_cad_preflight(payload: CadGenerationRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
