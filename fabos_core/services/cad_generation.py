@@ -302,13 +302,7 @@ class CadGenerationService:
             return None
         if owner_id is not None and str(row["user_id"] or "") != str(owner_id):
             return None
-        result = dict(row)
-        for key in ("spec_json", "verification_json", "artifacts_json"):
-            try:
-                result[key[:-5]] = json.loads(result[key] or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                result[key[:-5]] = {} if key != "artifacts_json" else []
-        return result
+        return self._job_payload(row)
 
     def preflight(self, spec=None, prompt=None, printer_id=None):
         spec = self.interpret_prompt(prompt) if spec is None else self.normalize_spec(spec)
