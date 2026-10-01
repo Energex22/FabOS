@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fabos_core.services.rate_limit import RateLimiter, request_client_key
 from pydantic import BaseModel, Field
+from fabos_core.services.cad_generation import CadGenerationError
 
 from fabos_core.application import FabOSApplication
 from fabos_core.services.admin_api import register_admin_routes
@@ -118,6 +119,11 @@ class LoginRequest(BaseModel):
     identifier: str = Field(min_length=1, max_length=320)
     password: str = Field(min_length=1, max_length=1024)
 
+
+class CadGenerationRequest(BaseModel):
+    prompt: Optional[str] = Field(default=None, max_length=12000)
+    spec: Optional[Dict[str, Any]] = None
+    output_formats: list[str] = Field(default_factory=lambda: ["stl", "step"])
 
 class StorefrontUpdate(BaseModel):
     visibility: str = Field(default="draft", min_length=1, max_length=20)
@@ -328,6 +334,47 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             return {"logged_out": True}
         application.auth.logout(authorization[7:].strip())
         return {"logged_out": True}
+
+    @app.get("/api/v1/customer/cad/capabilities")
+    def customer_cad_capabilities(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        return application.cad_generation.capabilities()
+
+    @app.post("/api/v1/customer/cad/generate")
+    def customer_cad_generate(payload: CadGenerationRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        if not payload.prompt and not payload.spec:
+            raise HTTPException(status_code=400, detail="Provide a design prompt or structured specification")
+        try:
+            result = application.cad_generation.generate(
+                spec=payload.spec,
+                prompt=payload.prompt,
+                output_formats=payload.output_formats,
+            )
+        except CadGenerationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="CAD generation failed: %s" % exc) from exc
+        artifacts = [
+            {"format": item["format"], "bytes": item["bytes"],
+             "url": "/api/v1/customer/cad/artifacts/%s/%s" % (result["job_id"], item["format"])}
+            for item in result["artifacts"]
+        ]
+        return {"job_id": result["job_id"], "spec": result["spec"],
+                "verification": result["verification"], "artifacts": artifacts}
+
+    @app.get("/api/v1/customer/cad/artifacts/{job_id}/{fmt}")
+    def customer_cad_artifact(job_id: str, fmt: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        if not re.fullmatch(r"[0-9a-fA-F-]{20,80}", job_id):
+            raise HTTPException(status_code=404, detail="CAD artifact not found")
+        if fmt.lower() not in {"stl", "step"}:
+            raise HTTPException(status_code=404, detail="CAD artifact not found")
+        root = application.cad_generation.root.resolve()
+        target = (root / job_id / ("model." + fmt.lower())).resolve()
+        try:
+            if target.parent.parent != root or not target.is_file():
+                raise HTTPException(status_code=404, detail="CAD artifact not found")
+        except OSError:
+            raise HTTPException(status_code=404, detail="CAD artifact not found")
+        return FileResponse(str(target), filename=target.name)
 
     @app.get("/api/v1/customer/me")
     def me(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
