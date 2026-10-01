@@ -205,8 +205,7 @@ class CadGenerationService:
             circles = []
             for face in shape.Faces():
                 try:
-                    surface = face._geomAdaptor().GetType()
-                    if str(surface).lower().endswith("cylinder"):
+                    if hasattr(face, "radius"):
                         circles.append(face)
                 except Exception:
                     continue
