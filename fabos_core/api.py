@@ -432,6 +432,13 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         return {"job_id": result["job_id"], "spec": result["spec"],
                 "verification": result["verification"], "artifacts": artifacts}
 
+    @app.get("/api/v1/customer/cad/jobs")
+    def customer_cad_jobs(limit: int = 50, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            return {"jobs": application.cad_generation.list_jobs(user["id"], limit=limit)}
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid CAD history limit")
+
     @app.get("/api/v1/customer/cad/jobs/{job_id}")
     def customer_cad_job(job_id: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         if not re.fullmatch(r"[0-9a-fA-F-]{20,80}", job_id):
