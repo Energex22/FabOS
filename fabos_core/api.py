@@ -126,6 +126,7 @@ class CadGenerationRequest(BaseModel):
     prompt: Optional[str] = Field(default=None, max_length=12000)
     spec: Optional[Dict[str, Any]] = None
     output_formats: List[str] = Field(default_factory=lambda: ["stl", "step"])
+    printer_id: Optional[str] = Field(default=None, max_length=128)
 
 class StorefrontUpdate(BaseModel):
     visibility: str = Field(default="draft", min_length=1, max_length=20)
@@ -368,9 +369,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     def customer_cad_preflight(payload: CadGenerationRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         if not payload.prompt and not payload.spec:
             raise HTTPException(status_code=400, detail="Provide a design prompt or structured specification")
-        printer_id = None
-        if payload.spec and isinstance(payload.spec, dict):
-            printer_id = payload.spec.get("printer_id")
+        printer_id = payload.printer_id
         try:
             return application.cad_generation.preflight(spec=payload.spec, prompt=payload.prompt, printer_id=printer_id)
         except CadGenerationError as exc:
