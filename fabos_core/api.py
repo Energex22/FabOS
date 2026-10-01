@@ -364,6 +364,29 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         return {"job_id": result["job_id"], "spec": result["spec"],
                 "verification": result["verification"], "artifacts": artifacts}
 
+    @app.post("/api/v1/customer/cad/preflight")
+    def customer_cad_preflight(payload: CadGenerationRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        if not payload.prompt and not payload.spec:
+            raise HTTPException(status_code=400, detail="Provide a design prompt or structured specification")
+        printer_id = None
+        if payload.spec and isinstance(payload.spec, dict):
+            printer_id = payload.spec.get("printer_id")
+        try:
+            return application.cad_generation.preflight(spec=payload.spec, prompt=payload.prompt, printer_id=printer_id)
+        except CadGenerationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="CAD preflight failed: %s" % exc) from exc
+
+    @app.get("/api/v1/customer/cad/jobs/{job_id}")
+    def customer_cad_job(job_id: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        if not re.fullmatch(r"[0-9a-fA-F-]{20,80}", job_id):
+            raise HTTPException(status_code=404, detail="CAD job not found")
+        result = application.cad_generation.get_job(job_id, owner_id=user["id"])
+        if not result:
+            raise HTTPException(status_code=404, detail="CAD job not found")
+        return result
+
     @app.get("/api/v1/customer/cad/artifacts/{job_id}/{fmt}")
     def customer_cad_artifact(job_id: str, fmt: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         if not re.fullmatch(r"[0-9a-fA-F-]{20,80}", job_id):
