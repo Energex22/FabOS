@@ -316,6 +316,63 @@ class CadGenerationService:
                 result["warnings"].append("Printer build volume is not configured; build-volume check was skipped.")
         return result
 
+    def revise(self, job_id, instruction, owner_id=None, output_formats=None):
+        """Apply a natural-language revision to an existing parametric CAD job."""
+        if not str(instruction or "").strip():
+            raise CadGenerationError("A revision instruction is required")
+        existing = self.get_job(job_id, owner_id=owner_id)
+        if not existing:
+            raise CadGenerationError("CAD job not found")
+        current = existing.get("spec") or {}
+        if self.ai and hasattr(self.ai, "design_spec_from_prompt"):
+            prompt = (
+                "Revise this existing CAD specification without changing unspecified features. "
+                "Return the complete replacement JSON specification. Existing specification: "
+                + json.dumps(current, default=str)
+                + "\nRequested revision: " + str(instruction).strip()[:8000]
+            )
+            try:
+                candidate = self.ai.design_spec_from_prompt(prompt)
+                spec = self.normalize_spec(candidate)
+            except Exception:
+                spec = self._apply_simple_revision(current, instruction)
+        else:
+            spec = self._apply_simple_revision(current, instruction)
+        return self.generate(
+            spec=spec,
+            prompt="Revision of %s: %s" % (job_id, str(instruction).strip()[:8000]),
+            output_formats=output_formats or ["stl", "step"],
+            owner_id=owner_id,
+        )
+
+    def _apply_simple_revision(self, original, instruction):
+        spec = json.loads(json.dumps(original, default=str))
+        text = str(instruction).lower()
+        dimensions = spec.setdefault("dimensions", {})
+        replacements = {
+            "width": r"(?:width|wide)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
+            "depth": r"(?:depth|deep)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
+            "height": r"(?:height|tall|thick)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
+            "diameter": r"(?:diameter|dia)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
+            "outer_diameter": r"(?:outer\s+diameter)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
+            "inner_diameter": r"(?:inner\s+diameter)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
+        }
+        changed = False
+        for key, pattern in replacements.items():
+            match = re.search(pattern, text)
+            if match:
+                dimensions[key] = float(match.group(1))
+                changed = True
+        hole_match = re.search(r"(?:hole|holes).{0,40}(\d+(?:\.\d+)?)\s*mm", text)
+        if hole_match and spec.get("holes"):
+            diameter = float(hole_match.group(1))
+            for hole in spec["holes"]:
+                hole["diameter"] = diameter
+            changed = True
+        if not changed:
+            raise CadGenerationError("The revision could not be mapped to a dimensional change. Please specify a dimension in millimeters.")
+        return self.normalize_spec(spec)
+
     def generate(self, spec=None, prompt=None, output_formats=None, owner_id=None):
         job_id = str(uuid.uuid4())
         try:
