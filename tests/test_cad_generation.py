@@ -23,6 +23,13 @@ class CadGenerationTests(unittest.TestCase):
         self.assertTrue(Path(next(a["path"] for a in result["artifacts"] if a["format"] == "stl")).is_file())
         self.assertTrue(Path(next(a["path"] for a in result["artifacts"] if a["format"] == "step")).is_file())
 
+    def test_simple_revision_updates_existing_spec(self):
+        original = {"shape": "plate", "dimensions": {"width": 100, "depth": 60, "height": 5}}
+        revised = self.service._apply_simple_revision(original, "make the width 120 mm and thickness 6 mm")
+        self.assertEqual(revised["dimensions"]["width"], 120.0)
+        self.assertEqual(revised["dimensions"]["height"], 6.0)
+        self.assertEqual(original["dimensions"]["width"], 100)
+
     def test_rejects_bad_hole_location(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({"shape": "plate", "dimensions": {"width": 50, "depth": 40, "height": 5},
