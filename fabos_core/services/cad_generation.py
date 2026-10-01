@@ -211,17 +211,19 @@ class CadGenerationService:
                     continue
             for requested in spec["holes"]:
                 target_r = requested["diameter"] / 2.0
-                best = None
+                candidates = []
                 for face in circles:
                     try:
                         radius = float(face._geomAdaptor().Radius())
                         center = face.Center()
-                        error = abs(radius - target_r)
-                        candidate = (error, float(center.x), float(center.y), radius)
-                        if best is None or candidate[0] < best[0]:
-                            best = candidate
+                        radius_error = abs(radius - target_r)
+                        distance = ((float(center.x) - requested["x"]) ** 2 +
+                                    (float(center.y) - requested["y"]) ** 2) ** 0.5
+                        candidates.append((radius_error, distance, float(center.x), float(center.y), radius))
                     except Exception:
                         continue
+                matching = [item for item in candidates if item[0] <= 0.01]
+                best = min(matching or candidates, key=lambda item: (item[1], item[0])) if (matching or candidates) else None
                 diameter_ok = bool(best and best[0] <= 0.01)
                 location_ok = False
                 if best:
