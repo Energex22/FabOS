@@ -104,10 +104,11 @@ class CadGenerationService:
             ]
         for hole in result["holes"]:
             if shape not in {"cylinder", "ring"}:
-                if hole["x"] < -result["dimensions"]["width"] / 2 or hole["x"] > result["dimensions"]["width"] / 2:
-                    raise CadGenerationError("hole x is outside the part")
-                if hole["y"] < -result["dimensions"]["depth"] / 2 or hole["y"] > result["dimensions"]["depth"] / 2:
-                    raise CadGenerationError("hole y is outside the part")
+                half_r = hole["diameter"] / 2
+                if abs(hole["x"]) + half_r > result["dimensions"]["width"] / 2:
+                    raise CadGenerationError("hole x or radius is outside the part")
+                if abs(hole["y"]) + half_r > result["dimensions"]["depth"] / 2:
+                    raise CadGenerationError("hole y or radius is outside the part")
         return result
 
     def parse_prompt(self, prompt):
