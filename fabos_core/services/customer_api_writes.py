@@ -1,6 +1,7 @@
 """Write-side HTTP handlers for customer commerce."""
 
 from fabos_core.services.payments import PaymentProviderError, PaymentProviderNotConfigured
+from fabos_core.services.cad_generation import CadGenerationError
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import os
@@ -159,6 +160,7 @@ class QuoteProject(BaseModel):
     material: str = Field(default="", max_length=200)
     quantity: int = Field(default=1, ge=1, le=1000)
     notes: str = Field(default="", max_length=4000)
+    cad_job_id: Optional[str] = Field(default=None, max_length=128)
 
 class QuoteRequest(BaseModel):
     project: QuoteProject
@@ -337,7 +339,18 @@ def register_customer_write_routes(app, get_application, current_user):
                 project["notes"] = (project.get("notes") or "").strip()
                 project["notes"] += ("\n" if project["notes"] else "") + "File: " + str(payload.file.get("name") or "uploaded file")
             quote, items = application.customer_commerce.create_quote_request(user["id"], project)
-            return {"quote": _public_quote(quote), "items": [_public_quote_item(item) for item in items]}
+            attached = None
+            if payload.project.cad_job_id:
+                try:
+                    attached = application.cad_generation.attach_to_quote(
+                        payload.project.cad_job_id, quote["id"], user["id"]
+                    )
+                except CadGenerationError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+            result = {"quote": _public_quote(quote), "items": [_public_quote_item(item) for item in items]}
+            if attached:
+                result["cad"] = attached
+            return result
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except (KeyError, ValueError) as exc:
