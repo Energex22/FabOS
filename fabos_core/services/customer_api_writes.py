@@ -346,6 +346,9 @@ def register_customer_write_routes(app, get_application, current_user):
                         payload.project.cad_job_id, quote["id"], user["id"]
                     )
                 except CadGenerationError as exc:
+                    with application.database.connect() as conn:
+                        conn.execute("DELETE FROM quotes WHERE id=?", (quote["id"],))
+                        conn.commit()
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
             result = {"quote": _public_quote(quote), "items": [_public_quote_item(item) for item in items]}
             if attached:
