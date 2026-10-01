@@ -354,7 +354,7 @@ class CadGenerationService:
         replacements = {
             "width": r"(?:width|wide)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
             "depth": r"(?:depth|deep)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
-            "height": r"(?:height|tall|thick)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
+            "height": r"(?:height|tall|thick|thickness)\s*(?:is\s*)?(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
             "diameter": r"(?:diameter|dia)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
             "outer_diameter": r"(?:outer\s+diameter)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
             "inner_diameter": r"(?:inner\s+diameter)\s*(?:to|=|of)?\s*(\d+(?:\.\d+)?)\s*mm",
