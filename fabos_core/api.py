@@ -129,6 +129,10 @@ class CadGenerationRequest(BaseModel):
     output_formats: List[str] = Field(default_factory=lambda: ["stl", "step"])
     printer_id: Optional[str] = Field(default=None, max_length=128)
 
+class CadRevisionRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=8000)
+    output_formats: List[str] = Field(default_factory=lambda: ["stl", "step"])
+
 class StorefrontUpdate(BaseModel):
     visibility: str = Field(default="draft", min_length=1, max_length=20)
     origin_type: str = Field(default="catalog_import", min_length=1, max_length=40)
@@ -404,6 +408,29 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail="CAD preflight failed: %s" % exc) from exc
+
+    @app.post("/api/v1/customer/cad/jobs/{job_id}/revise")
+    def customer_cad_revise(job_id: str, payload: CadRevisionRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        if not re.fullmatch(r"[0-9a-fA-F-]{20,80}", job_id):
+            raise HTTPException(status_code=404, detail="CAD job not found")
+        try:
+            result = application.cad_generation.revise(
+                job_id=job_id,
+                instruction=payload.instruction,
+                output_formats=payload.output_formats,
+                owner_id=user["id"],
+            )
+        except CadGenerationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="CAD revision failed: %s" % exc) from exc
+        artifacts = [
+            {"format": item["format"], "bytes": item["bytes"],
+             "url": "/api/v1/customer/cad/artifacts/%s/%s" % (result["job_id"], item["format"])}
+            for item in result["artifacts"]
+        ]
+        return {"job_id": result["job_id"], "spec": result["spec"],
+                "verification": result["verification"], "artifacts": artifacts}
 
     @app.get("/api/v1/customer/cad/jobs/{job_id}")
     def customer_cad_job(job_id: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
