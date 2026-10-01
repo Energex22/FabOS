@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from fabos_core.services import cad_generation as cad_module
 from fabos_core.services.cad_generation import CadGenerationError, CadGenerationService
 
 
@@ -14,6 +15,7 @@ class CadGenerationTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_parse_prompt_and_generate_plate(self):
         result = self.service.generate(prompt="Create a 120 x 80 x 5 mm mounting plate with 4 5 mm holes.")
         self.assertEqual(result["spec"]["shape"], "mounting_plate")
@@ -26,6 +28,7 @@ class CadGenerationTests(unittest.TestCase):
             self.service.normalize_spec({"shape": "plate", "dimensions": {"width": 50, "depth": 40, "height": 5},
                                          "holes": [{"diameter": 5, "x": 100, "y": 0}]})
 
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_ring_dimensions(self):
         result = self.service.generate(spec={"shape": "ring", "dimensions": {"outer_diameter": 40, "inner_diameter": 20, "height": 5}})
         self.assertTrue(result["verification"]["passed"])
