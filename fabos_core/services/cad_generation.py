@@ -241,6 +241,7 @@ class CadGenerationService:
         checks.append({"measurement": "hole_features", "requested": len(spec.get("holes", [])),
                        "actual": len(hole_checks), "pass": len(hole_checks) == len(spec.get("holes", [])) and
                        all(item["pass"] for item in hole_checks)})
+        checks.append({"measurement": "watertight", "actual": bool(shape.isValid()), "pass": bool(shape.isValid())})
         checks.append({"measurement": "solid_valid", "actual": bool(shape.isValid()), "pass": bool(shape.isValid())})
         return {"passed": all(x["pass"] for x in checks), "checks": checks, "holes": hole_checks}
 
