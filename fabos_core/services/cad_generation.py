@@ -197,24 +197,102 @@ class CadGenerationService:
                            "delta_mm": round(delta, 5), "pass": delta <= 0.01})
         return {"passed": all(x["pass"] for x in checks), "checks": checks}
 
-    def generate(self, spec=None, prompt=None, output_formats=None, owner_id=None):
+    def _save_job(self, job_id, owner_id, status, prompt, spec=None, verification=None, artifacts=None, error=None):
+        if self.database is None:
+            return
+        try:
+            with self.database.connect() as conn:
+                conn.execute(
+                    """INSERT INTO cad_generation_jobs
+                       (id,user_id,status,prompt,spec_json,verification_json,artifacts_json,error)
+                       VALUES(?,?,?,?,?,?,?,?)
+                       ON CONFLICT(id) DO UPDATE SET
+                         status=excluded.status,prompt=excluded.prompt,spec_json=excluded.spec_json,
+                         verification_json=excluded.verification_json,artifacts_json=excluded.artifacts_json,
+                         error=excluded.error,updated_at=CURRENT_TIMESTAMP""",
+                    (job_id, str(owner_id) if owner_id is not None else None, status,
+                     str(prompt or "")[:12000], json.dumps(spec or {}, default=str),
+                     json.dumps(verification or {}, default=str),
+                     json.dumps(artifacts or [], default=str), error),
+                )
+                conn.commit()
+        except Exception:
+            return
+
+    def get_job(self, job_id, owner_id=None):
+        if self.database is None:
+            return None
+        with self.database.connect() as conn:
+            row = conn.execute("SELECT * FROM cad_generation_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row:
+            return None
+        if owner_id is not None and str(row["user_id"] or "") != str(owner_id):
+            return None
+        result = dict(row)
+        for key in ("spec_json", "verification_json", "artifacts_json"):
+            try:
+                result[key[:-5]] = json.loads(result[key] or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                result[key[:-5]] = {} if key != "artifacts_json" else []
+        return result
+
+    def preflight(self, spec=None, prompt=None, printer_id=None):
         spec = self.interpret_prompt(prompt) if spec is None else self.normalize_spec(spec)
         model = self._cadquery_model(spec)
         verification = self._verify(model, spec)
-        if not verification["passed"]:
-            raise CadGenerationError("Generated geometry failed dimensional verification")
+        result = {"geometry": verification, "printer": None, "printable": verification["passed"], "warnings": []}
+        if printer_id and self.database is not None:
+            with self.database.connect() as conn:
+                printer = conn.execute("SELECT * FROM printers WHERE id=?", (printer_id,)).fetchone()
+            if not printer:
+                raise CadGenerationError("Printer not found")
+            bb = model.val().BoundingBox()
+            dims = (float(bb.xlen), float(bb.ylen), float(bb.zlen))
+            limits = []
+            for key in ("build_x_mm", "build_y_mm", "build_z_mm"):
+                try:
+                    limits.append(float(printer[key]))
+                except (TypeError, ValueError):
+                    limits.append(0.0)
+            known = all(x > 0 for x in limits)
+            fits = ((dims[0] <= limits[0] and dims[1] <= limits[1] and dims[2] <= limits[2]) or
+                    (dims[1] <= limits[0] and dims[0] <= limits[1] and dims[2] <= limits[2])) if known else True
+            result["printer"] = {"id": printer["id"], "name": printer["name"],
+                                 "build_volume_mm": {"x": limits[0], "y": limits[1], "z": limits[2]},
+                                 "model_mm": {"x": round(dims[0], 4), "y": round(dims[1], 4), "z": round(dims[2], 4)},
+                                 "fits_build_volume": fits}
+            result["printable"] = result["printable"] and fits
+            if not fits:
+                result["warnings"].append("Model exceeds the selected printer build volume.")
+            if not known:
+                result["warnings"].append("Printer build volume is not configured; build-volume check was skipped.")
+        return result
+
+    def generate(self, spec=None, prompt=None, output_formats=None, owner_id=None):
         job_id = str(uuid.uuid4())
-        folder = self.root / job_id
-        folder.mkdir(parents=True, exist_ok=True)
-        formats = [str(x).lower() for x in (output_formats or ["stl", "step"]) if str(x).lower() in {"stl", "step"}]
-        (folder / "metadata.json").write_text(json.dumps({"owner_id": str(owner_id or ""), "spec": spec}, default=str), encoding="utf-8")
-        artifacts = []
-        for fmt in (formats or ["stl"]):
-            target = folder / ("model." + fmt)
-            if fmt == "stl":
-                cq.exporters.export(model, str(target), exportType="STL", tolerance=0.01, angularTolerance=0.1)
-            else:
-                cq.exporters.export(model, str(target), exportType="STEP")
-            artifacts.append({"format": fmt, "path": str(target), "bytes": target.stat().st_size})
-        return {"job_id": job_id, "spec": spec, "verification": verification, "artifacts": artifacts,
-                "capabilities": self.capabilities()}
+        try:
+            spec = self.interpret_prompt(prompt) if spec is None else self.normalize_spec(spec)
+            self._save_job(job_id, owner_id, "generating", prompt, spec)
+            model = self._cadquery_model(spec)
+            verification = self._verify(model, spec)
+            if not verification["passed"]:
+                raise CadGenerationError("Generated geometry failed dimensional verification")
+            folder = self.root / job_id
+            folder.mkdir(parents=True, exist_ok=True)
+            formats = [str(x).lower() for x in (output_formats or ["stl", "step"]) if str(x).lower() in {"stl", "step"}]
+            (folder / "metadata.json").write_text(json.dumps({"owner_id": str(owner_id or ""), "spec": spec}, default=str), encoding="utf-8")
+            artifacts = []
+            for fmt in (formats or ["stl"]):
+                target = folder / ("model." + fmt)
+                if fmt == "stl":
+                    cq.exporters.export(model, str(target), exportType="STL", tolerance=0.01, angularTolerance=0.1)
+                else:
+                    cq.exporters.export(model, str(target), exportType="STEP")
+                artifacts.append({"format": fmt, "path": str(target), "bytes": target.stat().st_size})
+            self._save_job(job_id, owner_id, "completed", prompt, spec, verification, artifacts)
+            return {"job_id": job_id, "spec": spec, "verification": verification, "artifacts": artifacts,
+                    "capabilities": self.capabilities()}
+        except Exception as exc:
+            self._save_job(job_id, owner_id, "failed", prompt, locals().get("spec"), locals().get("verification"),
+                           locals().get("artifacts"), str(exc)[:2000])
+            raise
