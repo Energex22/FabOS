@@ -22,7 +22,7 @@ class CadGenerationError(ValueError):
 class CadGenerationService:
     SHAPES = {"box", "plate", "cylinder", "ring", "bracket", "mounting_plate"}
 
-    def __init__(self, settings=None, database=None, ai=None):
+    def __init__(self, settings=None, database=None, ai=None, design_vault=None):
         self.settings = settings
         self.database = database
         self.ai = ai
