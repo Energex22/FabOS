@@ -184,7 +184,8 @@ class CadGenerationService:
         return model
 
     def _verify(self, model, spec):
-        bb = model.val().BoundingBox()
+        shape = model.val()
+        bb = shape.BoundingBox()
         actual = {"width_mm": round(bb.xlen, 4), "depth_mm": round(bb.ylen, 4), "height_mm": round(bb.zlen, 4)}
         d = spec["dimensions"]
         expected = {"width_mm": round(d.get("width", d.get("outer_diameter", d.get("diameter"))), 4),
@@ -195,7 +196,54 @@ class CadGenerationService:
             delta = abs(actual[key] - expected[key])
             checks.append({"measurement": key, "expected_mm": expected[key], "actual_mm": actual[key],
                            "delta_mm": round(delta, 5), "pass": delta <= 0.01})
-        return {"passed": all(x["pass"] for x in checks), "checks": checks}
+
+        # Bounding-box checks are necessary but not sufficient. For every requested
+        # hole, inspect the resulting solid's cylindrical faces so we can verify the
+        # modeled diameter and approximate center rather than merely echoing the spec.
+        hole_checks = []
+        if spec.get("holes"):
+            circles = []
+            for face in shape.Faces():
+                try:
+                    surface = face._geomAdaptor().GetType()
+                    if str(surface).lower().endswith("cylinder"):
+                        circles.append(face)
+                except Exception:
+                    continue
+            for requested in spec["holes"]:
+                target_r = requested["diameter"] / 2.0
+                best = None
+                for face in circles:
+                    try:
+                        radius = float(face.radius())
+                        center = face.Center()
+                        error = abs(radius - target_r)
+                        candidate = (error, float(center.x), float(center.y), radius)
+                        if best is None or candidate[0] < best[0]:
+                            best = candidate
+                    except Exception:
+                        continue
+                diameter_ok = bool(best and best[0] <= 0.01)
+                location_ok = False
+                if best:
+                    location_ok = abs(best[1] - requested["x"]) <= 0.05 and abs(best[2] - requested["y"]) <= 0.05
+                hole_checks.append({
+                    "requested_diameter_mm": round(requested["diameter"], 4),
+                    "actual_diameter_mm": round(best[3] * 2, 4) if best else None,
+                    "requested_x_mm": round(requested["x"], 4),
+                    "requested_y_mm": round(requested["y"], 4),
+                    "actual_x_mm": round(best[1], 4) if best else None,
+                    "actual_y_mm": round(best[2], 4) if best else None,
+                    "diameter_pass": diameter_ok,
+                    "location_pass": location_ok,
+                    "pass": diameter_ok and location_ok,
+                })
+
+        checks.append({"measurement": "hole_features", "requested": len(spec.get("holes", [])),
+                       "actual": len(hole_checks), "pass": len(hole_checks) == len(spec.get("holes", [])) and
+                       all(item["pass"] for item in hole_checks)})
+        checks.append({"measurement": "solid_valid", "actual": bool(shape.isValid()), "pass": bool(shape.isValid())})
+        return {"passed": all(x["pass"] for x in checks), "checks": checks, "holes": hole_checks}
 
     def _save_job(self, job_id, owner_id, status, prompt, spec=None, verification=None, artifacts=None, error=None):
         if self.database is None:
