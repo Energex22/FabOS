@@ -26,6 +26,7 @@ class CadGenerationService:
         self.settings = settings
         self.database = database
         self.ai = ai
+        self.design_vault = design_vault
 
     @property
     def root(self):
@@ -317,6 +318,73 @@ class CadGenerationService:
             if not known:
                 result["warnings"].append("Printer build volume is not configured; build-volume check was skipped.")
         return result
+
+    def attach_to_quote(self, job_id, quote_id, user_id):
+        """Attach a completed customer CAD job to the customer's quote Design Vault."""
+        job = self.get_job(job_id, owner_id=user_id)
+        if not job:
+            raise CadGenerationError("CAD job not found")
+        if job.get("status") != "completed":
+            raise CadGenerationError("Only completed CAD jobs can be attached to a quote")
+        with self.database.connect() as conn:
+            owner = conn.execute(
+                "SELECT customer_id FROM customer_accounts WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+            quote = conn.execute(
+                "SELECT customer_id,quote_number FROM quotes WHERE id=?",
+                (quote_id,),
+            ).fetchone()
+            if not owner or not quote or str(owner["customer_id"]) != str(quote["customer_id"]):
+                raise CadGenerationError("Quote access denied")
+            existing = conn.execute(
+                "SELECT design_id FROM quote_designs WHERE quote_id=?",
+                (quote_id,),
+            ).fetchone()
+            if existing:
+                return {"quote_id": quote_id, "design_id": existing["design_id"], "attached": False}
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS quote_designs("
+                "quote_id TEXT PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,"
+                "design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,"
+                "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+            )
+            design_id = str(uuid.uuid4())
+            version_id = str(uuid.uuid4())
+            name = "AI CAD " + str(quote["quote_number"])
+            conn.execute(
+                "INSERT INTO designs(id,product_id,name,current_version,notes) VALUES(?,?,?,?,?)",
+                (design_id, None, name, 1, "AI-generated CAD job %s" % job_id),
+            )
+            conn.execute(
+                "INSERT INTO design_versions(id,design_id,version,label,notes) VALUES(?,?,?,?,?)",
+                (version_id, design_id, 1, "AI Generated", "Generated from customer CAD request"),
+            )
+            conn.execute(
+                "INSERT INTO quote_designs(quote_id,design_id) VALUES(?,?)",
+                (quote_id, design_id),
+            )
+            conn.commit()
+        imported = []
+        try:
+            for artifact in job.get("artifacts") or []:
+                path = Path(str(artifact.get("path") or ""))
+                if not path.is_file():
+                    continue
+                if path.suffix.lower() not in {".stl", ".step", ".stp", ".3mf"}:
+                    continue
+                if self.design_vault:
+                    self.design_vault.import_file(design_id, path, make_primary=not imported)
+                imported.append(path.name)
+            if not imported:
+                raise CadGenerationError("Completed CAD job has no usable artifacts")
+        except Exception:
+            with self.database.connect() as conn:
+                conn.execute("DELETE FROM quote_designs WHERE quote_id=?", (quote_id,))
+                conn.execute("DELETE FROM designs WHERE id=?", (design_id,))
+                conn.commit()
+            raise
+        return {"quote_id": quote_id, "design_id": design_id, "attached": True, "artifacts": imported}
 
     def revise(self, job_id, instruction, owner_id=None, output_formats=None):
         """Apply a natural-language revision to an existing parametric CAD job."""
