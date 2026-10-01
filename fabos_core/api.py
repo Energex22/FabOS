@@ -1,3 +1,4 @@
+import json
 """HTTP API boundary for the customer-facing web application.
 
 The API delegates business rules to the existing internal services. It intentionally
@@ -349,6 +350,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
                 spec=payload.spec,
                 prompt=payload.prompt,
                 output_formats=payload.output_formats,
+                owner_id=user["id"],
             )
         except CadGenerationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -373,7 +375,12 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         try:
             if target.parent.parent != root or not target.is_file():
                 raise HTTPException(status_code=404, detail="CAD artifact not found")
-        except OSError:
+            metadata = json.loads((target.parent / "metadata.json").read_text(encoding="utf-8"))
+            if str(metadata.get("owner_id") or "") != str(user["id"]):
+                raise HTTPException(status_code=404, detail="CAD artifact not found")
+        except HTTPException:
+            raise
+        except (OSError, ValueError, json.JSONDecodeError):
             raise HTTPException(status_code=404, detail="CAD artifact not found")
         return FileResponse(str(target), filename=target.name)
 
