@@ -66,7 +66,7 @@ class CadGenerationService:
         dimensions = spec.get("dimensions") or {}
         if not isinstance(dimensions, dict):
             raise CadGenerationError("dimensions must be an object")
-        result = {"shape": shape, "dimensions": {}, "holes": [], "metadata": dict(spec.get("metadata") or {})}
+        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "metadata": dict(spec.get("metadata") or {})}
         if shape == "cylinder":
             result["dimensions"]["diameter"] = self._number(dimensions.get("diameter", dimensions.get("width", 50)), "diameter")
             result["dimensions"]["height"] = self._number(dimensions.get("height", 10), "height")
@@ -108,6 +108,23 @@ class CadGenerationService:
                 "diameter": self._number(hole.get("diameter"), "hole diameter"),
                 "x": self._number(hole.get("x", 0), "hole x", -2000, 2000),
                 "y": self._number(hole.get("y", 0), "hole y", -2000, 2000),
+            })
+        slots = spec.get("slots") or []
+        if not isinstance(slots, list):
+            raise CadGenerationError("slots must be an array")
+        for slot in slots[:self.MAX_FEATURES]:
+            if not isinstance(slot, dict):
+                raise CadGenerationError("Each slot must be an object")
+            length = self._number(slot.get("length"), "slot length")
+            width = self._number(slot.get("width"), "slot width")
+            if width > length:
+                raise CadGenerationError("slot width cannot exceed slot length")
+            result["slots"].append({
+                "length": length,
+                "width": width,
+                "x": self._number(slot.get("x", 0), "slot x", -2000, 2000),
+                "y": self._number(slot.get("y", 0), "slot y", -2000, 2000),
+                "angle": float(slot.get("angle", 0) or 0),
             })
         if shape == "flange" and not result["holes"]:
             import math
