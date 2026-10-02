@@ -43,6 +43,44 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(revised["dimensions"]["height"], 6.0)
         self.assertEqual(original["dimensions"]["width"], 100)
 
+    def test_edge_treatment_spec_validation(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 80, "depth": 50, "height": 8},
+            "edge_treatment": {"fillet_radius": 3},
+        })
+        self.assertEqual(spec["edge_treatment"]["fillet_radius"], 3.0)
+
+    def test_rejects_multiple_edge_treatments(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 80, "depth": 50, "height": 8},
+                "edge_treatment": {"fillet_radius": 3, "chamfer_distance": 1},
+            })
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_fillet_generation_and_verification(self):
+        result = self.service.generate(spec={
+            "shape": "plate",
+            "dimensions": {"width": 80, "depth": 50, "height": 8},
+            "edge_treatment": {"fillet_radius": 3},
+        }, output_formats=["step"])
+        self.assertTrue(result["verification"]["passed"])
+        treatment = next(item for item in result["verification"]["checks"] if item["measurement"] == "edge_treatment")
+        self.assertEqual(treatment["type"], "fillet_radius")
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_chamfer_generation_and_verification(self):
+        result = self.service.generate(spec={
+            "shape": "plate",
+            "dimensions": {"width": 80, "depth": 50, "height": 8},
+            "edge_treatment": {"chamfer_distance": 2},
+        }, output_formats=["step"])
+        self.assertTrue(result["verification"]["passed"])
+        treatment = next(item for item in result["verification"]["checks"] if item["measurement"] == "edge_treatment")
+        self.assertEqual(treatment["type"], "chamfer_distance")
+
     def test_counterbore_hole_spec_validation(self):
         spec = self.service.normalize_spec({
             "shape": "plate",
