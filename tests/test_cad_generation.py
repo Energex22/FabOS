@@ -52,6 +52,13 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(len(spec["slots"]), 1)
         self.assertEqual(spec["slots"][0]["width"], 8.0)
 
+    def test_rejects_slots_on_round_part(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "flange",
+                "dimensions": {"outer_diameter": 80, "bore_diameter": 20, "height": 8},
+                "slots": [{"length": 20, "width": 6, "x": 0, "y": 0}],
+            })
     def test_rejects_slot_outside_part(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
