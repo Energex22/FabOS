@@ -351,15 +351,36 @@ class CadGenerationService:
         boss_checks = []
         if spec.get("bosses"):
             for requested in spec["bosses"]:
+                target_r = requested["diameter"] / 2.0
+                candidates = []
+                for face in circles:
+                    try:
+                        radius = float(face._geomAdaptor().Radius())
+                        center = face.Center()
+                        radius_error = abs(radius - target_r)
+                        distance = ((float(center.x) - requested["x"]) ** 2 +
+                                    (float(center.y) - requested["y"]) ** 2) ** 0.5
+                        candidates.append((radius_error, distance, float(center.x), float(center.y), radius))
+                    except Exception:
+                        continue
+                matching = [item for item in candidates if item[0] <= 0.01]
+                best = min(matching or candidates, key=lambda item: (item[1], item[0])) if (matching or candidates) else None
+                diameter_ok = bool(best and best[0] <= 0.01)
+                location_ok = bool(best and abs(best[2] - requested["x"]) <= 0.05 and abs(best[3] - requested["y"]) <= 0.05)
                 boss_checks.append({
                     "requested_diameter_mm": round(requested["diameter"], 4),
-                    "requested_height_mm": round(requested["height"], 4),
+                    "actual_diameter_mm": round(best[4] * 2, 4) if best else None,
                     "requested_x_mm": round(requested["x"], 4),
                     "requested_y_mm": round(requested["y"], 4),
-                    "pass": True,
+                    "actual_x_mm": round(best[2], 4) if best else None,
+                    "actual_y_mm": round(best[3], 4) if best else None,
+                    "diameter_pass": diameter_ok,
+                    "location_pass": location_ok,
+                    "pass": diameter_ok and location_ok,
                 })
         checks.append({"measurement": "boss_features", "requested": len(spec.get("bosses", [])),
-                       "actual": len(boss_checks), "pass": len(boss_checks) == len(spec.get("bosses", []))})
+                       "actual": len(boss_checks), "pass": len(boss_checks) == len(spec.get("bosses", [])) and
+                       all(item["pass"] for item in boss_checks)})
         checks.append({"measurement": "hole_features", "requested": len(spec.get("holes", [])),
                        "actual": len(hole_checks), "pass": len(hole_checks) == len(spec.get("holes", [])) and
                        all(item["pass"] for item in hole_checks)})
