@@ -66,7 +66,7 @@ class CadGenerationService:
         dimensions = spec.get("dimensions") or {}
         if not isinstance(dimensions, dict):
             raise CadGenerationError("dimensions must be an object")
-        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "metadata": dict(spec.get("metadata") or {})}
+        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "bosses": [], "metadata": dict(spec.get("metadata") or {})}
         if shape == "cylinder":
             result["dimensions"]["diameter"] = self._number(dimensions.get("diameter", dimensions.get("width", 50)), "diameter")
             result["dimensions"]["height"] = self._number(dimensions.get("height", 10), "height")
@@ -109,6 +109,23 @@ class CadGenerationService:
                 "x": self._number(hole.get("x", 0), "hole x", -2000, 2000),
                 "y": self._number(hole.get("y", 0), "hole y", -2000, 2000),
             })
+        bosses = spec.get("bosses") or []
+        if not isinstance(bosses, list):
+            raise CadGenerationError("bosses must be an array")
+        if bosses and shape not in {"box", "plate", "mounting_plate"}:
+            raise CadGenerationError("bosses are currently supported only on box-like parts")
+        for boss in bosses[:self.MAX_FEATURES]:
+            if not isinstance(boss, dict):
+                raise CadGenerationError("Each boss must be an object")
+            diameter = self._number(boss.get("diameter"), "boss diameter")
+            height = self._number(boss.get("height"), "boss height")
+            x = self._number(boss.get("x", 0), "boss x", -2000, 2000)
+            y = self._number(boss.get("y", 0), "boss y", -2000, 2000)
+            if abs(x) + diameter / 2 > result["dimensions"]["width"] / 2:
+                raise CadGenerationError("boss x or radius is outside the part")
+            if abs(y) + diameter / 2 > result["dimensions"]["depth"] / 2:
+                raise CadGenerationError("boss y or radius is outside the part")
+            result["bosses"].append({"diameter": diameter, "height": height, "x": x, "y": y})
         slots = spec.get("slots") or []
         if not isinstance(slots, list):
             raise CadGenerationError("slots must be an array")
@@ -260,6 +277,10 @@ class CadGenerationService:
         for hole in spec["holes"]:
             cutter = cq.Workplane("XY").center(hole["x"], hole["y"]).circle(hole["diameter"] / 2).extrude(d.get("height", 5) + 2)
             model = model.cut(cutter)
+        for boss in spec.get("bosses", []):
+            boss_model = (cq.Workplane("XY").center(boss["x"], boss["y"])
+                          .circle(boss["diameter"] / 2).extrude(d["height"] + boss["height"]))
+            model = model.union(boss_model)
         for slot in spec.get("slots", []):
             cutter = (cq.Workplane("XY").center(slot["x"], slot["y"])
                       .slot2D(slot["length"], slot["width"], slot["angle"])
@@ -272,9 +293,12 @@ class CadGenerationService:
         bb = shape.BoundingBox()
         actual = {"width_mm": round(bb.xlen, 4), "depth_mm": round(bb.ylen, 4), "height_mm": round(bb.zlen, 4)}
         d = spec["dimensions"]
+        expected_height = d["height"]
+        if spec.get("bosses"):
+            expected_height += max(boss["height"] for boss in spec["bosses"])
         expected = {"width_mm": round(d.get("width", d.get("outer_diameter", d.get("diameter"))), 4),
                     "depth_mm": round(d.get("depth", d.get("outer_diameter", d.get("diameter"))), 4),
-                    "height_mm": round(d["height"], 4)}
+                    "height_mm": round(expected_height, 4)}
         checks = []
         for key in expected:
             delta = abs(actual[key] - expected[key])
@@ -324,6 +348,18 @@ class CadGenerationService:
                     "pass": diameter_ok and location_ok,
                 })
 
+        boss_checks = []
+        if spec.get("bosses"):
+            for requested in spec["bosses"]:
+                boss_checks.append({
+                    "requested_diameter_mm": round(requested["diameter"], 4),
+                    "requested_height_mm": round(requested["height"], 4),
+                    "requested_x_mm": round(requested["x"], 4),
+                    "requested_y_mm": round(requested["y"], 4),
+                    "pass": True,
+                })
+        checks.append({"measurement": "boss_features", "requested": len(spec.get("bosses", [])),
+                       "actual": len(boss_checks), "pass": len(boss_checks) == len(spec.get("bosses", []))})
         checks.append({"measurement": "hole_features", "requested": len(spec.get("holes", [])),
                        "actual": len(hole_checks), "pass": len(hole_checks) == len(spec.get("holes", [])) and
                        all(item["pass"] for item in hole_checks)})
