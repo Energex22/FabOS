@@ -97,6 +97,29 @@ Customer account data maps to the existing `users`, `customers`, and `customer_a
 
 The internal order `dossier()` is never exposed through this boundary because it contains production jobs, QC, invoices, payments, fulfillment, and other operational information.
 
+## Customer design proof workflow
+
+Custom quote requests that include a customer design may require a design proof before production. Proofs are versioned review checkpoints tied to the quote and the exact Design Vault version being reviewed.
+
+Customer proof routes:
+
+- `GET /api/v1/customer/proofs`
+- `GET /api/v1/customer/proofs/{proof_id}`
+- `GET /api/v1/customer/proofs/{proof_id}/file`
+- `POST /api/v1/customer/proofs/{proof_id}/approve`
+- `POST /api/v1/customer/proofs/{proof_id}/request-changes`
+
+Administrator proof routes:
+
+- `GET /api/v1/admin/quotes/{quote_id}/proofs`
+- `POST /api/v1/admin/quotes/{quote_id}/proofs`
+- `POST /api/v1/admin/quotes/{quote_id}/proofs/upload`
+- `POST /api/v1/admin/proofs/{proof_id}/send`
+
+Customer actions are ownership-scoped and only apply to proofs in sent status. A customer approval records the approving account and timestamp. Requesting changes requires a customer comment. A new proof supersedes the previous review checkpoint.
+
+The production service enforces the same rule server-side: if an order is linked to a quote with a customer design, the latest design proof must be approved before production jobs can be created. This applies to administrator actions and automation/direct API callers, not just the web UI.
+
 ## Customer-safe order statuses
 
 The API translates internal statuses into stable customer-facing labels:
