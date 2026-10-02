@@ -26,6 +26,16 @@ class CadGenerationTests(unittest.TestCase):
         self.assertTrue(Path(next(a["path"] for a in result["artifacts"] if a["format"] == "step")).is_file())
         self.assertTrue(Path(next(a["path"] for a in result["artifacts"] if a["format"] == "3mf")).is_file())
 
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_slot_generation_produces_valid_model(self):
+        result = self.service.generate(spec={
+            "shape": "plate",
+            "dimensions": {"width": 100, "depth": 60, "height": 5},
+            "slots": [{"length": 30, "width": 8, "x": 0, "y": 0, "angle": 45}],
+        }, output_formats=["stl", "3mf"])
+        self.assertTrue(result["verification"]["passed"])
+        self.assertTrue(any(a["format"] == "stl" for a in result["artifacts"]))
+        self.assertTrue(any(a["format"] == "3mf" for a in result["artifacts"]))
     def test_simple_revision_updates_existing_spec(self):
         original = {"shape": "plate", "dimensions": {"width": 100, "depth": 60, "height": 5}}
         revised = self.service._apply_simple_revision(original, "make the width 120 mm and thickness 6 mm")
