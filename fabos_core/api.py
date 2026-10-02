@@ -6,7 +6,7 @@ Administrator routes are separately protected and are not part of the customer U
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 from pathlib import Path
 
@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from fabos_core.application import FabOSApplication
 from fabos_core.services.admin_api import register_admin_routes
 from fabos_core.services.customer_api_writes import register_customer_write_routes
+from fabos_core.services.design_proofs_api import register_design_proof_routes
 from fabos_core.services.payment_api import register_payment_routes
 
 
@@ -360,6 +361,47 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         updated_user = application.accounts.get_user(user["id"])
         return {"user": _user_payload(updated_user), "customer": _customer_payload(application.accounts.customer_for_user(user["id"]))}
 
+    @app.post("/api/v1/customer/quotes/{quote_id}/accept")
+    def accept_customer_quote(quote_id: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            row, _items = application.quotes.get_for_user(user["id"], quote_id)
+            status = str(row["status"] or "").lower()
+            if status == "approved":
+                existing = application.quotes.convert_to_order(quote_id)
+                return {"accepted": True, "order_id": existing}
+            if status != "sent":
+                raise HTTPException(status_code=409, detail="This quote is not ready for customer acceptance.")
+            expires = str(row["expires_at"] or "").strip()
+            if expires and expires[:10] < datetime.utcnow().date().isoformat():
+                application.quotes.set_status(quote_id, "expired")
+                raise HTTPException(status_code=409, detail="This quote has expired. Please contact FABVEX for an updated quote.")
+            application.quotes.set_status(quote_id, "accepted")
+            order_id = application.quotes.convert_to_order(quote_id)
+            return {"accepted": True, "order_id": order_id}
+        except HTTPException:
+            raise
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="Quote access denied") from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Quote not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/customer/quotes/{quote_id}/decline")
+    def decline_customer_quote(quote_id: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            row, _items = application.quotes.get_for_user(user["id"], quote_id)
+            if str(row["status"] or "").lower() != "sent":
+                raise HTTPException(status_code=409, detail="This quote cannot be declined in its current state.")
+            application.quotes.set_status(quote_id, "declined")
+            return {"declined": True, "quote_id": quote_id}
+        except HTTPException:
+            raise
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail="Quote access denied") from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Quote not found") from exc
+
     @app.get("/api/v1/customer/quotes")
     def customer_quotes(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         rows = application.quotes.list_for_user(user["id"])
@@ -397,8 +439,71 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         order["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
         return {"order": order, "items": [_order_item_payload(item) for item in items]}
 
+    @app.get("/api/v1/admin/quotes")
+    def admin_quotes(q: str = "", status: str = "All", group: str = "all", user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        rows = application.quotes.list(query=q, status=status, group=group)
+        return {"quotes": [_json(row) for row in rows]}
+
+    @app.get("/api/v1/admin/quotes/{quote_id}")
+    def admin_quote(quote_id: str, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            row, items = application.quotes.get(quote_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Quote not found") from exc
+        return {"quote": _json(row), "items": [_json(item) for item in items], "versions": [_json(v) for v in application.quotes.versions(quote_id)]}
+
+    @app.put("/api/v1/admin/quotes/{quote_id}")
+    def update_admin_quote(quote_id: str, payload: dict, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            row, existing_items = application.quotes.get(quote_id)
+            requested_status = str(payload.get("status") or row["status"] or "draft").lower()
+            if requested_status in {"accepted", "approved", "declined"}:
+                raise HTTPException(status_code=409, detail="Customer decision states can only be changed by the customer workflow.")
+            items = payload.get("items")
+            if not items:
+                items = [dict(item) for item in existing_items]
+            expires_at = payload.get("expires_at", row["expires_at"])
+            if requested_status == "sent" and not expires_at:
+                expires_at = (datetime.utcnow().date() + timedelta(days=14)).isoformat()
+            data = {"customer_id": row["customer_id"], "status": requested_status, "expires_at": expires_at, "notes": payload.get("notes", row["notes"])}
+            application.quotes.save(data, items, quote_id=quote_id)
+            updated, updated_items = application.quotes.get(quote_id)
+            return {"quote": _json(updated), "items": [_json(item) for item in updated_items], "versions": [_json(v) for v in application.quotes.versions(quote_id)]}
+        except HTTPException:
+            raise
+        except (KeyError, ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/v1/admin/customers")
+    def admin_customers(q: str = "", user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        return {"customers": [_json(row) for row in application.customers.list(query=q)]}
+
+    @app.post("/api/v1/admin/customers")
+    def create_admin_customer(payload: dict, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            customer_id = application.customers.save({
+                "name": str(payload.get("name") or "").strip(),
+                "email": str(payload.get("email") or "").strip().lower(),
+                "phone": str(payload.get("phone") or "").strip(),
+                "notes": str(payload.get("notes") or "").strip(),
+            })
+            return {"customer_id": customer_id, "customer": _json(application.customers.get(customer_id))}
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/v1/admin/orders/{order_id}/start-production")
+    def start_admin_production(order_id: str, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            created = application.production.create_jobs_from_order(order_id)
+            return {"order_id": order_id, "jobs_created": created, "started": bool(created)}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     register_admin_routes(app, get_application, administrator_user)
     register_customer_write_routes(app, get_application, customer_user)
+    register_design_proof_routes(app, get_application, customer_user, administrator_user)
     register_payment_routes(app, get_application, administrator_user)
     return app
 

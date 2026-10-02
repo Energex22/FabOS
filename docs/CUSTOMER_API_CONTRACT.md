@@ -27,7 +27,15 @@ The development server binds to `127.0.0.1:8000`. `FABOS_CORS_ORIGINS` may be se
 - `PATCH /api/v1/customer/me`
 - `GET /api/v1/customer/quotes`
 - `GET /api/v1/customer/quotes/{quote_id}`
+- `POST /api/v1/customer/quotes/{quote_id}/accept`
+- `POST /api/v1/customer/quotes/{quote_id}/decline`
 - `POST /api/v1/customer/quotes`
+- `GET /api/v1/admin/quotes`
+- `GET /api/v1/admin/quotes/{quote_id}`
+- `PUT /api/v1/admin/quotes/{quote_id}`
+- `GET /api/v1/admin/customers`
+- `POST /api/v1/admin/customers`
+- `POST /api/v1/admin/orders/{order_id}/start-production`
 - `POST /api/v1/quote-requests`
 - `POST /api/v1/quote-requests/upload`
 - `GET /api/v1/customer/orders`
@@ -40,6 +48,10 @@ Payment-provider webhooks and physical-sale payment ingestion are internal integ
 ## Catalog eligibility
 
 The public catalog is generated from FabOS's catalog source of truth. A product is exposed to customers only when its storefront visibility is `published`, it has a usable printable model, it has a positive customer price, and its license status is commercially acceptable.
+
+Customer quote acceptance is server-enforced: a customer can accept or decline only their own quote after FabOS has placed it in `sent` status. An accepted quote is converted to its server-side order; internal production state remains administrator-only.
+
+Quote edits create immutable `quote_versions` snapshots so price, notes, expiration, and line-item history can be audited without trusting browser state.
 
 The customer API deliberately strips internal production files, license metadata, source URLs, and designer/internal provenance fields from the public product representation.
 
@@ -84,6 +96,29 @@ Customer routes require an authenticated user whose account type is `customer`, 
 Customer account data maps to the existing `users`, `customers`, and `customer_accounts` records. Quotes map to `quotes` and `quote_items`. Orders map to `orders` and their linked quote/items. Checkout shipping/tax/channel fields use the existing order migration fields. The API uses existing customer-scoped quote and order service methods rather than duplicating ownership queries.
 
 The internal order `dossier()` is never exposed through this boundary because it contains production jobs, QC, invoices, payments, fulfillment, and other operational information.
+
+## Customer design proof workflow
+
+Custom quote requests that include a customer design may require a design proof before production. Proofs are versioned review checkpoints tied to the quote and the exact Design Vault version being reviewed.
+
+Customer proof routes:
+
+- `GET /api/v1/customer/proofs`
+- `GET /api/v1/customer/proofs/{proof_id}`
+- `GET /api/v1/customer/proofs/{proof_id}/file`
+- `POST /api/v1/customer/proofs/{proof_id}/approve`
+- `POST /api/v1/customer/proofs/{proof_id}/request-changes`
+
+Administrator proof routes:
+
+- `GET /api/v1/admin/quotes/{quote_id}/proofs`
+- `POST /api/v1/admin/quotes/{quote_id}/proofs`
+- `POST /api/v1/admin/quotes/{quote_id}/proofs/upload`
+- `POST /api/v1/admin/proofs/{proof_id}/send`
+
+Customer actions are ownership-scoped and only apply to proofs in sent status. A customer approval records the approving account and timestamp. Requesting changes requires a customer comment. A new proof supersedes the previous review checkpoint.
+
+The production service enforces the same rule server-side: if an order is linked to a quote with a customer design, the latest design proof must be approved before production jobs can be created. This applies to administrator actions and automation/direct API callers, not just the web UI.
 
 ## Customer-safe order statuses
 
