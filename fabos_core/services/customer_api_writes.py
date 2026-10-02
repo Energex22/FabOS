@@ -300,7 +300,6 @@ def register_customer_write_routes(app, get_application, current_user):
             version_id = str(uuid.uuid4())
             safe_name = "Custom Quote " + str(quote["quote_number"])
             with application.database.connect() as conn:
-                conn.execute("CREATE TABLE IF NOT EXISTS quote_designs(quote_id TEXT PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
                 conn.execute("INSERT INTO designs(id,product_id,name,current_version,notes) VALUES(?,?,?,1,?)",(design_id,None,safe_name,"Customer custom quote %s"%quote["quote_number"]))
                 conn.execute("INSERT INTO design_versions(id,design_id,version,label,notes) VALUES(?,?,?,?,?)",(version_id,design_id,1,"Customer upload","Uploaded with custom quote request"))
                 conn.execute("INSERT INTO quote_designs(quote_id,design_id) VALUES(?,?)",(quote_id,design_id))
