@@ -309,7 +309,8 @@ class AIService:
             "diameter?:number,outer_diameter?:number,inner_diameter?:number,bore_diameter?:number,"
             "bolt_circle_diameter?:number,bolt_hole_diameter?:number,bolt_hole_count?:number}, "
             "holes:[{diameter:number,x:number,y:number}], "
-            "slots:[{length:number,width:number,x:number,y:number,angle?:number}], metadata:{}}. "
+            "slots:[{length:number,width:number,x:number,y:number,angle?:number}], "
+            "bosses:[{diameter:number,height:number,x:number,y:number}], metadata:{}}. "
             "Do not include code, formulas, comments, or unsupported fields."
         )
         messages = [{"role": "system", "content": system}, {"role": "user", "content": str(prompt).strip()[:12000]}]
@@ -355,7 +356,8 @@ class AIService:
             "Use only dimensions explicitly supplied in the reference note; if scale is insufficient, "
             "put missing measurements in metadata.missing_dimensions and set metadata.scale_confirmed=false. "
             "Describe visible geometry/features in metadata.features. Allowed shapes: box, plate, cylinder, "
-            "ring, bracket, mounting_plate, flange. Slots are rounded rectangular cutouts. All dimensions are millimeters."
+            "ring, bracket, mounting_plate, flange. Slots are rounded rectangular cutouts. "
+            "Bosses are cylindrical raised features on box-like parts. All dimensions are millimeters."
         )
         if reference_note:
             prompt += "\nReference measurements/context: " + str(reference_note).strip()[:4000]
