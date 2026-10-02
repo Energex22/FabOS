@@ -70,6 +70,29 @@ class QuoteOrderSnapshotTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(count, 1)
 
+    def test_quote_versions_record_each_saved_price_revision(self):
+        quote_id = self.quotes.save(
+            {"customer_id": "customer-1", "status": "draft", "notes": "Initial"},
+            [{"product_id": None, "description": "Custom item", "quantity": 1, "unit_price_cents": 4200}],
+        )
+        self.quotes.save(
+            {"customer_id": "customer-1", "status": "sent", "notes": "Final quote"},
+            [{"product_id": None, "description": "Custom item", "quantity": 1, "unit_price_cents": 4750}],
+            quote_id=quote_id,
+        )
+        versions = self.quotes.versions(quote_id)
+        self.assertEqual([row["version"] for row in versions], [2, 1])
+        self.assertEqual(versions[0]["status"], "sent")
+        self.assertEqual(versions[0]["total_cents"], 4750)
+
+    def test_quote_status_transition_rejects_unknown_status(self):
+        quote_id = self.quotes.save(
+            {"customer_id": "customer-1", "status": "draft"},
+            [{"product_id": None, "description": "Custom item", "quantity": 1, "unit_price_cents": 4200}],
+        )
+        with self.assertRaises(ValueError):
+            self.quotes.set_status(quote_id, "customer_approved_themselves")
+
 
 if __name__ == "__main__":
     unittest.main()
