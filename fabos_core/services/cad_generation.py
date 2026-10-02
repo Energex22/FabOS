@@ -360,12 +360,6 @@ class CadGenerationService:
             ).fetchone()
             if existing:
                 return {"quote_id": quote_id, "design_id": existing["design_id"], "attached": False}
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS quote_designs("
-                "quote_id TEXT PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,"
-                "design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,"
-                "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
-            )
             design_id = str(uuid.uuid4())
             version_id = str(uuid.uuid4())
             name = "AI CAD " + str(quote["quote_number"])
