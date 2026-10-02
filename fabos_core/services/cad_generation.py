@@ -43,7 +43,7 @@ class CadGenerationService:
             except Exception:
                 configured = False
         return {"enabled": cq is not None, "engine": "cadquery" if cq is not None else None,
-                "step": cq is not None, "stl": cq is not None,
+                "step": cq is not None, "stl": cq is not None, "3mf": cq is not None,
                 "shapes": sorted(self.SHAPES), "ai_interpretation": configured}
 
     @staticmethod
@@ -472,7 +472,7 @@ class CadGenerationService:
         return self.generate(
             spec=spec,
             prompt="Revision of %s: %s" % (job_id, str(instruction).strip()[:8000]),
-            output_formats=output_formats or ["stl", "step"],
+            output_formats=output_formats or ["stl", "step", "3mf"],
             owner_id=owner_id,
         )
 
@@ -515,13 +515,15 @@ class CadGenerationService:
                 raise CadGenerationError("Generated geometry failed dimensional verification")
             folder = self.root / job_id
             folder.mkdir(parents=True, exist_ok=True)
-            formats = [str(x).lower() for x in (output_formats or ["stl", "step"]) if str(x).lower() in {"stl", "step"}]
+            formats = [str(x).lower() for x in (output_formats or ["stl", "step", "3mf"]) if str(x).lower() in {"stl", "step", "3mf"}]
             (folder / "metadata.json").write_text(json.dumps({"owner_id": str(owner_id or ""), "spec": spec}, default=str), encoding="utf-8")
             artifacts = []
             for fmt in (formats or ["stl"]):
                 target = folder / ("model." + fmt)
                 if fmt == "stl":
                     cq.exporters.export(model, str(target), exportType="STL", tolerance=0.01, angularTolerance=0.1)
+                elif fmt == "3mf":
+                    cq.exporters.export(model, str(target), exportType="3MF", tolerance=0.01, angularTolerance=0.1)
                 else:
                     cq.exporters.export(model, str(target), exportType="STEP")
                 artifacts.append({"format": fmt, "path": str(target), "bytes": target.stat().st_size})
