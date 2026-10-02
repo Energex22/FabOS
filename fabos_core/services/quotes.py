@@ -13,6 +13,8 @@ class QuoteService:
                 conn.execute("ALTER TABLE quote_items ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL")
             conn.execute("CREATE TABLE IF NOT EXISTS quote_price_snapshots(id TEXT PRIMARY KEY,quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,quote_item_id TEXT NOT NULL,unit_price_cents INTEGER NOT NULL,pricing_mode TEXT NOT NULL DEFAULT 'manual',calculation_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_quote_price_snapshots_quote ON quote_price_snapshots(quote_id,created_at)")
+            conn.execute("CREATE TABLE IF NOT EXISTS quote_versions(id TEXT PRIMARY KEY,quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,version INTEGER NOT NULL,status TEXT NOT NULL,total_cents INTEGER NOT NULL,expires_at TEXT,notes TEXT,snapshot_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_quote_versions_quote_version ON quote_versions(quote_id,version)")
             conn.commit()
     def list(self,query="",status="All",sort_column="created",descending=True,group="all"):
         col=self.SORT_COLUMNS.get(sort_column,"q.created_at"); direction="DESC" if descending else "ASC"; like="%%%s%%"%query.strip(); where=["(?='' OR q.quote_number LIKE ? OR COALESCE(c.name,'') LIKE ?)"]; args=[query.strip(),like,like]
