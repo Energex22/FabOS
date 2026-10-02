@@ -311,9 +311,9 @@ class CadGenerationService:
         hole_checks = []
         circles = []
         for face in shape.Faces():
-                try:
-                    if face.geomType() == "CYLINDER":
-                        circles.append(face)
+            try:
+                if face.geomType() == "CYLINDER":
+                    circles.append(face)
             except Exception:
                 continue
         if spec.get("holes"):
