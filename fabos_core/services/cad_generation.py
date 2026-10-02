@@ -161,6 +161,15 @@ class CadGenerationService:
                 raise CadGenerationError("hole x or radius is outside the part")
             if abs(hole["y"]) + half_r > result["dimensions"]["depth"] / 2:
                 raise CadGenerationError("hole y or radius is outside the part")
+        for slot in result["slots"]:
+            radius = slot["width"] / 2.0
+            half_straight = max(0.0, (slot["length"] - slot["width"]) / 2.0)
+            extent = half_straight + radius
+            if shape not in {"cylinder", "ring", "flange"}:
+                if abs(slot["x"]) + extent > result["dimensions"]["width"] / 2:
+                    raise CadGenerationError("slot x or length is outside the part")
+                if abs(slot["y"]) + radius > result["dimensions"]["depth"] / 2:
+                    raise CadGenerationError("slot y or width is outside the part")
         return result
 
     def parse_prompt(self, prompt):
@@ -238,6 +247,11 @@ class CadGenerationService:
             raise CadGenerationError("Unsupported shape")
         for hole in spec["holes"]:
             cutter = cq.Workplane("XY").center(hole["x"], hole["y"]).circle(hole["diameter"] / 2).extrude(d.get("height", 5) + 2)
+            model = model.cut(cutter)
+        for slot in spec.get("slots", []):
+            cutter = (cq.Workplane("XY").center(slot["x"], slot["y"])
+                      .slot2D(slot["length"], slot["width"], slot["angle"])
+                      .extrude(d.get("height", 5) + 2))
             model = model.cut(cutter)
         return model
 
