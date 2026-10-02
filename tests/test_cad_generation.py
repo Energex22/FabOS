@@ -18,12 +18,13 @@ class CadGenerationTests(unittest.TestCase):
 
     @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_parse_prompt_and_generate_plate(self):
-        result = self.service.generate(prompt="Create a 120 x 80 x 5 mm mounting plate with 4 5 mm holes.")
+        result = self.service.generate(prompt="Create a 120 x 80 x 5 mm mounting plate with 4 5 mm holes.", output_formats=["stl", "step", "3mf"])
         self.assertEqual(result["spec"]["shape"], "mounting_plate")
         self.assertTrue(result["verification"]["passed"])
         self.assertTrue(all(item["pass"] for item in result["verification"]["holes"]))
         self.assertTrue(Path(next(a["path"] for a in result["artifacts"] if a["format"] == "stl")).is_file())
         self.assertTrue(Path(next(a["path"] for a in result["artifacts"] if a["format"] == "step")).is_file())
+        self.assertTrue(Path(next(a["path"] for a in result["artifacts"] if a["format"] == "3mf")).is_file())
 
     def test_simple_revision_updates_existing_spec(self):
         original = {"shape": "plate", "dimensions": {"width": 100, "depth": 60, "height": 5}}
