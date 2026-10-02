@@ -33,6 +33,22 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(revised["dimensions"]["height"], 6.0)
         self.assertEqual(original["dimensions"]["width"], 100)
 
+    def test_slot_spec_validation(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 100, "depth": 60, "height": 5},
+            "slots": [{"length": 30, "width": 8, "x": 0, "y": 0, "angle": 45}],
+        })
+        self.assertEqual(len(spec["slots"]), 1)
+        self.assertEqual(spec["slots"][0]["width"], 8.0)
+
+    def test_rejects_slot_outside_part(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 50, "depth": 40, "height": 5},
+                "slots": [{"length": 30, "width": 8, "x": 30, "y": 0}],
+            })
     def test_rejects_bad_hole_location(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({"shape": "plate", "dimensions": {"width": 50, "depth": 40, "height": 5},
