@@ -43,6 +43,35 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(revised["dimensions"]["height"], 6.0)
         self.assertEqual(original["dimensions"]["width"], 100)
 
+    def test_counterbore_hole_spec_validation(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 80, "depth": 50, "height": 8},
+            "holes": [{"diameter": 4, "x": 10, "y": 5, "head_type": "counterbore", "head_diameter": 8, "head_depth": 3}],
+        })
+        hole = spec["holes"][0]
+        self.assertEqual(hole["head_type"], "counterbore")
+        self.assertEqual(hole["head_diameter"], 8.0)
+        self.assertEqual(hole["head_depth"], 3.0)
+
+    def test_rejects_invalid_hole_head(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 80, "depth": 50, "height": 8},
+                "holes": [{"diameter": 8, "x": 0, "y": 0, "head_type": "counterbore", "head_diameter": 6, "head_depth": 3}],
+            })
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_counterbore_generation(self):
+        result = self.service.generate(spec={
+            "shape": "plate",
+            "dimensions": {"width": 80, "depth": 50, "height": 8},
+            "holes": [{"diameter": 4, "x": 10, "y": 5, "head_type": "counterbore", "head_diameter": 8, "head_depth": 3}],
+        }, output_formats=["stl", "step", "3mf"])
+        self.assertTrue(result["verification"]["passed"])
+        self.assertTrue(any(a["format"] == "3mf" for a in result["artifacts"]))
+
     def test_boss_spec_validation(self):
         spec = self.service.normalize_spec({
             "shape": "plate",
