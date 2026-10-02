@@ -399,8 +399,15 @@ class CadGenerationService:
         actual = {"width_mm": round(bb.xlen, 4), "depth_mm": round(bb.ylen, 4), "height_mm": round(bb.zlen, 4)}
         d = spec["dimensions"]
         expected_height = d["height"]
+        raised_heights = []
         if spec.get("bosses"):
-            expected_height += max(boss["height"] for boss in spec["bosses"])
+            raised_heights.extend(boss["height"] for boss in spec["bosses"])
+        if spec.get("ribs"):
+            raised_heights.extend(rib["height"] for rib in spec["ribs"])
+        if spec.get("tabs"):
+            raised_heights.extend(tab["height"] for tab in spec["tabs"])
+        if raised_heights:
+            expected_height += max(raised_heights)
         expected = {"width_mm": round(d.get("width", d.get("outer_diameter", d.get("diameter"))), 4),
                     "depth_mm": round(d.get("depth", d.get("outer_diameter", d.get("diameter"))), 4),
                     "height_mm": round(expected_height, 4)}
