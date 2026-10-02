@@ -280,5 +280,45 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(result["verification"]["checks"][0]["actual_mm"], 40.0)
 
 
+    def test_rib_and_tab_spec_validation(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 100, "depth": 60, "height": 5},
+            "ribs": [{"length": 40, "width": 4, "height": 12, "x": 0, "y": 0, "angle": 15}],
+            "tabs": [{"length": 20, "width": 10, "height": 3, "x": 30, "y": 20}],
+        })
+        self.assertEqual(spec["ribs"][0]["height"], 12.0)
+        self.assertEqual(spec["ribs"][0]["angle"], 15.0)
+        self.assertEqual(spec["tabs"][0]["length"], 20.0)
+
+    def test_rejects_rib_outside_part(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 50, "depth": 40, "height": 5},
+                "ribs": [{"length": 20, "width": 8, "height": 10, "x": 30, "y": 0}],
+            })
+
+    def test_rejects_tabs_on_round_part(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "cylinder",
+                "dimensions": {"diameter": 40, "height": 10},
+                "tabs": [{"length": 10, "width": 5, "height": 3, "x": 0, "y": 0}],
+            })
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_rib_and_tab_generation(self):
+        result = self.service.generate(spec={
+            "shape": "plate",
+            "dimensions": {"width": 100, "depth": 60, "height": 5},
+            "ribs": [{"length": 40, "width": 4, "height": 12, "x": 0, "y": 0}],
+            "tabs": [{"length": 20, "width": 10, "height": 3, "x": 30, "y": 20}],
+        }, output_formats=["step"])
+        self.assertTrue(result["verification"]["passed"])
+        self.assertTrue(any(item["measurement"] == "rib_features" for item in result["verification"]["checks"]))
+        self.assertTrue(any(item["measurement"] == "tab_features" for item in result["verification"]["checks"]))
+
+
 if __name__ == "__main__":
     unittest.main()
