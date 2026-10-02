@@ -113,6 +113,21 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual([job["id"] for job in jobs], ["job-a"])
         self.assertEqual(jobs[0]["spec"]["shape"], "box")
 
+    def test_rejects_hole_outside_cylinder(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "cylinder",
+                "dimensions": {"diameter": 40, "height": 10},
+                "holes": [{"diameter": 5, "x": 25, "y": 0}],
+            })
+
+    def test_rejects_hole_inside_ring_bore(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "ring",
+                "dimensions": {"outer_diameter": 40, "inner_diameter": 20, "height": 5},
+                "holes": [{"diameter": 5, "x": 0, "y": 0}],
+            })
     @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_ring_dimensions(self):
         result = self.service.generate(spec={"shape": "ring", "dimensions": {"outer_diameter": 40, "inner_diameter": 20, "height": 5}})
