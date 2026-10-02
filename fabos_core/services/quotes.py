@@ -74,8 +74,24 @@ class QuoteService:
             for i in items:
                 item_id=str(uuid.uuid4()); conn.execute("INSERT INTO quote_items(id,quote_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?,?)",(item_id,quote_id,i.get("product_id"),i.get("variant_id"),i.get("description") or "Custom item",int(i.get("quantity",1)),int(i.get("unit_price_cents",0)),i.get("material",""),i.get("color",""),int(i.get("estimated_minutes") or 0),float(i.get("estimated_filament_g") or 0)))
                 conn.execute("INSERT INTO quote_price_snapshots(id,quote_id,quote_item_id,unit_price_cents,pricing_mode,calculation_json) VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),quote_id,item_id,int(i.get("unit_price_cents",0)),str(i.get("pricing_mode") or "manual"),json.dumps(i.get("pricing_breakdown"),sort_keys=True) if i.get("pricing_breakdown") is not None else None))
+            version=conn.execute("SELECT COALESCE(MAX(version),0)+1 FROM quote_versions WHERE quote_id=?",(quote_id,)).fetchone()[0]
+            snapshot={"customer_id":data["customer_id"],"status":data.get("status","draft"),"total_cents":total,"expires_at":data.get("expires_at") or None,"notes":data.get("notes",""),"items":[dict(i) for i in items]}
+            conn.execute("INSERT INTO quote_versions(id,quote_id,version,status,total_cents,expires_at,notes,snapshot_json) VALUES(?,?,?,?,?,?,?,?)",(str(uuid.uuid4()),quote_id,int(version),data.get("status","draft"),total,data.get("expires_at") or None,data.get("notes",""),json.dumps(snapshot,sort_keys=True,default=str)))
             conn.commit()
         return quote_id
+    def set_status(self,quote_id,status):
+        allowed={"draft","under_review","sent","accepted","declined","expired","approved"}
+        status=str(status or "").strip().lower()
+        if status not in allowed: raise ValueError("Invalid quote status")
+        with self.database.connect() as conn:
+            row=conn.execute("SELECT id,status FROM quotes WHERE id=?",(quote_id,)).fetchone()
+            if not row: raise KeyError("Quote not found")
+            conn.execute("UPDATE quotes SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(status,quote_id))
+            conn.commit()
+        return status
+    def versions(self,quote_id):
+        with self.database.connect() as conn:
+            return conn.execute("SELECT id,quote_id,version,status,total_cents,expires_at,notes,snapshot_json,created_at FROM quote_versions WHERE quote_id=? ORDER BY version DESC",(quote_id,)).fetchall()
     def convert_to_order(self,quote_id):
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
