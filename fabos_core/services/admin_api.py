@@ -91,9 +91,12 @@ def register_admin_routes(app, get_application, administrator_user):
                 FROM printers p LEFT JOIN maintenance_records m ON m.printer_id=p.id
                 GROUP BY p.id ORDER BY hours_since_service DESC""").fetchall()]
 
-        cad_jobs = [dict(row) for row in conn.execute("""
-            SELECT id,status,prompt,spec_json,verification_json,artifacts_json,error,created_at,updated_at
-            FROM cad_generation_jobs ORDER BY created_at DESC LIMIT 8""").fetchall()]
+        with application.database.connect() as cad_conn:
+            cad_jobs = [dict(row) for row in cad_conn.execute("""
+                SELECT id,status,prompt,spec_json,verification_json,artifacts_json,error,created_at,updated_at
+                FROM cad_generation_jobs ORDER BY created_at DESC LIMIT 8""").fetchall()]
+            cad_total = int(cad_conn.execute("SELECT COUNT(*) FROM cad_generation_jobs").fetchone()[0] or 0)
+            cad_failed = int(cad_conn.execute("SELECT COUNT(*) FROM cad_generation_jobs WHERE status='failed'").fetchone()[0] or 0)
         import json
         for job in cad_jobs:
             for field in ("spec_json","verification_json","artifacts_json"):
@@ -115,7 +118,7 @@ def register_admin_routes(app, get_application, administrator_user):
             "printers": {"total": printer_total, "online": printer_online, "items": printers},
             "inventory": {"low_filament": low_filament, "low_supplies": low_supplies, "filament_threshold_g": low_filament_threshold, "spools": low_spools},
             "maintenance": {"items": maintenance},
-            "cad": {"recent_jobs": cad_jobs, "total": int(scalar("SELECT COUNT(*) FROM cad_generation_jobs")), "failed": int(scalar("SELECT COUNT(*) FROM cad_generation_jobs WHERE status='failed'"))},
+            "cad": {"recent_jobs": cad_jobs, "total": cad_total, "failed": cad_failed},
             "recent_orders": recent_orders,
             "action_items": action_items,
         }
