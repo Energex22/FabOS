@@ -306,7 +306,8 @@ class AIService:
             "All dimensions are millimeters. Never invent a measurement when the user supplied one; "
             "use conservative primitive defaults only when a dimension is genuinely omitted. "
             "JSON schema: {shape:string, dimensions:{width?:number,depth?:number,height:number, "
-            "diameter?:number,outer_diameter?:number,inner_diameter?:number}, "
+            "diameter?:number,outer_diameter?:number,inner_diameter?:number,bore_diameter?:number,"
+            "bolt_circle_diameter?:number,bolt_hole_diameter?:number,bolt_hole_count?:number}, "
             "holes:[{diameter:number,x:number,y:number}], metadata:{}}. "
             "Do not include code, formulas, comments, or unsupported fields."
         )
@@ -353,7 +354,7 @@ class AIService:
             "Use only dimensions explicitly supplied in the reference note; if scale is insufficient, "
             "put missing measurements in metadata.missing_dimensions and set metadata.scale_confirmed=false. "
             "Describe visible geometry/features in metadata.features. Allowed shapes: box, plate, cylinder, "
-            "ring, bracket, mounting_plate. All dimensions are millimeters."
+            "ring, bracket, mounting_plate, flange. All dimensions are millimeters."
         )
         if reference_note:
             prompt += "\nReference measurements/context: " + str(reference_note).strip()[:4000]
