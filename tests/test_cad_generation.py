@@ -318,6 +318,8 @@ class CadGenerationTests(unittest.TestCase):
         self.assertTrue(result["verification"]["passed"])
         self.assertTrue(any(item["measurement"] == "rib_features" for item in result["verification"]["checks"]))
         self.assertTrue(any(item["measurement"] == "tab_features" for item in result["verification"]["checks"]))
+        height_check = next(item for item in result["verification"]["checks"] if item["measurement"] == "height_mm")
+        self.assertEqual(height_check["expected_mm"], 17.0)
 
 
 if __name__ == "__main__":
