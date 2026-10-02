@@ -143,7 +143,7 @@ INSERT OR IGNORE INTO marketing_channels(id,name,channel_type,active,publish_mod
 );
 CREATE INDEX IF NOT EXISTS idx_cad_generation_jobs_user ON cad_generation_jobs(user_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_cad_generation_jobs_status ON cad_generation_jobs(status,created_at);"""),
-,(52,"""CREATE TABLE IF NOT EXISTS quote_designs(
+(52,"""CREATE TABLE IF NOT EXISTS quote_designs(
  quote_id TEXT PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,
  design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
