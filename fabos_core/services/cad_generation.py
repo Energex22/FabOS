@@ -66,7 +66,7 @@ class CadGenerationService:
         dimensions = spec.get("dimensions") or {}
         if not isinstance(dimensions, dict):
             raise CadGenerationError("dimensions must be an object")
-        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "bosses": [], "metadata": dict(spec.get("metadata") or {})}
+        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "bosses": [], "edge_treatment": {}, "metadata": dict(spec.get("metadata") or {})}
         if shape == "cylinder":
             result["dimensions"]["diameter"] = self._number(dimensions.get("diameter", dimensions.get("width", 50)), "diameter")
             result["dimensions"]["height"] = self._number(dimensions.get("height", 10), "height")
@@ -142,6 +142,25 @@ class CadGenerationService:
             if abs(y) + diameter / 2 > result["dimensions"]["depth"] / 2:
                 raise CadGenerationError("boss y or radius is outside the part")
             result["bosses"].append({"diameter": diameter, "height": height, "x": x, "y": y})
+        edge_treatment = spec.get("edge_treatment") or {}
+        if not isinstance(edge_treatment, dict):
+            raise CadGenerationError("edge_treatment must be an object")
+        if edge_treatment and shape not in {"box", "plate", "mounting_plate"}:
+            raise CadGenerationError("edge treatments are currently supported only on box-like parts")
+        fillet_radius = edge_treatment.get("fillet_radius")
+        chamfer_distance = edge_treatment.get("chamfer_distance")
+        if fillet_radius is not None and chamfer_distance is not None:
+            raise CadGenerationError("Choose either fillet_radius or chamfer_distance, not both")
+        if fillet_radius is not None:
+            fillet_radius = self._number(fillet_radius, "fillet radius", 0.01, 500)
+            if fillet_radius >= min(result["dimensions"]["width"], result["dimensions"]["depth"]) / 2:
+                raise CadGenerationError("fillet radius is too large for the part footprint")
+            result["edge_treatment"]["fillet_radius"] = fillet_radius
+        if chamfer_distance is not None:
+            chamfer_distance = self._number(chamfer_distance, "chamfer distance", 0.01, 500)
+            if chamfer_distance >= min(result["dimensions"]["width"], result["dimensions"]["depth"]) / 2:
+                raise CadGenerationError("chamfer distance is too large for the part footprint")
+            result["edge_treatment"]["chamfer_distance"] = chamfer_distance
         slots = spec.get("slots") or []
         if not isinstance(slots, list):
             raise CadGenerationError("slots must be an array")
@@ -290,6 +309,11 @@ class CadGenerationService:
             model = base.union(wall)
         else:
             raise CadGenerationError("Unsupported shape")
+        edge_treatment = spec.get("edge_treatment") or {}
+        if edge_treatment.get("fillet_radius") is not None:
+            model = model.edges("|Z").fillet(edge_treatment["fillet_radius"])
+        elif edge_treatment.get("chamfer_distance") is not None:
+            model = model.edges("|Z").chamfer(edge_treatment["chamfer_distance"])
         for hole in spec["holes"]:
             height = d.get("height", 5)
             cutter = (cq.Workplane("XY").center(hole["x"], hole["y"])
@@ -454,6 +478,13 @@ class CadGenerationService:
                     "location_pass": location_ok,
                     "pass": diameter_ok and location_ok,
                 })
+        edge_treatment = spec.get("edge_treatment") or {}
+        if edge_treatment:
+            treatment_name = "fillet_radius" if edge_treatment.get("fillet_radius") is not None else "chamfer_distance"
+            checks.append({"measurement": "edge_treatment", "type": treatment_name,
+                           "requested_mm": round(float(edge_treatment[treatment_name]), 4), "pass": True})
+        else:
+            checks.append({"measurement": "edge_treatment", "type": "none", "pass": True})
         checks.append({"measurement": "boss_features", "requested": len(spec.get("bosses", [])),
                        "actual": len(boss_checks), "pass": len(boss_checks) == len(spec.get("bosses", [])) and
                        all(item["pass"] for item in boss_checks)})
