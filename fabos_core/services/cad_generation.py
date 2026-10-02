@@ -21,6 +21,7 @@ class CadGenerationError(ValueError):
 
 class CadGenerationService:
     SHAPES = {"box", "plate", "cylinder", "ring", "bracket", "mounting_plate", "flange"}
+    MAX_FEATURES = 32
 
     def __init__(self, settings=None, database=None, ai=None, design_vault=None):
         self.settings = settings
