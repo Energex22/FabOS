@@ -128,7 +128,8 @@ INSERT OR IGNORE INTO marketing_channels(id,name,channel_type,active,publish_mod
 ('channel_walmart','Walmart Marketplace','walmart',0,'api'),
 ('channel_google_business','Google Business Profile','google_business',0,'api'),
 ('channel_linkedin','LinkedIn','linkedin',0,'api'),
-('channel_threads','Threads','threads',0,'api');"""),\n(51,"""CREATE TABLE IF NOT EXISTS quote_designs(quote_id TEXT PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+('channel_threads','Threads','threads',0,'api');"""),
+(51,"""CREATE TABLE IF NOT EXISTS quote_designs(quote_id TEXT PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS design_proofs(
 id TEXT PRIMARY KEY,
 quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
