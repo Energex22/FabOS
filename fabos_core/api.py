@@ -347,6 +347,10 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     def customer_cad_capabilities(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         return application.cad_generation.capabilities()
 
+    @app.get("/api/v1/customer/cad/printers")
+    def customer_cad_printers(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        return {"printers": application.cad_generation.list_printers()}
+
     @app.post("/api/v1/customer/cad/generate")
     def customer_cad_generate(payload: CadGenerationRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         if not payload.prompt and not payload.spec:
