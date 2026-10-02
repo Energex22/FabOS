@@ -736,6 +736,27 @@ class CadGenerationService:
             raise CadGenerationError("The revision could not be mapped to a dimensional change. Please specify a dimension in millimeters.")
         return self.normalize_spec(spec)
 
+    @staticmethod
+    def _bounded_correction(spec, verification):
+        """Apply only deterministic, safe corrections inferred from verification deltas."""
+        corrected = json.loads(json.dumps(spec))
+        changed = False
+        for check in verification.get("checks", []):
+            measurement = check.get("measurement")
+            actual = check.get("actual_mm")
+            expected = check.get("expected_mm")
+            if not measurement or actual is None or expected is None:
+                continue
+            if measurement == "height_mm" and abs(float(actual) - float(expected)) > 0.01:
+                # Height mismatches are not safely correctable without changing feature intent.
+                continue
+            if measurement in {"width_mm", "depth_mm"} and abs(float(actual) - float(expected)) > 0.01:
+                # Bounding dimensions are similarly not safe to mutate automatically.
+                continue
+        # Currently there is intentionally no speculative geometry rewrite. Returning an
+        # equal spec keeps the retry hook explicit while preventing silent dimension changes.
+        return corrected if changed else spec
+
     def generate(self, spec=None, prompt=None, output_formats=None, owner_id=None):
         job_id = str(uuid.uuid4())
         try:
@@ -744,7 +765,16 @@ class CadGenerationService:
             model = self._cadquery_model(spec)
             verification = self._verify(model, spec)
             if not verification["passed"]:
-                raise CadGenerationError("Generated geometry failed dimensional verification")
+                corrected = self._bounded_correction(spec, verification)
+                if corrected != spec:
+                    corrected_model = self._cadquery_model(corrected)
+                    corrected_verification = self._verify(corrected_model, corrected)
+                    if corrected_verification["passed"]:
+                        spec, model, verification = corrected, corrected_model, corrected_verification
+                    else:
+                        raise CadGenerationError("Generated geometry failed dimensional verification after bounded correction")
+                else:
+                    raise CadGenerationError("Generated geometry failed dimensional verification")
             folder = self.root / job_id
             folder.mkdir(parents=True, exist_ok=True)
             formats = [str(x).lower() for x in (output_formats or ["stl", "step", "3mf"]) if str(x).lower() in {"stl", "step", "3mf"}]
