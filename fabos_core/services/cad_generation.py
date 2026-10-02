@@ -368,6 +368,43 @@ class CadGenerationService:
                 location_ok = False
                 if best:
                     location_ok = abs(best[2] - requested["x"]) <= 0.05 and abs(best[3] - requested["y"]) <= 0.05
+                head_type = requested.get("head_type") or ""
+                head_diameter_ok = True
+                head_depth_ok = True
+                head_actual_diameter = None
+                head_actual_depth = None
+                if head_type:
+                    head_faces = []
+                    target_head_radius = requested["head_diameter"] / 2.0
+                    target_depth = requested["head_depth"]
+                    for face in shape.Faces():
+                        try:
+                            geom_type = face.geomType()
+                            if head_type == "counterbore" and geom_type != "CYLINDER":
+                                continue
+                            if head_type == "countersink" and geom_type != "CONE":
+                                continue
+                            fb = face.BoundingBox()
+                            center = face.Center()
+                            center_distance = ((float(center.x) - requested["x"]) ** 2 +
+                                               (float(center.y) - requested["y"]) ** 2) ** 0.5
+                            diameter_span = max(float(fb.xlen), float(fb.ylen))
+                            depth_span = float(fb.zlen)
+                            head_faces.append((abs(diameter_span - requested["head_diameter"]),
+                                               abs(depth_span - target_depth),
+                                               center_distance, diameter_span, depth_span,
+                                               float(fb.zmax)))
+                        except Exception:
+                            continue
+                    candidate_head = min(head_faces, key=lambda item: (item[2], item[0], item[1])) if head_faces else None
+                    if candidate_head:
+                        head_actual_diameter = round(candidate_head[3], 4)
+                        head_actual_depth = round(candidate_head[4], 4)
+                        head_diameter_ok = candidate_head[0] <= 0.05 and candidate_head[2] <= 0.05
+                        head_depth_ok = candidate_head[1] <= 0.05 and abs(candidate_head[5] - d["height"]) <= 0.05
+                    else:
+                        head_diameter_ok = False
+                        head_depth_ok = False
                 hole_checks.append({
                     "requested_diameter_mm": round(requested["diameter"], 4),
                     "actual_diameter_mm": round(best[4] * 2, 4) if best else None,
@@ -375,9 +412,16 @@ class CadGenerationService:
                     "requested_y_mm": round(requested["y"], 4),
                     "actual_x_mm": round(best[2], 4) if best else None,
                     "actual_y_mm": round(best[3], 4) if best else None,
+                    "head_type": head_type,
+                    "requested_head_diameter_mm": round(requested["head_diameter"], 4) if requested.get("head_diameter") else None,
+                    "actual_head_diameter_mm": head_actual_diameter,
+                    "requested_head_depth_mm": round(requested["head_depth"], 4) if requested.get("head_depth") else None,
+                    "actual_head_depth_mm": head_actual_depth,
                     "diameter_pass": diameter_ok,
                     "location_pass": location_ok,
-                    "pass": diameter_ok and location_ok,
+                    "head_diameter_pass": head_diameter_ok,
+                    "head_depth_pass": head_depth_ok,
+                    "pass": diameter_ok and location_ok and head_diameter_ok and head_depth_ok,
                 })
 
         boss_checks = []
