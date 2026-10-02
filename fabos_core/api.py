@@ -6,7 +6,7 @@ Administrator routes are separately protected and are not part of the customer U
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 from pathlib import Path
 
@@ -370,6 +370,10 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
                 return {"accepted": True, "order_id": existing}
             if status != "sent":
                 raise HTTPException(status_code=409, detail="This quote is not ready for customer acceptance.")
+            expires = str(row["expires_at"] or "").strip()
+            if expires and expires[:10] < datetime.utcnow().date().isoformat():
+                application.quotes.set_status(quote_id, "expired")
+                raise HTTPException(status_code=409, detail="This quote has expired. Please contact FABVEX for an updated quote.")
             application.quotes.set_status(quote_id, "accepted")
             order_id = application.quotes.convert_to_order(quote_id)
             return {"accepted": True, "order_id": order_id}
@@ -457,7 +461,10 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             items = payload.get("items")
             if not items:
                 items = [dict(item) for item in existing_items]
-            data = {"customer_id": row["customer_id"], "status": requested_status, "expires_at": payload.get("expires_at", row["expires_at"]), "notes": payload.get("notes", row["notes"])}
+            expires_at = payload.get("expires_at", row["expires_at"])
+            if requested_status == "sent" and not expires_at:
+                expires_at = (datetime.utcnow().date() + timedelta(days=14)).isoformat()
+            data = {"customer_id": row["customer_id"], "status": requested_status, "expires_at": expires_at, "notes": payload.get("notes", row["notes"])}
             application.quotes.save(data, items, quote_id=quote_id)
             updated, updated_items = application.quotes.get(quote_id)
             return {"quote": _json(updated), "items": [_json(item) for item in updated_items], "versions": [_json(v) for v in application.quotes.versions(quote_id)]}
