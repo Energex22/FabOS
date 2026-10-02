@@ -43,6 +43,47 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(revised["dimensions"]["height"], 6.0)
         self.assertEqual(original["dimensions"]["width"], 100)
 
+    def test_boss_spec_validation(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 100, "depth": 60, "height": 5},
+            "bosses": [{"diameter": 12, "height": 8, "x": 20, "y": -10}],
+        })
+        self.assertEqual(spec["bosses"][0]["diameter"], 12.0)
+        self.assertEqual(spec["bosses"][0]["height"], 8.0)
+
+    def test_rejects_boss_outside_part(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 50, "depth": 40, "height": 5},
+                "bosses": [{"diameter": 12, "height": 8, "x": 30, "y": 0}],
+            })
+
+    def test_rejects_boss_on_round_part(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "cylinder",
+                "dimensions": {"diameter": 40, "height": 10},
+                "bosses": [{"diameter": 12, "height": 8, "x": 0, "y": 0}],
+            })
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_boss_generation_and_dimensions(self):
+        result = self.service.generate(spec={
+            "shape": "plate",
+            "dimensions": {"width": 100, "depth": 60, "height": 5},
+            "bosses": [
+                {"diameter": 12, "height": 8, "x": -20, "y": 0},
+                {"diameter": 10, "height": 5, "x": 20, "y": 0},
+            ],
+        }, output_formats=["stl", "step", "3mf"])
+        self.assertTrue(result["verification"]["passed"])
+        height_check = next(item for item in result["verification"]["checks"] if item["measurement"] == "height_mm")
+        self.assertEqual(height_check["expected_mm"], 13.0)
+        self.assertEqual(height_check["actual_mm"], 13.0)
+        self.assertTrue(any(a["format"] == "3mf" for a in result["artifacts"]))
+
     def test_slot_spec_validation(self):
         spec = self.service.normalize_spec({
             "shape": "plate",
