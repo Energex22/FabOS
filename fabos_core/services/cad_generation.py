@@ -150,7 +150,17 @@ class CadGenerationService:
             ]
         for hole in result["holes"]:
             half_r = hole["diameter"] / 2
-            if shape in {"cylinder", "ring"}:
+            if shape == "cylinder":
+                radial = (hole["x"] ** 2 + hole["y"] ** 2) ** 0.5
+                if radial + half_r > result["dimensions"]["diameter"] / 2:
+                    raise CadGenerationError("hole x/y or radius is outside the cylinder")
+                continue
+            if shape == "ring":
+                radial = (hole["x"] ** 2 + hole["y"] ** 2) ** 0.5
+                outer_radius = result["dimensions"]["outer_diameter"] / 2
+                inner_radius = result["dimensions"]["inner_diameter"] / 2
+                if radial + half_r > outer_radius or radial - half_r < inner_radius:
+                    raise CadGenerationError("hole x/y or radius is outside the ring wall")
                 continue
             if shape == "flange":
                 radial = (hole["x"] ** 2 + hole["y"] ** 2) ** 0.5
