@@ -437,7 +437,7 @@ class CadGenerationService:
             known = all(x > 0 for x in limits)
             import itertools
             orientations = list(itertools.permutations(dims, 3))
-            fitting_orientation = next(('' + str(tuple(round(x, 4) for x in orientation)) for orientation in orientations
+            fitting_orientation = next((tuple(round(x, 4) for x in orientation) for orientation in orientations
                                          if orientation[0] <= limits[0] and orientation[1] <= limits[1] and orientation[2] <= limits[2]), None) if known else None
             fits = bool(fitting_orientation) if known else True
             result["printer"] = {"id": printer["id"], "name": printer["name"],
