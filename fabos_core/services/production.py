@@ -130,19 +130,32 @@ class ProductionService:
             order_status = str(order["status"] or "").strip().lower()
             if order_status not in {"confirmed", "in_production", "production"}:
                 raise ValueError("Order must be confirmed before production jobs can be created.")
-            # Custom customer designs require an approved proof before any print job\n
-            # can be created. This remains enforced for automation and direct API callers.\n
-            if order["quote_id"]:\n
-                has_design = conn.execute(\n
-                    "SELECT 1 FROM quote_designs WHERE quote_id=? LIMIT 1", (order["quote_id"],)\n
-                ).fetchone()\n
-                if has_design:\n
-                    proof = conn.execute(\n
-                        "SELECT status FROM design_proofs WHERE quote_id=? ORDER BY created_at DESC LIMIT 1",\n
-                        (order["quote_id"],),\n
-                    ).fetchone()\n
-                    if not proof or str(proof["status"] or "").lower() != "approved":\n
-                        raise ValueError("Customer design proof must be approved before production can start.")\n
+            # Custom customer designs require an approved proof before any print job
+
+            # can be created. This remains enforced for automation and direct API callers.
+
+            if order["quote_id"]:
+
+                has_design = conn.execute(
+
+                    "SELECT 1 FROM quote_designs WHERE quote_id=? LIMIT 1", (order["quote_id"],)
+
+                ).fetchone()
+
+                if has_design:
+
+                    proof = conn.execute(
+
+                        "SELECT status FROM design_proofs WHERE quote_id=? ORDER BY created_at DESC LIMIT 1",
+
+                        (order["quote_id"],),
+
+                    ).fetchone()
+
+                    if not proof or str(proof["status"] or "").lower() != "approved":
+
+                        raise ValueError("Customer design proof must be approved before production can start.")
+
             if not order["quote_id"]:
                 raise ValueError("This order has no quote items.")
             items = conn.execute(
