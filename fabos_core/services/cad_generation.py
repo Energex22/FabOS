@@ -296,14 +296,18 @@ class CadGenerationService:
                       .circle(hole["diameter"] / 2).extrude(height + 2))
             model = model.cut(cutter)
             if hole.get("head_type") == "counterbore":
-                head = (cq.Workplane("XY").center(hole["x"], hole["y"])
-                        .circle(hole["head_diameter"] / 2).extrude(hole["head_depth"]))
+                head = (cq.Workplane("XY", origin=(0, 0, height - hole["head_depth"]))
+                        .center(hole["x"], hole["y"])
+                        .circle(hole["head_diameter"] / 2)
+                        .extrude(hole["head_depth"]))
                 model = model.cut(head)
             elif hole.get("head_type") == "countersink":
-                head = (cq.Workplane("XY").center(hole["x"], hole["y"])
-                        .circle(hole["head_diameter"] / 2).workplane(offset=0)
+                head = (cq.Workplane("XY", origin=(0, 0, height - hole["head_depth"]))
+                        .center(hole["x"], hole["y"])
+                        .circle(hole["diameter"] / 2)
                         .workplane(offset=hole["head_depth"])
-                        .circle(hole["diameter"] / 2).loft(combine=False))
+                        .circle(hole["head_diameter"] / 2)
+                        .loft(combine=False))
                 model = model.cut(head)
         for boss in spec.get("bosses", []):
             boss_model = (cq.Workplane("XY").center(boss["x"], boss["y"])
