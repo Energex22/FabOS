@@ -104,10 +104,26 @@ class CadGenerationService:
         for hole in holes[:32]:
             if not isinstance(hole, dict):
                 raise CadGenerationError("Each hole must be an object")
+            diameter = self._number(hole.get("diameter"), "hole diameter")
+            head_type = str(hole.get("head_type") or "").strip().lower()
+            if head_type not in {"", "countersink", "counterbore"}:
+                raise CadGenerationError("hole head_type must be countersink or counterbore")
+            head_diameter = None
+            head_depth = None
+            if head_type:
+                head_diameter = self._number(hole.get("head_diameter"), "hole head diameter")
+                head_depth = self._number(hole.get("head_depth"), "hole head depth")
+                if head_diameter <= diameter:
+                    raise CadGenerationError("hole head diameter must exceed hole diameter")
+                if head_depth >= result["dimensions"]["height"]:
+                    raise CadGenerationError("hole head depth must be smaller than part height")
             result["holes"].append({
-                "diameter": self._number(hole.get("diameter"), "hole diameter"),
+                "diameter": diameter,
                 "x": self._number(hole.get("x", 0), "hole x", -2000, 2000),
                 "y": self._number(hole.get("y", 0), "hole y", -2000, 2000),
+                "head_type": head_type,
+                "head_diameter": head_diameter,
+                "head_depth": head_depth,
             })
         bosses = spec.get("bosses") or []
         if not isinstance(bosses, list):
@@ -275,8 +291,20 @@ class CadGenerationService:
         else:
             raise CadGenerationError("Unsupported shape")
         for hole in spec["holes"]:
-            cutter = cq.Workplane("XY").center(hole["x"], hole["y"]).circle(hole["diameter"] / 2).extrude(d.get("height", 5) + 2)
+            height = d.get("height", 5)
+            cutter = (cq.Workplane("XY").center(hole["x"], hole["y"])
+                      .circle(hole["diameter"] / 2).extrude(height + 2))
             model = model.cut(cutter)
+            if hole.get("head_type") == "counterbore":
+                head = (cq.Workplane("XY").center(hole["x"], hole["y"])
+                        .circle(hole["head_diameter"] / 2).extrude(hole["head_depth"]))
+                model = model.cut(head)
+            elif hole.get("head_type") == "countersink":
+                head = (cq.Workplane("XY").center(hole["x"], hole["y"])
+                        .circle(hole["head_diameter"] / 2).workplane(offset=0)
+                        .workplane(offset=hole["head_depth"])
+                        .circle(hole["diameter"] / 2).loft(combine=False))
+                model = model.cut(head)
         for boss in spec.get("bosses", []):
             boss_model = (cq.Workplane("XY").center(boss["x"], boss["y"])
                           .circle(boss["diameter"] / 2).extrude(d["height"] + boss["height"]))
