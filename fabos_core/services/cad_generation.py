@@ -435,12 +435,16 @@ class CadGenerationService:
                 except (TypeError, ValueError):
                     limits.append(0.0)
             known = all(x > 0 for x in limits)
-            fits = ((dims[0] <= limits[0] and dims[1] <= limits[1] and dims[2] <= limits[2]) or
-                    (dims[1] <= limits[0] and dims[0] <= limits[1] and dims[2] <= limits[2])) if known else True
+            import itertools
+            orientations = list(itertools.permutations(dims, 3))
+            fitting_orientation = next(('' + str(tuple(round(x, 4) for x in orientation)) for orientation in orientations
+                                         if orientation[0] <= limits[0] and orientation[1] <= limits[1] and orientation[2] <= limits[2]), None) if known else None
+            fits = bool(fitting_orientation) if known else True
             result["printer"] = {"id": printer["id"], "name": printer["name"],
                                  "build_volume_mm": {"x": limits[0], "y": limits[1], "z": limits[2]},
                                  "model_mm": {"x": round(dims[0], 4), "y": round(dims[1], 4), "z": round(dims[2], 4)},
-                                 "fits_build_volume": fits}
+                                 "fits_build_volume": fits,
+                                 "fitting_orientation_mm": fitting_orientation}
             result["printable"] = result["printable"] and fits
             if not fits:
                 result["warnings"].append("Model exceeds the selected printer build volume.")
