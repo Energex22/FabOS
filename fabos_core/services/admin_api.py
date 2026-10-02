@@ -91,6 +91,17 @@ def register_admin_routes(app, get_application, administrator_user):
                 FROM printers p LEFT JOIN maintenance_records m ON m.printer_id=p.id
                 GROUP BY p.id ORDER BY hours_since_service DESC""").fetchall()]
 
+        cad_jobs = [dict(row) for row in conn.execute("""
+            SELECT id,status,prompt,spec_json,verification_json,artifacts_json,error,created_at,updated_at
+            FROM cad_generation_jobs ORDER BY created_at DESC LIMIT 8""").fetchall()]
+        import json
+        for job in cad_jobs:
+            for field in ("spec_json","verification_json","artifacts_json"):
+                raw = job.pop(field, None)
+                try:
+                    job[field[:-5]] = json.loads(raw) if raw else None
+                except (TypeError, ValueError):
+                    job[field[:-5]] = None
         action_items=[]
         try:
             action_items=[dict(item) for item in application.operations.action_items()[:20]]
@@ -104,6 +115,7 @@ def register_admin_routes(app, get_application, administrator_user):
             "printers": {"total": printer_total, "online": printer_online, "items": printers},
             "inventory": {"low_filament": low_filament, "low_supplies": low_supplies, "filament_threshold_g": low_filament_threshold, "spools": low_spools},
             "maintenance": {"items": maintenance},
+            "cad": {"recent_jobs": cad_jobs, "total": int(scalar("SELECT COUNT(*) FROM cad_generation_jobs")), "failed": int(scalar("SELECT COUNT(*) FROM cad_generation_jobs WHERE status='failed'"))},
             "recent_orders": recent_orders,
             "action_items": action_items,
         }
