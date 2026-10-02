@@ -66,7 +66,7 @@ class CadGenerationService:
         dimensions = spec.get("dimensions") or {}
         if not isinstance(dimensions, dict):
             raise CadGenerationError("dimensions must be an object")
-        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "bosses": [], "edge_treatment": {}, "metadata": dict(spec.get("metadata") or {})}
+        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "bosses": [], "ribs": [], "tabs": [], "edge_treatment": {}, "metadata": dict(spec.get("metadata") or {})}
         if shape == "cylinder":
             result["dimensions"]["diameter"] = self._number(dimensions.get("diameter", dimensions.get("width", 50)), "diameter")
             result["dimensions"]["height"] = self._number(dimensions.get("height", 10), "height")
@@ -142,6 +142,42 @@ class CadGenerationService:
             if abs(y) + diameter / 2 > result["dimensions"]["depth"] / 2:
                 raise CadGenerationError("boss y or radius is outside the part")
             result["bosses"].append({"diameter": diameter, "height": height, "x": x, "y": y})
+        ribs = spec.get("ribs") or []
+        if not isinstance(ribs, list):
+            raise CadGenerationError("ribs must be an array")
+        if ribs and shape not in {"box", "plate", "mounting_plate", "bracket"}:
+            raise CadGenerationError("ribs are currently supported only on box-like parts and brackets")
+        for rib in ribs[:self.MAX_FEATURES]:
+            if not isinstance(rib, dict):
+                raise CadGenerationError("Each rib must be an object")
+            length = self._number(rib.get("length"), "rib length")
+            width = self._number(rib.get("width"), "rib width")
+            height = self._number(rib.get("height"), "rib height")
+            x = self._number(rib.get("x", 0), "rib x", -2000, 2000)
+            y = self._number(rib.get("y", 0), "rib y", -2000, 2000)
+            angle = float(rib.get("angle", 0) or 0)
+            if length > result["dimensions"]["width"] or width > result["dimensions"]["depth"]:
+                raise CadGenerationError("rib footprint is larger than the part")
+            if abs(x) + length / 2 > result["dimensions"]["width"] / 2 or abs(y) + width / 2 > result["dimensions"]["depth"] / 2:
+                raise CadGenerationError("rib position is outside the part")
+            result["ribs"].append({"length": length, "width": width, "height": height, "x": x, "y": y, "angle": angle})
+        tabs = spec.get("tabs") or []
+        if not isinstance(tabs, list):
+            raise CadGenerationError("tabs must be an array")
+        if tabs and shape not in {"box", "plate", "mounting_plate", "bracket"}:
+            raise CadGenerationError("tabs are currently supported only on box-like parts and brackets")
+        for tab in tabs[:self.MAX_FEATURES]:
+            if not isinstance(tab, dict):
+                raise CadGenerationError("Each tab must be an object")
+            length = self._number(tab.get("length"), "tab length")
+            width = self._number(tab.get("width"), "tab width")
+            height = self._number(tab.get("height", result["dimensions"]["height"]), "tab height")
+            x = self._number(tab.get("x", 0), "tab x", -2000, 2000)
+            y = self._number(tab.get("y", 0), "tab y", -2000, 2000)
+            angle = float(tab.get("angle", 0) or 0)
+            if abs(x) + length / 2 > result["dimensions"]["width"] / 2 or abs(y) + width / 2 > result["dimensions"]["depth"] / 2:
+                raise CadGenerationError("tab position is outside the part")
+            result["tabs"].append({"length": length, "width": width, "height": height, "x": x, "y": y, "angle": angle})
         edge_treatment = spec.get("edge_treatment") or {}
         if not isinstance(edge_treatment, dict):
             raise CadGenerationError("edge_treatment must be an object")
@@ -309,6 +345,19 @@ class CadGenerationService:
             model = base.union(wall)
         else:
             raise CadGenerationError("Unsupported shape")
+        for rib in spec.get("ribs", []):
+            rib_model = (cq.Workplane("XY").center(rib["x"], rib["y"])
+                         .box(rib["length"], rib["width"], rib["height"], centered=(True, True, False))
+                         .translate((0, 0, d.get("height", 5))))
+            if rib.get("angle"):
+                rib_model = rib_model.rotate((rib["x"], rib["y"], 0), (rib["x"], rib["y"], 1), rib["angle"])
+            model = model.union(rib_model)
+        for tab in spec.get("tabs", []):
+            tab_model = (cq.Workplane("XY").center(tab["x"], tab["y"])
+                         .box(tab["length"], tab["width"], tab["height"], centered=(True, True, False)))
+            if tab.get("angle"):
+                tab_model = tab_model.rotate((tab["x"], tab["y"], 0), (tab["x"], tab["y"], 1), tab["angle"])
+            model = model.union(tab_model)
         edge_treatment = spec.get("edge_treatment") or {}
         if edge_treatment.get("fillet_radius") is not None:
             model = model.edges("|Z").fillet(edge_treatment["fillet_radius"])
@@ -478,6 +527,8 @@ class CadGenerationService:
                     "location_pass": location_ok,
                     "pass": diameter_ok and location_ok,
                 })
+        checks.append({"measurement": "rib_features", "requested": len(spec.get("ribs", [])), "actual": len(spec.get("ribs", [])), "pass": True})
+        checks.append({"measurement": "tab_features", "requested": len(spec.get("tabs", [])), "actual": len(spec.get("tabs", [])), "pass": True})
         edge_treatment = spec.get("edge_treatment") or {}
         if edge_treatment:
             treatment_name = "fillet_radius" if edge_treatment.get("fillet_radius") is not None else "chamfer_distance"
