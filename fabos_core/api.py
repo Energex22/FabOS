@@ -435,7 +435,15 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     @app.get("/api/v1/customer/cad/jobs")
     def customer_cad_jobs(limit: int = 50, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         try:
-            return {"jobs": application.cad_generation.list_jobs(user["id"], limit=limit)}
+            jobs = application.cad_generation.list_jobs(user["id"], limit=limit)
+            for job in jobs:
+                job["artifacts"] = [
+                    {"format": item.get("format"), "bytes": item.get("bytes"),
+                     "url": "/api/v1/customer/cad/artifacts/%s/%s" % (job["id"], item.get("format"))}
+                    for item in (job.get("artifacts") or [])
+                    if item.get("format") in {"stl", "step", "3mf"}
+                ]
+            return {"jobs": jobs}
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="Invalid CAD history limit")
 
@@ -446,13 +454,19 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         result = application.cad_generation.get_job(job_id, owner_id=user["id"])
         if not result:
             raise HTTPException(status_code=404, detail="CAD job not found")
+        result["artifacts"] = [
+            {"format": item.get("format"), "bytes": item.get("bytes"),
+             "url": "/api/v1/customer/cad/artifacts/%s/%s" % (job_id, item.get("format"))}
+            for item in (result.get("artifacts") or [])
+            if item.get("format") in {"stl", "step", "3mf"}
+        ]
         return result
 
     @app.get("/api/v1/customer/cad/artifacts/{job_id}/{fmt}")
     def customer_cad_artifact(job_id: str, fmt: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         if not re.fullmatch(r"[0-9a-fA-F-]{20,80}", job_id):
             raise HTTPException(status_code=404, detail="CAD artifact not found")
-        if fmt.lower() not in {"stl", "step"}:
+        if fmt.lower() not in {"stl", "step", "3mf"}:
             raise HTTPException(status_code=404, detail="CAD artifact not found")
         root = application.cad_generation.root.resolve()
         target = (root / job_id / ("model." + fmt.lower())).resolve()
