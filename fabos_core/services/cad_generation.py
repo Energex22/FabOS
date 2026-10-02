@@ -309,14 +309,14 @@ class CadGenerationService:
         # hole, inspect the resulting solid's cylindrical faces so we can verify the
         # modeled diameter and approximate center rather than merely echoing the spec.
         hole_checks = []
-        if spec.get("holes"):
-            circles = []
-            for face in shape.Faces():
+        circles = []
+        for face in shape.Faces():
                 try:
                     if face.geomType() == "CYLINDER":
                         circles.append(face)
-                except Exception:
-                    continue
+            except Exception:
+                continue
+        if spec.get("holes"):
             for requested in spec["holes"]:
                 target_r = requested["diameter"] / 2.0
                 candidates = []
