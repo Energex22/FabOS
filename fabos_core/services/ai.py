@@ -302,7 +302,7 @@ class AIService:
             raise ValueError("Design prompt is required")
         system = (
             "You convert 3D-printing part descriptions into a strict JSON CAD specification. "
-            "Return JSON only. Allowed shapes: box, plate, cylinder, ring, bracket, mounting_plate. "
+            "Return JSON only. Allowed shapes: box, plate, cylinder, ring, bracket, mounting_plate, flange. "
             "All dimensions are millimeters. Never invent a measurement when the user supplied one; "
             "use conservative primitive defaults only when a dimension is genuinely omitted. "
             "JSON schema: {shape:string, dimensions:{width?:number,depth?:number,height:number, "
