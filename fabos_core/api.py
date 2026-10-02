@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from fabos_core.application import FabOSApplication
 from fabos_core.services.admin_api import register_admin_routes
 from fabos_core.services.customer_api_writes import register_customer_write_routes
+from fabos_core.services.design_proofs_api import register_design_proof_routes
 from fabos_core.services.payment_api import register_payment_routes
 
 
@@ -502,6 +503,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
 
     register_admin_routes(app, get_application, administrator_user)
     register_customer_write_routes(app, get_application, customer_user)
+    register_design_proof_routes(app, get_application, customer_user, administrator_user)
     register_payment_routes(app, get_application, administrator_user)
     return app
 
