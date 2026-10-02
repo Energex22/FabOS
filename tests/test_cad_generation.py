@@ -37,6 +37,16 @@ class CadGenerationTests(unittest.TestCase):
             self.service.normalize_spec({"shape": "plate", "dimensions": {"width": 50, "depth": 40, "height": 5},
                                          "holes": [{"diameter": 5, "x": 100, "y": 0}]})
 
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_flange_generation_and_bolt_pattern(self):
+        result = self.service.generate(
+            prompt="Create an 80 x 20 x 8 mm flange with a 20 mm bore and 4 bolt holes."
+        )
+        self.assertEqual(result["spec"]["shape"], "flange")
+        self.assertEqual(len(result["spec"]["holes"]), 5)
+        self.assertTrue(result["verification"]["passed"])
+        self.assertTrue(all(item["pass"] for item in result["verification"]["holes"]))
+
     def test_job_history_is_scoped_to_user(self):
         db_file = Path(self.temp.name) / "cad.sqlite3"
 
