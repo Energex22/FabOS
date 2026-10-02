@@ -287,8 +287,8 @@ class CadGenerationService:
         limit = max(1, min(int(limit or 50), 100))
         with self.database.connect() as conn:
             rows = conn.execute(
-                "SELECT id,owner_id,status,prompt,spec_json,verification_json,artifacts_json,error,created_at,updated_at "
-                "FROM cad_generation_jobs WHERE owner_id=? ORDER BY created_at DESC LIMIT ?",
+                "SELECT id,user_id,status,prompt,spec_json,verification_json,artifacts_json,error,created_at,updated_at "
+                "FROM cad_generation_jobs WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
                 (owner_id, limit),
             ).fetchall()
         return [self._job_payload(row) for row in rows]
