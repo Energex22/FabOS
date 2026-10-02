@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,6 +36,45 @@ class CadGenerationTests(unittest.TestCase):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({"shape": "plate", "dimensions": {"width": 50, "depth": 40, "height": 5},
                                          "holes": [{"diameter": 5, "x": 100, "y": 0}]})
+
+    def test_job_history_is_scoped_to_user(self):
+        db_file = Path(self.temp.name) / "cad.sqlite3"
+
+        class Database:
+            def connect(self):
+                conn = sqlite3.connect(str(db_file))
+                conn.row_factory = sqlite3.Row
+                return conn
+
+        with Database().connect() as conn:
+            conn.execute("""CREATE TABLE cad_generation_jobs(
+                id TEXT PRIMARY KEY,
+                user_id TEXT,
+                status TEXT,
+                prompt TEXT,
+                spec_json TEXT,
+                verification_json TEXT,
+                artifacts_json TEXT,
+                error TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.execute(
+                "INSERT INTO cad_generation_jobs(id,user_id,status,prompt,spec_json,verification_json,artifacts_json) "
+                "VALUES(?,?,?,?,?,?,?)",
+                ("job-a", "user-a", "completed", "A", '{"shape":"box"}', '{}', '[]'),
+            )
+            conn.execute(
+                "INSERT INTO cad_generation_jobs(id,user_id,status,prompt,spec_json,verification_json,artifacts_json) "
+                "VALUES(?,?,?,?,?,?,?)",
+                ("job-b", "user-b", "completed", "B", '{"shape":"plate"}', '{}', '[]'),
+            )
+            conn.commit()
+
+        service = CadGenerationService(settings=SimpleNamespace(data_dir=self.temp.name), database=Database())
+        jobs = service.list_jobs("user-a")
+        self.assertEqual([job["id"] for job in jobs], ["job-a"])
+        self.assertEqual(jobs[0]["spec"]["shape"], "box")
 
     @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_ring_dimensions(self):
