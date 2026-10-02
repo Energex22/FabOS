@@ -354,6 +354,26 @@ class CadGenerationService:
             return None
         return self._job_payload(row)
 
+    def list_printers(self):
+        if self.database is None:
+            return []
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                "SELECT id,name,build_x_mm,build_y_mm,build_z_mm FROM printers ORDER BY name"
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "build_volume_mm": {
+                    "x": float(row["build_x_mm"] or 0),
+                    "y": float(row["build_y_mm"] or 0),
+                    "z": float(row["build_z_mm"] or 0),
+                },
+            }
+            for row in rows
+        ]
+
     def preflight(self, spec=None, prompt=None, printer_id=None):
         spec = self.interpret_prompt(prompt) if spec is None else self.normalize_spec(spec)
         model = self._cadquery_model(spec)
