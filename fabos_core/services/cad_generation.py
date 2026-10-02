@@ -283,8 +283,19 @@ class CadGenerationService:
         checks.append({"measurement": "hole_features", "requested": len(spec.get("holes", [])),
                        "actual": len(hole_checks), "pass": len(hole_checks) == len(spec.get("holes", [])) and
                        all(item["pass"] for item in hole_checks)})
-        checks.append({"measurement": "watertight", "actual": bool(shape.isValid()), "pass": bool(shape.isValid())})
-        checks.append({"measurement": "solid_valid", "actual": bool(shape.isValid()), "pass": bool(shape.isValid())})
+        valid = bool(shape.isValid())
+        try:
+            solids = list(shape.Solids())
+            closed_shells = []
+            for solid in solids:
+                for shell in solid.Shells():
+                    checker = getattr(shell, "isClosed", None)
+                    closed_shells.append(bool(checker()) if callable(checker) else valid)
+            watertight = valid and len(solids) == 1 and bool(closed_shells) and all(closed_shells)
+        except Exception:
+            watertight = valid
+        checks.append({"measurement": "watertight", "actual": watertight, "pass": watertight})
+        checks.append({"measurement": "solid_valid", "actual": valid, "pass": valid})
         return {"passed": all(x["pass"] for x in checks), "checks": checks, "holes": hole_checks}
 
     def _save_job(self, job_id, owner_id, status, prompt, spec=None, verification=None, artifacts=None, error=None):
