@@ -27,7 +27,15 @@ The development server binds to `127.0.0.1:8000`. `FABOS_CORS_ORIGINS` may be se
 - `PATCH /api/v1/customer/me`
 - `GET /api/v1/customer/quotes`
 - `GET /api/v1/customer/quotes/{quote_id}`
+- `POST /api/v1/customer/quotes/{quote_id}/accept`
+- `POST /api/v1/customer/quotes/{quote_id}/decline`
 - `POST /api/v1/customer/quotes`
+- `GET /api/v1/admin/quotes`
+- `GET /api/v1/admin/quotes/{quote_id}`
+- `PUT /api/v1/admin/quotes/{quote_id}`
+- `GET /api/v1/admin/customers`
+- `POST /api/v1/admin/customers`
+- `POST /api/v1/admin/orders/{order_id}/start-production`
 - `POST /api/v1/quote-requests`
 - `POST /api/v1/quote-requests/upload`
 - `GET /api/v1/customer/orders`
@@ -40,6 +48,10 @@ Payment-provider webhooks and physical-sale payment ingestion are internal integ
 ## Catalog eligibility
 
 The public catalog is generated from FabOS's catalog source of truth. A product is exposed to customers only when its storefront visibility is `published`, it has a usable printable model, it has a positive customer price, and its license status is commercially acceptable.
+
+Customer quote acceptance is server-enforced: a customer can accept or decline only their own quote after FabOS has placed it in `sent` status. An accepted quote is converted to its server-side order; internal production state remains administrator-only.
+
+Quote edits create immutable `quote_versions` snapshots so price, notes, expiration, and line-item history can be audited without trusting browser state.
 
 The customer API deliberately strips internal production files, license metadata, source URLs, and designer/internal provenance fields from the public product representation.
 
