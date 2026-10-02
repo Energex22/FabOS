@@ -63,6 +63,36 @@ class CadGenerationTests(unittest.TestCase):
             })
 
     @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_countersink_generation_verifies_head_geometry(self):
+        result = self.service.generate(spec={
+            "shape": "plate",
+            "dimensions": {"width": 80, "depth": 50, "height": 8},
+            "holes": [{"diameter": 4, "x": 10, "y": 5, "head_type": "countersink", "head_diameter": 9, "head_depth": 2}],
+        }, output_formats=["step"])
+        self.assertTrue(result["verification"]["passed"])
+        hole = result["verification"]["holes"][0]
+        self.assertEqual(hole["head_type"], "countersink")
+        self.assertTrue(hole["head_diameter_pass"])
+        self.assertTrue(hole["head_depth_pass"])
+        self.assertAlmostEqual(hole["actual_head_diameter_mm"], 9.0, places=2)
+        self.assertAlmostEqual(hole["actual_head_depth_mm"], 2.0, places=2)
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_counterbore_generation_verifies_head_geometry(self):
+        result = self.service.generate(spec={
+            "shape": "plate",
+            "dimensions": {"width": 80, "depth": 50, "height": 8},
+            "holes": [{"diameter": 4, "x": 10, "y": 5, "head_type": "counterbore", "head_diameter": 8, "head_depth": 3}],
+        }, output_formats=["step"])
+        self.assertTrue(result["verification"]["passed"])
+        hole = result["verification"]["holes"][0]
+        self.assertEqual(hole["head_type"], "counterbore")
+        self.assertTrue(hole["head_diameter_pass"])
+        self.assertTrue(hole["head_depth_pass"])
+        self.assertAlmostEqual(hole["actual_head_diameter_mm"], 8.0, places=2)
+        self.assertAlmostEqual(hole["actual_head_depth_mm"], 3.0, places=2)
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_counterbore_generation(self):
         result = self.service.generate(spec={
             "shape": "plate",
