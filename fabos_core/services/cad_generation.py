@@ -112,6 +112,8 @@ class CadGenerationService:
         slots = spec.get("slots") or []
         if not isinstance(slots, list):
             raise CadGenerationError("slots must be an array")
+        if slots and shape in {"cylinder", "ring", "flange"}:
+            raise CadGenerationError("slots are currently supported only on box-like parts")
         for slot in slots[:self.MAX_FEATURES]:
             if not isinstance(slot, dict):
                 raise CadGenerationError("Each slot must be an object")
