@@ -20,7 +20,7 @@ class CadGenerationError(ValueError):
 
 
 class CadGenerationService:
-    SHAPES = {"box", "plate", "cylinder", "ring", "bracket", "mounting_plate"}
+    SHAPES = {"box", "plate", "cylinder", "ring", "bracket", "mounting_plate", "flange"}
 
     def __init__(self, settings=None, database=None, ai=None, design_vault=None):
         self.settings = settings
@@ -69,6 +69,21 @@ class CadGenerationService:
         if shape == "cylinder":
             result["dimensions"]["diameter"] = self._number(dimensions.get("diameter", dimensions.get("width", 50)), "diameter")
             result["dimensions"]["height"] = self._number(dimensions.get("height", 10), "height")
+        elif shape == "flange":
+            outer = self._number(dimensions.get("outer_diameter", dimensions.get("diameter", 80)), "outer_diameter")
+            bore = self._number(dimensions.get("bore_diameter", dimensions.get("inner_diameter", 20)), "bore_diameter")
+            if bore >= outer:
+                raise CadGenerationError("bore_diameter must be smaller than outer_diameter")
+            result["dimensions"].update({
+                "outer_diameter": outer,
+                "bore_diameter": bore,
+                "height": self._number(dimensions.get("height", 8), "height"),
+                "bolt_circle_diameter": self._number(dimensions.get("bolt_circle_diameter", outer * 0.7), "bolt_circle_diameter"),
+                "bolt_hole_diameter": self._number(dimensions.get("bolt_hole_diameter", 5), "bolt_hole_diameter"),
+                "bolt_hole_count": max(2, min(32, int(dimensions.get("bolt_hole_count", 4)))),
+            })
+            if result["dimensions"]["bolt_circle_diameter"] >= outer:
+                raise CadGenerationError("bolt_circle_diameter must be smaller than outer_diameter")
         elif shape == "ring":
             outer = self._number(dimensions.get("outer_diameter", dimensions.get("diameter", 50)), "outer_diameter")
             inner = self._number(dimensions.get("inner_diameter", 25), "inner_diameter")
@@ -93,6 +108,18 @@ class CadGenerationService:
                 "x": self._number(hole.get("x", 0), "hole x", -2000, 2000),
                 "y": self._number(hole.get("y", 0), "hole y", -2000, 2000),
             })
+        if shape == "flange" and not result["holes"]:
+            import math
+            d = result["dimensions"]
+            result["holes"].append({"diameter": d["bore_diameter"], "x": 0.0, "y": 0.0})
+            radius = d["bolt_circle_diameter"] / 2.0
+            for index in range(d["bolt_hole_count"]):
+                angle = (2.0 * math.pi * index) / d["bolt_hole_count"]
+                result["holes"].append({
+                    "diameter": d["bolt_hole_diameter"],
+                    "x": radius * math.cos(angle),
+                    "y": radius * math.sin(angle),
+                })
         if shape == "mounting_plate" and not result["holes"]:
             w, d = result["dimensions"]["width"], result["dimensions"]["depth"]
             inset = min(w, d) * 0.125
@@ -121,6 +148,8 @@ class CadGenerationService:
             shape = "mounting_plate"
         elif "bracket" in lowered:
             shape = "bracket"
+        elif "flange" in lowered:
+            shape = "flange"
         elif "ring" in lowered or "washer" in lowered:
             shape = "ring"
         elif "cylinder" in lowered or "round post" in lowered:
@@ -141,6 +170,8 @@ class CadGenerationService:
             spec = {"shape": shape, "dimensions": {"diameter": float(match.group(1)) if match else dims[0], "height": dims[-1]}}
         elif shape == "ring":
             spec = {"shape": shape, "dimensions": {"outer_diameter": dims[0], "inner_diameter": dims[1] if dims[1] < dims[0] else dims[0] / 2, "height": dims[2]}}
+        elif shape == "flange":
+            spec = {"shape": shape, "dimensions": {"outer_diameter": dims[0], "bore_diameter": dims[1] if dims[1] < dims[0] else dims[0] / 4, "height": dims[2]}}
         else:
             spec = {"shape": shape, "dimensions": {"width": dims[0], "depth": dims[1], "height": dims[2]}}
             count = re.search(r"(\d+)\s*(?:mounting\s+)?holes?", lowered)
@@ -169,6 +200,8 @@ class CadGenerationService:
         d, shape = spec["dimensions"], spec["shape"]
         if shape in {"box", "plate", "mounting_plate"}:
             model = cq.Workplane("XY").box(d["width"], d["depth"], d["height"], centered=(True, True, False))
+        elif shape == "flange":
+            model = cq.Workplane("XY").circle(d["outer_diameter"] / 2).extrude(d["height"])
         elif shape == "cylinder":
             model = cq.Workplane("XY").circle(d["diameter"] / 2).extrude(d["height"])
         elif shape == "ring":
