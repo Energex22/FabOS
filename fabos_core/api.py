@@ -126,7 +126,7 @@ class LoginRequest(BaseModel):
 class CadGenerationRequest(BaseModel):
     prompt: Optional[str] = Field(default=None, max_length=12000)
     spec: Optional[Dict[str, Any]] = None
-    output_formats: List[str] = Field(default_factory=lambda: ["stl", "step"])
+    output_formats: List[str] = Field(default_factory=lambda: ["stl", "step", "3mf"])
     printer_id: Optional[str] = Field(default=None, max_length=128)
 
 class CadRevisionRequest(BaseModel):
