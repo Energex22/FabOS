@@ -301,6 +301,25 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual([job["id"] for job in jobs], ["job-a"])
         self.assertEqual(jobs[0]["spec"]["shape"], "box")
 
+    def test_counterbore_verification_reports_depth(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 60, "depth": 40, "height": 10},
+            "holes": [{"diameter": 5, "x": 0, "y": 0, "head_type": "counterbore", "head_diameter": 10, "head_depth": 3}],
+        })
+        self.assertEqual(spec["holes"][0]["head_depth"], 3.0)
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_boss_verification_includes_height(self):
+        result = self.service.generate(spec={
+            "shape": "plate",
+            "dimensions": {"width": 60, "depth": 40, "height": 5},
+            "bosses": [{"diameter": 10, "height": 8, "x": 0, "y": 0}],
+        }, output_formats=["step"])
+        self.assertTrue(result["verification"]["passed"])
+        check = next(c for c in result["verification"]["checks"] if c["measurement"] == "boss_features")
+        self.assertTrue(check["details"][0]["height_pass"])
+
     def test_rejects_overlapping_holes(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
