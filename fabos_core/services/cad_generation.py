@@ -99,6 +99,29 @@ class CadGenerationService:
         distance = math.hypot(local_x - closest_x, local_y - closest_y)
         return distance < circle["diameter"] / 2.0
 
+    @staticmethod
+    def _validate_reference_metadata(metadata):
+        """Reject reference-derived CAD until its dimensions are sufficiently constrained."""
+        if not isinstance(metadata, dict) or not metadata.get("reference_analysis"):
+            return
+        if not bool(metadata.get("scale_confirmed")):
+            raise CadGenerationError(
+                "Reference-derived CAD requires a confirmed physical or drawing scale before generation"
+            )
+        missing = metadata.get("missing_dimensions") or []
+        if missing:
+            raise CadGenerationError(
+                "Reference-derived CAD is missing required measurements: %s" % ", ".join(str(item) for item in missing[:8])
+            )
+        uncertainties = metadata.get("feature_uncertainties") or []
+        if uncertainties or bool(metadata.get("needs_user_confirmation")):
+            raise CadGenerationError(
+                "Reference-derived CAD has unresolved geometry that requires user confirmation"
+            )
+        scale_source = str(metadata.get("scale_source") or "").strip().lower()
+        if scale_source not in {"drawing_dimension", "user_measurement", "physical_scale_reference"}:
+            raise CadGenerationError("Reference-derived CAD requires a recognized scale source")
+
     def normalize_spec(self, spec):
         if not isinstance(spec, dict):
             raise CadGenerationError("Design specification must be an object")
@@ -108,7 +131,9 @@ class CadGenerationService:
         dimensions = spec.get("dimensions") or {}
         if not isinstance(dimensions, dict):
             raise CadGenerationError("dimensions must be an object")
-        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "bosses": [], "ribs": [], "tabs": [], "internal_posts": [], "dividers": [], "cable_openings": [], "lid_interface": {}, "edge_treatment": {}, "metadata": dict(spec.get("metadata") or {})}
+        metadata = dict(spec.get("metadata") or {})
+        self._validate_reference_metadata(metadata)
+        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "bosses": [], "ribs": [], "tabs": [], "internal_posts": [], "dividers": [], "cable_openings": [], "lid_interface": {}, "edge_treatment": {}, "metadata": metadata}
         if shape == "cylinder":
             result["dimensions"]["diameter"] = self._number(dimensions.get("diameter", dimensions.get("width", 50)), "diameter")
             result["dimensions"]["height"] = self._number(dimensions.get("height", 10), "height")
