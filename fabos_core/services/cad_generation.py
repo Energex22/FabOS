@@ -433,6 +433,8 @@ class CadGenerationService:
         lowered = text.lower()
         if "mounting plate" in lowered:
             shape = "mounting_plate"
+        elif "enclosure" in lowered or "case" in lowered or "housing" in lowered:
+            shape = "enclosure"
         elif "bracket" in lowered:
             shape = "bracket"
         elif "flange" in lowered:
