@@ -618,7 +618,7 @@ class CadGenerationTests(unittest.TestCase):
             self.service.normalize_spec({
                 "shape": "enclosure",
                 "dimensions": {"width": 60, "depth": 50, "height": 30, "wall_thickness": 3, "floor_thickness": 4},
-                "dividers": [{"length": 55, "thickness": 4, "height": 20, "x": 0, "y": 0, "angle": 45}],
+                "dividers": [{"length": 65, "thickness": 4, "height": 20, "x": 0, "y": 0, "angle": 45}],
             })
 
     def test_rejects_cable_opening_outside_wall_span(self):
