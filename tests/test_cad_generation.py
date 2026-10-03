@@ -301,6 +301,72 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual([job["id"] for job in jobs], ["job-a"])
         self.assertEqual(jobs[0]["spec"]["shape"], "box")
 
+    def test_job_detail_isolated_by_owner(self):
+        db_file = Path(self.temp.name) / "cad-detail.sqlite3"
+
+        class Database:
+            def connect(self):
+                conn = sqlite3.connect(str(db_file))
+                conn.row_factory = sqlite3.Row
+                return conn
+
+        with Database().connect() as conn:
+            conn.execute("""CREATE TABLE cad_generation_jobs(
+                id TEXT PRIMARY KEY,
+                user_id TEXT,
+                status TEXT,
+                prompt TEXT,
+                spec_json TEXT,
+                verification_json TEXT,
+                artifacts_json TEXT,
+                error TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.execute(
+                "INSERT INTO cad_generation_jobs(id,user_id,status,prompt,spec_json,verification_json,artifacts_json) "
+                "VALUES(?,?,?,?,?,?,?)",
+                ("job-a", "user-a", "completed", "A", '{"shape":"box"}', '{}', '[]'),
+            )
+            conn.commit()
+
+        service = CadGenerationService(settings=SimpleNamespace(data_dir=self.temp.name), database=Database())
+        self.assertIsNotNone(service.get_job("job-a", owner_id="user-a"))
+        self.assertIsNone(service.get_job("job-a", owner_id="user-b"))
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_preflight_rejects_model_that_exceeds_printer_volume(self):
+        db_file = Path(self.temp.name) / "printer.sqlite3"
+
+        class Database:
+            def connect(self):
+                conn = sqlite3.connect(str(db_file))
+                conn.row_factory = sqlite3.Row
+                return conn
+
+        with Database().connect() as conn:
+            conn.execute("""CREATE TABLE printers(
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                build_x_mm REAL,
+                build_y_mm REAL,
+                build_z_mm REAL
+            )""")
+            conn.execute(
+                "INSERT INTO printers(id,name,build_x_mm,build_y_mm,build_z_mm) VALUES(?,?,?,?,?)",
+                ("tiny", "Tiny Printer", 50, 50, 50),
+            )
+            conn.commit()
+
+        service = CadGenerationService(settings=SimpleNamespace(data_dir=self.temp.name), database=Database())
+        result = service.preflight(
+            spec={"shape": "box", "dimensions": {"width": 80, "depth": 40, "height": 20}},
+            printer_id="tiny",
+        )
+        self.assertFalse(result["printer"]["fits_build_volume"])
+        self.assertFalse(result["printable"])
+        self.assertTrue(result["warnings"])
+
     def test_counterbore_verification_reports_depth(self):
         spec = self.service.normalize_spec({
             "shape": "plate",
