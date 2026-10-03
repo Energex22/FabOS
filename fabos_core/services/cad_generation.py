@@ -424,7 +424,6 @@ class CadGenerationService:
                         y = origin_y + (iy - (count_y - 1) / 2.0) * spacing_y
                         result["holes"].append({"diameter": diameter, "x": x, "y": y, "head_type": "", "head_diameter": None, "head_depth": None})
             else:
-                import math
                 count = max(2, min(self.MAX_FEATURES, int(mounting_pattern.get("count", 4))))
                 radius = self._number(mounting_pattern.get("radius", 20), "mounting pattern radius")
                 center_x = float(mounting_pattern.get("center_x", 0) or 0)
@@ -439,7 +438,6 @@ class CadGenerationService:
                         "head_type": "", "head_diameter": None, "head_depth": None,
                     })
         if shape == "flange" and not result["holes"]:
-            import math
             d = result["dimensions"]
             result["holes"].append({"diameter": d["bore_diameter"], "x": 0.0, "y": 0.0})
             radius = d["bolt_circle_diameter"] / 2.0
@@ -620,7 +618,7 @@ class CadGenerationService:
             if d.get("corner_radius", 0):
                 inner = inner.edges("|Z").fillet(max(0.01, d["corner_radius"] - d["wall_thickness"]))
             model = outer.cut(inner)
-        if shape == "enclosure":
+        elif shape == "enclosure":
             for post in spec.get("internal_posts", []):
                 post_model = cq.Workplane("XY").center(post["x"], post["y"]).circle(post["diameter"] / 2).extrude(post["height"])
                 if post.get("bore_diameter"):
