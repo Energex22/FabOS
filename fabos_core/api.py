@@ -376,7 +376,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
 
     @app.post("/api/v1/customer/cad/analyze-reference")
     async def customer_cad_analyze_reference(
-        reference_note: str = "",
+        reference_note: str = Form(default=""),
         files: List[UploadFile] = File(default=[]),
         user: Any = Depends(customer_user),
         application: FabOSApplication = Depends(get_application),
