@@ -480,6 +480,37 @@ class CadGenerationTests(unittest.TestCase):
                 "internal_posts": [{"diameter": 10, "height": 37, "x": 0, "y": 0}],
             })
 
+    def test_rejects_internal_post_overlapping_divider(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+                "internal_posts": [{"diameter": 10, "height": 20, "x": 0, "y": 0}],
+                "dividers": [{"length": 50, "thickness": 4, "height": 20, "x": 0, "y": 0, "angle": 0}],
+            })
+
+    def test_rejects_overlapping_enclosure_dividers(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+                "dividers": [
+                    {"length": 50, "thickness": 4, "height": 20, "x": 0, "y": 0, "angle": 0},
+                    {"length": 40, "thickness": 4, "height": 20, "x": 10, "y": 0, "angle": 90},
+                ],
+            })
+
+    def test_allows_non_overlapping_rotated_enclosure_dividers(self):
+        spec = self.service.normalize_spec({
+            "shape": "enclosure",
+            "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+            "dividers": [
+                {"length": 30, "thickness": 4, "height": 20, "x": -25, "y": 0, "angle": 0},
+                {"length": 30, "thickness": 4, "height": 20, "x": 25, "y": 0, "angle": 45},
+            ],
+        })
+        self.assertEqual(len(spec["dividers"]), 2)
+
     def test_rejects_lid_lip_wall_that_collapses_interface(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
