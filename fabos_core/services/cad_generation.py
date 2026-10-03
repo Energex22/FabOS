@@ -414,7 +414,6 @@ class CadGenerationService:
                     raise CadGenerationError("slot x or length is outside the part")
                 if abs(slot["y"]) + radius > result["dimensions"]["depth"] / 2:
                     raise CadGenerationError("slot y or width is outside the part")
-        checks.append({"measurement": "internal_post_features", "requested": len(spec.get("internal_posts", [])), "actual": len(spec.get("internal_posts", [])), "pass": True})
         checks.append({"measurement": "divider_features", "requested": len(spec.get("dividers", [])), "actual": len(spec.get("dividers", [])), "pass": True})
         checks.append({"measurement": "cable_opening_features", "requested": len(spec.get("cable_openings", [])), "actual": len(spec.get("cable_openings", [])), "pass": True})
         checks.append({"measurement": "lid_interface", "requested": bool(spec.get("lid_interface")), "actual": bool(spec.get("lid_interface")), "pass": True})
