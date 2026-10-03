@@ -58,6 +58,47 @@ class CadGenerationService:
             raise CadGenerationError("%s must be between %s and %s mm" % (name, minimum, maximum))
         return result
 
+    @staticmethod
+    def _obb_overlap(a, b):
+        """Return True when two 2D oriented rectangles overlap."""
+        axes = []
+        for item in (a, b):
+            angle = math.radians(item["angle"] % 360.0)
+            ux = (math.cos(angle), math.sin(angle))
+            uy = (-math.sin(angle), math.cos(angle))
+            axes.extend((ux, uy))
+        for axis in axes:
+            ax, ay = axis
+            def project(rect):
+                angle = math.radians(rect["angle"] % 360.0)
+                ux = (math.cos(angle), math.sin(angle))
+                uy = (-math.sin(angle), math.cos(angle))
+                cx, cy = rect["x"], rect["y"]
+                radius = abs(ax * ux[0] + ay * ux[1]) * rect["length"] / 2.0
+                radius += abs(ax * uy[0] + ay * uy[1]) * rect["thickness"] / 2.0
+                center = ax * cx + ay * cy
+                return center - radius, center + radius
+            amin, amax = project(a)
+            bmin, bmax = project(b)
+            if amax <= bmin or bmax <= amin:
+                return False
+        return True
+
+    @staticmethod
+    def _circle_obb_overlap(circle, rect):
+        """Return True when a circle overlaps an oriented rectangle."""
+        angle = math.radians(rect["angle"] % 360.0)
+        ux = (math.cos(angle), math.sin(angle))
+        uy = (-math.sin(angle), math.cos(angle))
+        dx = circle["x"] - rect["x"]
+        dy = circle["y"] - rect["y"]
+        local_x = dx * ux[0] + dy * ux[1]
+        local_y = dx * uy[0] + dy * uy[1]
+        closest_x = max(-rect["length"] / 2.0, min(local_x, rect["length"] / 2.0))
+        closest_y = max(-rect["thickness"] / 2.0, min(local_y, rect["thickness"] / 2.0))
+        distance = math.hypot(local_x - closest_x, local_y - closest_y)
+        return distance < circle["diameter"] / 2.0
+
     def normalize_spec(self, spec):
         if not isinstance(spec, dict):
             raise CadGenerationError("Design specification must be an object")
@@ -284,6 +325,18 @@ class CadGenerationService:
             if lip_wall >= min(inner_w, inner_d) / 2:
                 raise CadGenerationError("lid lip wall is too large for the available lid interface")
             result["lid_interface"] = {"lip_height": lip_height, "clearance": clearance, "lip_wall": lip_wall}
+
+        if shape == "enclosure" and result["internal_posts"] and result["dividers"]:
+            for post in result["internal_posts"]:
+                circle = {"x": post["x"], "y": post["y"], "diameter": post["diameter"]}
+                for divider in result["dividers"]:
+                    if self._circle_obb_overlap(circle, divider):
+                        raise CadGenerationError("internal post overlaps an enclosure divider")
+        if shape == "enclosure" and len(result["dividers"]) > 1:
+            for index, divider in enumerate(result["dividers"]):
+                for other in result["dividers"][index + 1:]:
+                    if self._obb_overlap(divider, other):
+                        raise CadGenerationError("enclosure dividers overlap")
 
         edge_treatment = spec.get("edge_treatment") or {}
         if not isinstance(edge_treatment, dict):
