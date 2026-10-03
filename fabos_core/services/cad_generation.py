@@ -461,6 +461,10 @@ class CadGenerationService:
             spec = {"shape": shape, "dimensions": {"outer_diameter": dims[0], "inner_diameter": dims[1] if dims[1] < dims[0] else dims[0] / 2, "height": dims[2]}}
         elif shape == "flange":
             spec = {"shape": shape, "dimensions": {"outer_diameter": dims[0], "bore_diameter": dims[1] if dims[1] < dims[0] else dims[0] / 4, "height": dims[2]}}
+        elif shape == "enclosure":
+            wall_match = re.search(r"(\d+(?:\.\d+)?)\s*mm\s*(?:wall|walls|wall thickness|thick)", lowered)
+            wall = float(wall_match.group(1)) if wall_match else 2.0
+            spec = {"shape": shape, "dimensions": {"width": dims[0], "depth": dims[1], "height": dims[2], "wall_thickness": wall, "floor_thickness": wall}}
         else:
             spec = {"shape": shape, "dimensions": {"width": dims[0], "depth": dims[1], "height": dims[2]}}
             count = re.search(r"(\d+)\s*(?:mounting\s+)?holes?", lowered)
