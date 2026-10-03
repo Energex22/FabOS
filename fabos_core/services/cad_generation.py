@@ -492,9 +492,68 @@ class CadGenerationService:
                     raise CadGenerationError("slot x or length is outside the part")
                 if abs(slot["y"]) + radius > result["dimensions"]["depth"] / 2:
                     raise CadGenerationError("slot y or width is outside the part")
-        checks.append({"measurement": "divider_features", "requested": len(spec.get("dividers", [])), "actual": len(spec.get("dividers", [])), "pass": True})
-        checks.append({"measurement": "cable_opening_features", "requested": len(spec.get("cable_openings", [])), "actual": len(spec.get("cable_openings", [])), "pass": True})
-        checks.append({"measurement": "lid_interface", "requested": bool(spec.get("lid_interface")), "actual": bool(spec.get("lid_interface")), "pass": True})
+        # Verify enclosure internals against actual solid volume rather than trusting the request count.
+        # This catches regressions where a requested feature is normalized but the boolean operation
+        # does not actually change the generated geometry.
+        divider_requested = len(spec.get("dividers", []))
+        divider_volume_delta = 0.0
+        divider_pass = True
+        if shape == "enclosure" and divider_requested:
+            baseline = dict(spec)
+            baseline["dividers"] = []
+            try:
+                baseline_volume = float(self._cadquery_model(baseline).val().Volume())
+                actual_volume = float(model.val().Volume())
+                divider_volume_delta = actual_volume - baseline_volume
+                divider_pass = divider_volume_delta > 0.001
+            except Exception:
+                divider_pass = False
+        checks.append({
+            "measurement": "divider_geometry",
+            "requested": divider_requested,
+            "volume_delta_mm3": round(divider_volume_delta, 4),
+            "pass": divider_pass,
+        })
+
+        opening_requested = len(spec.get("cable_openings", []))
+        opening_volume_delta = 0.0
+        opening_pass = True
+        if shape == "enclosure" and opening_requested:
+            baseline = dict(spec)
+            baseline["cable_openings"] = []
+            try:
+                baseline_volume = float(self._cadquery_model(baseline).val().Volume())
+                actual_volume = float(model.val().Volume())
+                opening_volume_delta = baseline_volume - actual_volume
+                opening_pass = opening_volume_delta > 0.001
+            except Exception:
+                opening_pass = False
+        checks.append({
+            "measurement": "cable_opening_geometry",
+            "requested": opening_requested,
+            "volume_delta_mm3": round(opening_volume_delta, 4),
+            "pass": opening_pass,
+        })
+
+        lid_requested = bool(spec.get("lid_interface"))
+        lid_volume_delta = 0.0
+        lid_pass = True
+        if shape == "enclosure" and lid_requested:
+            baseline = dict(spec)
+            baseline["lid_interface"] = {}
+            try:
+                baseline_volume = float(self._cadquery_model(baseline).val().Volume())
+                actual_volume = float(model.val().Volume())
+                lid_volume_delta = actual_volume - baseline_volume
+                lid_pass = lid_volume_delta > 0.001
+            except Exception:
+                lid_pass = False
+        checks.append({
+            "measurement": "lid_interface_geometry",
+            "requested": lid_requested,
+            "volume_delta_mm3": round(lid_volume_delta, 4),
+            "pass": lid_pass,
+        })
         internal_post_checks = []
         if spec.get("internal_posts"):
             for requested in spec["internal_posts"]:
