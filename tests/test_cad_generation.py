@@ -301,6 +301,35 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual([job["id"] for job in jobs], ["job-a"])
         self.assertEqual(jobs[0]["spec"]["shape"], "box")
 
+    def test_rejects_overlapping_holes(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 60, "height": 5},
+                "holes": [
+                    {"diameter": 10, "x": 0, "y": 0},
+                    {"diameter": 8, "x": 7, "y": 0},
+                ],
+            })
+
+    def test_rejects_hole_overlapping_boss(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 60, "height": 5},
+                "holes": [{"diameter": 8, "x": 10, "y": 0}],
+                "bosses": [{"diameter": 12, "height": 5, "x": 12, "y": 0}],
+            })
+
+    def test_rejects_hole_overlapping_internal_post(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+                "holes": [{"diameter": 8, "x": 10, "y": 0}],
+                "internal_posts": [{"diameter": 12, "height": 20, "x": 12, "y": 0}],
+            })
+
     def test_rejects_hole_outside_cylinder(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
