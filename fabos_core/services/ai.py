@@ -351,13 +351,24 @@ class AIService:
         if not images:
             raise ValueError("At least one reference image is required")
         prompt = (
-            "Analyze these reference images for a 3D-printable part. Return JSON only using the same "
-            "CAD schema as design_spec_from_prompt. Do not invent exact dimensions from pixels. "
-            "Use only dimensions explicitly supplied in the reference note; if scale is insufficient, "
-            "put missing measurements in metadata.missing_dimensions and set metadata.scale_confirmed=false. "
-            "Describe visible geometry/features in metadata.features. Allowed shapes: box, plate, cylinder, "
-            "ring, bracket, mounting_plate, flange, enclosure. Enclosures are open-top boxes with wall_thickness and floor_thickness. "
-            "Bosses are cylindrical raised features on box-like parts. Ribs and tabs are rectangular raised features on box-like parts; preserve supplied dimensions and placement. Mounting patterns expand into explicit holes and support rectangular/grid or radial layouts. Enclosures may also use internal_posts for screw standoffs, dividers for internal compartments, cable_openings on the four side walls, and lid_interface for a removable-lid locating lip. Edge treatments may use one fillet_radius or one chamfer_distance on box-like parts. All dimensions are millimeters."
+            "Analyze these reference images as a dimensional CAD engineer. Return JSON only using the same CAD schema as design_spec_from_prompt. "
+            "First classify the references in metadata.reference_kind as photo, dimensioned_drawing, sketch, or mixed. "
+            "Separate metadata.explicit_dimensions (measurements visibly labeled or explicitly supplied in the reference note) from metadata.inferred_dimensions (estimates based on geometry). "
+            "Never treat pixel proportions, perspective, or visual scale as an exact measurement. "
+            "Set metadata.scale_confirmed=true only when a trustworthy scale source exists, such as labeled drawing dimensions or an explicitly supplied physical reference measurement. "
+            "Set metadata.scale_source to drawing_dimension, user_measurement, physical_scale_reference, or none. "
+            "For dimensioned drawings, extract every readable labeled dimension and use drawing views to resolve width/depth/height and feature locations. "
+            "For photos and ordinary sketches without a trustworthy scale, identify the measurements required to make a dimensionally accurate model and list them in metadata.missing_dimensions. "
+            "List unresolved critical geometry ambiguities in metadata.feature_uncertainties and set metadata.needs_user_confirmation=true when any critical ambiguity remains. "
+            "Set metadata.confidence to a number from 0 to 1 reflecting extraction confidence, not confidence that an unmeasured dimension is correct. "
+            "Do not invent exact dimensions from pixels. Use only dimensions explicitly supplied in the reference note or labeled in the reference. "
+            "If scale is insufficient, metadata.scale_confirmed must be false and direct generation must remain blocked. "
+            "Describe visible geometry/features in metadata.features. Allowed shapes: box, plate, cylinder, ring, bracket, mounting_plate, flange, enclosure. "
+            "Enclosures are open-top boxes with wall_thickness and floor_thickness. Bosses are cylindrical raised features on box-like parts. "
+            "Ribs and tabs are rectangular raised features on box-like parts; preserve supplied dimensions and placement. "
+            "Mounting patterns expand into explicit holes and support rectangular/grid or radial layouts. "
+            "Enclosures may also use internal_posts for screw standoffs, dividers for internal compartments, cable_openings on the four side walls, and lid_interface for a removable-lid locating lip. "
+            "Edge treatments may use one fillet_radius or one chamfer_distance on box-like parts. All dimensions are millimeters."
         )
         if reference_note:
             prompt += "\nReference measurements/context: " + str(reference_note).strip()[:4000]
@@ -378,4 +389,26 @@ class AIService:
         result = json.loads(raw)
         if not isinstance(result, dict):
             raise ValueError("AI CAD image response was not an object")
+        metadata = result.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        metadata.setdefault("reference_analysis", True)
+        metadata.setdefault("reference_kind", "mixed")
+        metadata.setdefault("scale_confirmed", False)
+        metadata.setdefault("scale_source", "none")
+        metadata.setdefault("confidence", 0.0)
+        metadata.setdefault("missing_dimensions", [])
+        metadata.setdefault("explicit_dimensions", {})
+        metadata.setdefault("inferred_dimensions", {})
+        metadata.setdefault("feature_uncertainties", [])
+        metadata.setdefault("needs_user_confirmation", False)
+        if not isinstance(metadata["missing_dimensions"], list):
+            metadata["missing_dimensions"] = [str(metadata["missing_dimensions"])]
+        if not isinstance(metadata["feature_uncertainties"], list):
+            metadata["feature_uncertainties"] = [str(metadata["feature_uncertainties"])]
+        try:
+            metadata["confidence"] = max(0.0, min(1.0, float(metadata.get("confidence", 0.0))))
+        except (TypeError, ValueError):
+            metadata["confidence"] = 0.0
+        result["metadata"] = metadata
         return result
