@@ -380,5 +380,23 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(result["verification"]["checks"][2]["actual_mm"], 40.0)
 
 
+    def test_printability_constraints_warn_by_default(self):
+        spec = self.service.normalize_spec({
+            "shape": "enclosure",
+            "dimensions": {"width": 60, "depth": 50, "height": 30, "wall_thickness": 0.5},
+            "print_constraints": {"nozzle_diameter": 0.4, "min_wall_thickness": 1.0},
+        })
+        self.assertTrue(spec["metadata"]["printability_warnings"])
+
+    def test_printability_constraints_strict_reject(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 60, "depth": 50, "height": 3},
+                "holes": [{"diameter": 0.3, "x": 0, "y": 0}],
+                "print_constraints": {"min_feature_size": 0.8, "strict": True},
+            })
+
+
 if __name__ == "__main__":
     unittest.main()
