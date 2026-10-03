@@ -36,6 +36,49 @@ class CadGenerationTests(unittest.TestCase):
         self.assertTrue(result["verification"]["passed"])
         self.assertTrue(any(a["format"] == "stl" for a in result["artifacts"]))
         self.assertTrue(any(a["format"] == "3mf" for a in result["artifacts"]))
+    def test_reference_cad_requires_confirmed_scale(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 60, "height": 5},
+                "metadata": {
+                    "reference_analysis": True,
+                    "scale_confirmed": False,
+                    "scale_source": "none",
+                    "missing_dimensions": ["hole spacing"],
+                },
+            })
+
+    def test_reference_cad_requires_all_measurements_and_confirmations(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 60, "height": 5},
+                "metadata": {
+                    "reference_analysis": True,
+                    "scale_confirmed": True,
+                    "scale_source": "user_measurement",
+                    "missing_dimensions": [],
+                    "feature_uncertainties": ["hole depth"],
+                    "needs_user_confirmation": True,
+                },
+            })
+
+    def test_reference_cad_accepts_fully_constrained_reference(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 100, "depth": 60, "height": 5},
+            "metadata": {
+                "reference_analysis": True,
+                "scale_confirmed": True,
+                "scale_source": "drawing_dimension",
+                "missing_dimensions": [],
+                "feature_uncertainties": [],
+                "needs_user_confirmation": False,
+            },
+        })
+        self.assertTrue(spec["metadata"]["reference_analysis"])
+
     def test_simple_revision_updates_existing_spec(self):
         original = {"shape": "plate", "dimensions": {"width": 100, "depth": 60, "height": 5}}
         revised = self.service._apply_simple_revision(original, "make the width 120 mm and thickness 6 mm")
