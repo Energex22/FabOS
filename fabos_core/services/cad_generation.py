@@ -505,7 +505,11 @@ class CadGenerationService:
                 baseline_volume = float(self._cadquery_model(baseline).val().Volume())
                 actual_volume = float(model.val().Volume())
                 divider_volume_delta = actual_volume - baseline_volume
-                divider_pass = divider_volume_delta > 0.001
+                expected_divider_volume = sum(
+                    float(item["length"]) * float(item["thickness"]) * float(item["height"])
+                    for item in spec.get("dividers", [])
+                )
+                divider_pass = divider_volume_delta > 0.001 and divider_volume_delta <= expected_divider_volume + max(0.1, expected_divider_volume * 0.02)
             except Exception:
                 divider_pass = False
         checks.append({
@@ -525,7 +529,14 @@ class CadGenerationService:
                 baseline_volume = float(self._cadquery_model(baseline).val().Volume())
                 actual_volume = float(model.val().Volume())
                 opening_volume_delta = baseline_volume - actual_volume
-                opening_pass = opening_volume_delta > 0.001
+                expected_opening_volume = sum(
+                    float(item["width"]) * float(spec["dimensions"]["wall_thickness"]) * float(item["height"])
+                    for item in spec.get("cable_openings", [])
+                )
+                opening_pass = (
+                    opening_volume_delta > 0.001
+                    and abs(opening_volume_delta - expected_opening_volume) <= max(0.1, expected_opening_volume * 0.03)
+                )
             except Exception:
                 opening_pass = False
         checks.append({
@@ -545,7 +556,16 @@ class CadGenerationService:
                 baseline_volume = float(self._cadquery_model(baseline).val().Volume())
                 actual_volume = float(model.val().Volume())
                 lid_volume_delta = actual_volume - baseline_volume
-                lid_pass = lid_volume_delta > 0.001
+                lid = spec["lid_interface"]
+                inner_w = spec["dimensions"]["width"] - 2 * spec["dimensions"]["wall_thickness"] - 2 * lid["clearance"]
+                inner_d = spec["dimensions"]["depth"] - 2 * spec["dimensions"]["wall_thickness"] - 2 * lid["clearance"]
+                cut_w = max(0.1, inner_w - 2 * lid["lip_wall"])
+                cut_d = max(0.1, inner_d - 2 * lid["lip_wall"])
+                expected_lid_volume = (inner_w * inner_d - cut_w * cut_d) * lid["lip_height"]
+                lid_pass = (
+                    lid_volume_delta > 0.001
+                    and abs(lid_volume_delta - expected_lid_volume) <= max(0.1, expected_lid_volume * 0.03)
+                )
             except Exception:
                 lid_pass = False
         checks.append({
