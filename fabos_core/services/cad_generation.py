@@ -203,6 +203,9 @@ class CadGenerationService:
                 raise CadGenerationError("Each internal post must be an object")
             diameter = self._number(post.get("diameter"), "internal post diameter")
             height = self._number(post.get("height", result["dimensions"]["height"] - result["dimensions"]["floor_thickness"]), "internal post height")
+            interior_height = result["dimensions"]["height"] - result["dimensions"]["floor_thickness"]
+            if height > interior_height:
+                raise CadGenerationError("internal post height exceeds the enclosure interior height")
             x = self._number(post.get("x", 0), "internal post x", -2000, 2000)
             y = self._number(post.get("y", 0), "internal post y", -2000, 2000)
             bore = post.get("bore_diameter")
@@ -228,10 +231,16 @@ class CadGenerationService:
             x = self._number(divider.get("x", 0), "divider x", -2000, 2000)
             y = self._number(divider.get("y", 0), "divider y", -2000, 2000)
             angle = float(divider.get("angle", 0) or 0)
-            if length > min(result["dimensions"]["width"] - 2 * result["dimensions"]["wall_thickness"], result["dimensions"]["depth"] - 2 * result["dimensions"]["wall_thickness"]):
-                raise CadGenerationError("divider is too long for the enclosure interior")
-            if abs(x) + length / 2 > result["dimensions"]["width"] / 2 - result["dimensions"]["wall_thickness"] or abs(y) + thickness / 2 > result["dimensions"]["depth"] / 2 - result["dimensions"]["wall_thickness"]:
-                raise CadGenerationError("divider position is outside the enclosure interior")
+            angle_radians = math.radians(angle % 360.0)
+            cos_a, sin_a = abs(math.cos(angle_radians)), abs(math.sin(angle_radians))
+            half_x = (length * cos_a + thickness * sin_a) / 2.0
+            half_y = (length * sin_a + thickness * cos_a) / 2.0
+            interior_half_w = result["dimensions"]["width"] / 2 - result["dimensions"]["wall_thickness"]
+            interior_half_d = result["dimensions"]["depth"] / 2 - result["dimensions"]["wall_thickness"]
+            if half_x > interior_half_w or half_y > interior_half_d:
+                raise CadGenerationError("divider footprint is too large for the enclosure interior at this angle")
+            if abs(x) + half_x > interior_half_w or abs(y) + half_y > interior_half_d:
+                raise CadGenerationError("divider position is outside the enclosure interior at this angle")
             result["dividers"].append({"length": length, "thickness": thickness, "height": height, "x": x, "y": y, "angle": angle})
         cable_openings = spec.get("cable_openings") or []
         if not isinstance(cable_openings, list):
@@ -250,6 +259,11 @@ class CadGenerationService:
             z = self._number(opening.get("z", result["dimensions"]["floor_thickness"] + height / 2), "cable opening z", 0, 2000)
             if z - height / 2 < result["dimensions"]["floor_thickness"] or z + height / 2 > result["dimensions"]["height"]:
                 raise CadGenerationError("cable opening height is outside the enclosure wall")
+            side_span = (result["dimensions"]["width"] if side in {"front", "back"} else result["dimensions"]["depth"]) - 2 * result["dimensions"]["wall_thickness"]
+            if width > side_span:
+                raise CadGenerationError("cable opening is wider than the usable enclosure wall span")
+            if abs(offset) + width / 2 > side_span / 2:
+                raise CadGenerationError("cable opening offset places it outside the enclosure wall span")
             result["cable_openings"].append({"side": side, "width": width, "height": height, "offset": offset, "z": z})
         lid_interface = spec.get("lid_interface") or {}
         if not isinstance(lid_interface, dict):
@@ -262,8 +276,12 @@ class CadGenerationService:
             lip_wall = self._number(lid_interface.get("lip_wall", result["dimensions"]["wall_thickness"]), "lid lip wall")
             if lip_height >= result["dimensions"]["height"] - result["dimensions"]["floor_thickness"]:
                 raise CadGenerationError("lid lip height is too large")
-            if clearance * 2 >= min(result["dimensions"]["width"], result["dimensions"]["depth"]) - 2 * result["dimensions"]["wall_thickness"]:
+            inner_w = result["dimensions"]["width"] - 2 * result["dimensions"]["wall_thickness"] - 2 * clearance
+            inner_d = result["dimensions"]["depth"] - 2 * result["dimensions"]["wall_thickness"] - 2 * clearance
+            if inner_w <= 0 or inner_d <= 0:
                 raise CadGenerationError("lid clearance is too large")
+            if lip_wall >= min(inner_w, inner_d) / 2:
+                raise CadGenerationError("lid lip wall is too large for the available lid interface")
             result["lid_interface"] = {"lip_height": lip_height, "clearance": clearance, "lip_wall": lip_wall}
 
         edge_treatment = spec.get("edge_treatment") or {}
