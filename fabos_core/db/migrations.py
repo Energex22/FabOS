@@ -142,7 +142,24 @@ INSERT OR IGNORE INTO marketing_channels(id,name,channel_type,active,publish_mod
  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_cad_generation_jobs_user ON cad_generation_jobs(user_id,created_at);
-CREATE INDEX IF NOT EXISTS idx_cad_generation_jobs_status ON cad_generation_jobs(status,created_at);"""),
+CREATE INDEX IF NOT EXISTS idx_cad_generation_jobs_status ON cad_generation_jobs(status,created_at);
+CREATE TABLE IF NOT EXISTS design_proofs(
+ id TEXT PRIMARY KEY,
+ quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+ design_id TEXT NOT NULL REFERENCES designs(id) ON DELETE CASCADE,
+ design_version INTEGER NOT NULL,
+ asset_id TEXT REFERENCES design_assets(id) ON DELETE SET NULL,
+ status TEXT NOT NULL DEFAULT 'draft',
+ notes TEXT NOT NULL DEFAULT '',
+ customer_comment TEXT NOT NULL DEFAULT '',
+ sent_at TEXT,
+ approved_at TEXT,
+ approved_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_design_proofs_quote ON design_proofs(quote_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_design_proofs_status ON design_proofs(status,updated_at);"""),
 (52,"""CREATE TABLE IF NOT EXISTS quote_designs(
  quote_id TEXT PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,
  design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,
