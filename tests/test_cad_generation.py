@@ -353,6 +353,20 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(len(result["verification"]["holes"]), 4)
 
 
+    def test_enclosure_corner_radius_normalization(self):
+        spec = self.service.normalize_spec({
+            "shape": "enclosure",
+            "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4, "corner_radius": 8},
+        })
+        self.assertEqual(spec["dimensions"]["corner_radius"], 8.0)
+
+    def test_rejects_enclosure_corner_radius_that_consumes_wall(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 40, "depth": 30, "height": 20, "wall_thickness": 3, "corner_radius": 14},
+            })
+
     def test_fallback_parser_recognizes_enclosure(self):
         spec = self.service.parse_prompt("Create a 100 x 80 x 40 mm enclosure with 3 mm walls")
         self.assertEqual(spec["shape"], "enclosure")
