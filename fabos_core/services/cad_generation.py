@@ -216,6 +216,43 @@ class CadGenerationService:
                 "y": self._number(slot.get("y", 0), "slot y", -2000, 2000),
                 "angle": float(slot.get("angle", 0) or 0),
             })
+        mounting_pattern = spec.get("mounting_pattern") or {}
+        if mounting_pattern:
+            if not isinstance(mounting_pattern, dict):
+                raise CadGenerationError("mounting_pattern must be an object")
+            pattern_type = str(mounting_pattern.get("type") or "rectangular").strip().lower()
+            if pattern_type not in {"rectangular", "grid", "radial"}:
+                raise CadGenerationError("mounting_pattern type must be rectangular, grid, or radial")
+            diameter = self._number(mounting_pattern.get("diameter", 5), "mounting pattern hole diameter")
+            if pattern_type in {"rectangular", "grid"}:
+                spacing_x = self._number(mounting_pattern.get("spacing_x", 20), "mounting pattern spacing_x")
+                spacing_y = self._number(mounting_pattern.get("spacing_y", spacing_x), "mounting pattern spacing_y")
+                count_x = max(1, min(8, int(mounting_pattern.get("count_x", 2))))
+                count_y = max(1, min(8, int(mounting_pattern.get("count_y", 2))))
+                origin_x = float(mounting_pattern.get("origin_x", 0) or 0)
+                origin_y = float(mounting_pattern.get("origin_y", 0) or 0)
+                for ix in range(count_x):
+                    for iy in range(count_y):
+                        if len(result["holes"]) >= self.MAX_FEATURES:
+                            break
+                        x = origin_x + (ix - (count_x - 1) / 2.0) * spacing_x
+                        y = origin_y + (iy - (count_y - 1) / 2.0) * spacing_y
+                        result["holes"].append({"diameter": diameter, "x": x, "y": y, "head_type": "", "head_diameter": None, "head_depth": None})
+            else:
+                import math
+                count = max(2, min(self.MAX_FEATURES, int(mounting_pattern.get("count", 4))))
+                radius = self._number(mounting_pattern.get("radius", 20), "mounting pattern radius")
+                center_x = float(mounting_pattern.get("center_x", 0) or 0)
+                center_y = float(mounting_pattern.get("center_y", 0) or 0)
+                start_angle = float(mounting_pattern.get("start_angle", 0) or 0)
+                for index in range(count):
+                    angle = math.radians(start_angle + (360.0 * index / count))
+                    result["holes"].append({
+                        "diameter": diameter,
+                        "x": center_x + radius * math.cos(angle),
+                        "y": center_y + radius * math.sin(angle),
+                        "head_type": "", "head_diameter": None, "head_depth": None,
+                    })
         if shape == "flange" and not result["holes"]:
             import math
             d = result["dimensions"]
@@ -270,6 +307,7 @@ class CadGenerationService:
                     raise CadGenerationError("slot x or length is outside the part")
                 if abs(slot["y"]) + radius > result["dimensions"]["depth"] / 2:
                     raise CadGenerationError("slot y or width is outside the part")
+        result["mounting_pattern"] = mounting_pattern
         return result
 
     def parse_prompt(self, prompt):
