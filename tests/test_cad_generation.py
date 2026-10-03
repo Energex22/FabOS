@@ -322,5 +322,36 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(height_check["expected_mm"], 17.0)
 
 
+    def test_rectangular_mounting_pattern_expands_to_holes(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 100, "depth": 60, "height": 5},
+            "mounting_pattern": {"type": "rectangular", "diameter": 5, "spacing_x": 40, "spacing_y": 20, "count_x": 2, "count_y": 2},
+        })
+        self.assertEqual(len(spec["holes"]), 4)
+        self.assertEqual(sorted((round(h["x"], 1), round(h["y"], 1)) for h in spec["holes"]),
+                         [(-20.0, -10.0), (-20.0, 10.0), (20.0, -10.0), (20.0, 10.0)])
+
+    def test_radial_mounting_pattern_expands_to_holes(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 100, "depth": 100, "height": 5},
+            "mounting_pattern": {"type": "radial", "diameter": 4, "radius": 30, "count": 4},
+        })
+        self.assertEqual(len(spec["holes"]), 4)
+        self.assertAlmostEqual(spec["holes"][0]["x"], 30.0, places=4)
+        self.assertAlmostEqual(spec["holes"][1]["y"], 30.0, places=4)
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_mounting_pattern_generates_verified_geometry(self):
+        result = self.service.generate(spec={
+            "shape": "plate",
+            "dimensions": {"width": 100, "depth": 60, "height": 5},
+            "mounting_pattern": {"type": "rectangular", "diameter": 5, "spacing_x": 40, "spacing_y": 20, "count_x": 2, "count_y": 2},
+        }, output_formats=["step"])
+        self.assertTrue(result["verification"]["passed"])
+        self.assertEqual(len(result["verification"]["holes"]), 4)
+
+
 if __name__ == "__main__":
     unittest.main()
