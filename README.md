@@ -306,6 +306,25 @@ http://127.0.0.1:8000
 
 Set FABOS_DATA_DIR before first use if you want data somewhere other than the Windows default. Keep the database and Design Vault outside the repository.
 
+### First-run setup and owner configuration
+
+For a fresh persistent data directory, initialize FabOS before exposing the customer boundary:
+
+~~~bash
+python -m fabos_core.cli init
+~~~
+
+Complete the initial owner/administrator setup explicitly, then configure payment, tax/shipping, and printer settings. The production setup flow also supports the combined `setup-production` workflow. Do not rely on a bootstrap/default owner password in production.
+
+Before going public, create and verify a backup:
+
+~~~bash
+python -m fabos_core.cli backup
+python -m fabos_core.cli backup-check
+~~~
+
+A backup is not considered production-ready until it can be opened/restored separately.
+
 ### Windows desktop
 
 The Windows desktop launcher is:
@@ -318,14 +337,14 @@ Do not expose the desktop/admin application through the public Caddy site.
 
 ## The two API entry points
 
-FabOS currently has two server entry points. They serve the same business services and route set, but their server stacks and environment handling differ.
+FabOS currently has two server entry points. They serve the same business services and route set, but their server stacks and environment handling differ. The supported Windows production storefront launcher uses the FastAPI/Uvicorn entry point; the Waitress entry point remains available for compatibility/alternative deployments.
 
 | | FastAPI/Uvicorn | WSGI/Waitress |
 | --- | --- | --- |
 | Command | python -m fabos_core.cli serve | python -m fabos_api.server |
-| Main use | Development/API docs | Windows production launcher |
+| Main use | Development and supported production API | Alternative/legacy server path |
 | Host/port | FABOS_API_HOST, FABOS_API_PORT | FABOS_API_HOST, FABOS_API_PORT |
-| CORS/origin | FABOS_CORS_ORIGINS | FABOS_CORS_ORIGINS, with legacy FABOS_API_ALLOW_ORIGIN fallback |
+| CORS/origin | FABOS_CORS_ORIGINS | FABOS_API_ALLOW_ORIGIN |
 | Other controls | FABOS_ALLOWED_HOSTS, FABOS_API_DOCS | FABOS_API_THREADS |
 
 Do not assume a variable for one server automatically configures the other.
@@ -504,6 +523,7 @@ This is a simplified map; the repository contains additional application modules
 Current development areas include:
 
 - deeper automation and durable workflows;
+- CAD/modeling and manufacturing-assistance workflows as they are promoted from experiments into supported production capabilities;
 - additional marketplace/provider adapters;
 - broader printer integrations;
 - advanced production intelligence;
