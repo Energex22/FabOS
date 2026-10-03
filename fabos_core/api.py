@@ -396,8 +396,17 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             images.append("data:%s;base64,%s" % (content_type, base64.b64encode(raw).decode("ascii")))
         try:
             result = application.ai.design_spec_from_images(images, reference_note=reference_note)
-            return {"spec": result, "scale_confirmed": bool((result.get("metadata") or {}).get("scale_confirmed")),
-                    "missing_dimensions": (result.get("metadata") or {}).get("missing_dimensions", [])}
+            metadata = result.get("metadata") or {}
+            return {
+                "spec": result,
+                "scale_confirmed": bool(metadata.get("scale_confirmed")),
+                "scale_source": metadata.get("scale_source", "none"),
+                "reference_kind": metadata.get("reference_kind", "mixed"),
+                "confidence": metadata.get("confidence", 0.0),
+                "missing_dimensions": metadata.get("missing_dimensions", []),
+                "feature_uncertainties": metadata.get("feature_uncertainties", []),
+                "needs_user_confirmation": bool(metadata.get("needs_user_confirmation")),
+            }
         except Exception as exc:
             raise HTTPException(status_code=400, detail="Reference analysis failed: %s" % exc) from exc
 
