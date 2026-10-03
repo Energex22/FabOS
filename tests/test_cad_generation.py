@@ -397,6 +397,64 @@ class CadGenerationTests(unittest.TestCase):
                 "print_constraints": {"min_feature_size": 0.8, "strict": True},
             })
 
+    def test_enclosure_internal_features_validation(self):
+        spec = self.service.normalize_spec({
+            "shape": "enclosure",
+            "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+            "internal_posts": [{"diameter": 10, "height": 20, "x": -30, "y": -20, "bore_diameter": 4}],
+            "dividers": [{"length": 50, "thickness": 3, "height": 25, "x": 0, "y": 0, "angle": 90}],
+            "cable_openings": [{"side": "front", "width": 12, "height": 8, "offset": 10, "z": 15}],
+            "lid_interface": {"lip_height": 2, "clearance": 0.25, "lip_wall": 2},
+        })
+        self.assertEqual(len(spec["internal_posts"]), 1)
+        self.assertEqual(spec["internal_posts"][0]["bore_diameter"], 4.0)
+        self.assertEqual(len(spec["dividers"]), 1)
+        self.assertEqual(len(spec["cable_openings"]), 1)
+        self.assertEqual(spec["cable_openings"][0]["side"], "front")
+        self.assertEqual(spec["lid_interface"]["clearance"], 0.25)
+
+    def test_rejects_enclosure_features_on_non_enclosure(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 60, "height": 5},
+                "internal_posts": [{"diameter": 10, "x": 0, "y": 0}],
+            })
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 60, "height": 5},
+                "cable_openings": [{"side": "front", "width": 10, "height": 5}],
+            })
+
+    def test_rejects_invalid_cable_opening(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+                "cable_openings": [{"side": "top", "width": 10, "height": 5}],
+            })
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_enclosure_internal_features_generation(self):
+        result = self.service.generate(spec={
+            "shape": "enclosure",
+            "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+            "internal_posts": [
+                {"diameter": 10, "height": 20, "x": -30, "y": -20, "bore_diameter": 4},
+                {"diameter": 10, "height": 20, "x": 30, "y": -20, "bore_diameter": 4},
+            ],
+            "dividers": [{"length": 50, "thickness": 3, "height": 25, "x": 0, "y": 0}],
+            "cable_openings": [{"side": "front", "width": 12, "height": 8, "offset": 10, "z": 15}],
+            "lid_interface": {"lip_height": 2, "clearance": 0.25, "lip_wall": 2},
+        }, output_formats=["step"])
+        self.assertTrue(result["verification"]["passed"])
+        self.assertEqual(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "internal_post_features"), 2)
+        self.assertEqual(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "divider_features"), 1)
+        self.assertEqual(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "cable_opening_features"), 1)
+        self.assertTrue(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "lid_interface"))
+
+
 
 if __name__ == "__main__":
     unittest.main()
