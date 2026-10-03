@@ -6,8 +6,66 @@ It brings the core operations of a 3D-printing business into one authoritative s
 
 [FabOS-Web](https://github.com/Energex22/FabOS-Web) is the web application layer. FabOS remains the business-logic and persistence authority; the browser is never trusted with authoritative pricing, ownership, payment state, production state, or fulfillment decisions.
 
-> **Current development version:** 0.16.0-beta.7  
-> **Python:** >=3.8
+> **Current application version:** `0.16.0-beta.7`  
+> **Python:** >=3.8  
+> **Package metadata:** `pyproject.toml` currently reports `0.1.0`; this should be reconciled before a versioned package release.
+
+## Visual overview
+
+GitHub renders Mermaid diagrams directly in Markdown, so the diagrams below stay versioned with the software and can be updated when the architecture changes.
+
+### What FabOS controls
+
+```mermaid
+flowchart LR
+    U[Customer / Staff] --> W[FabOS-Web]
+    W --> A[FabOS API]
+    A --> C[Commerce]
+    A --> D[Design Vault]
+    A --> M[Manufacturing]
+    A --> F[Fulfillment]
+    A --> P[Payments]
+    A --> I[Integrations]
+    M --> O[OctoPrint / Printers]
+    P --> S[Stripe]
+    I --> AI[AI / Marketplace / Marketing]
+```
+
+### From customer request to finished order
+
+```mermaid
+flowchart LR
+    R[Request] --> Q[Quote]
+    Q --> D[Design]
+    D --> V[Design Version]
+    V --> P[Proof]
+    P -->|Approved| O[Order]
+    P -->|Changes| D
+    O --> PAY[Payment]
+    PAY --> J[Production Job]
+    J --> PRINT[Print]
+    PRINT --> QC[QC]
+    QC -->|Rework| J
+    QC -->|Pass| F[Fulfillment]
+    F --> C[Customer]
+```
+
+### Public deployment
+
+```mermaid
+flowchart TB
+    Internet --> TLS[HTTPS :443]
+    TLS --> Caddy[Caddy]
+    Caddy --> Web[FabOS-Web static build]
+    Caddy --> API[/api/*]
+    API --> App[FabOS FastAPI/Uvicorn]
+    App --> DB[(SQLite)]
+    App --> Vault[(Design Vault)]
+    App --> Stripe[Stripe]
+    App --> Octo[OctoPrint]
+```
+
+These diagrams are descriptive rather than a substitute for the architecture documentation. See [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).
 
 ## What FabOS does
 
