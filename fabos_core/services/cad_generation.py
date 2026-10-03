@@ -319,6 +319,33 @@ class CadGenerationService:
                     raise CadGenerationError("slot x or length is outside the part")
                 if abs(slot["y"]) + radius > result["dimensions"]["depth"] / 2:
                     raise CadGenerationError("slot y or width is outside the part")
+        print_constraints = spec.get("print_constraints") or {}
+        if not isinstance(print_constraints, dict):
+            raise CadGenerationError("print_constraints must be an object")
+        nozzle = self._number(print_constraints.get("nozzle_diameter", 0.4), "nozzle diameter", 0.1, 2.0)
+        min_wall = self._number(print_constraints.get("min_wall_thickness", nozzle * 2), "minimum wall thickness", 0.1, 20.0)
+        min_feature = self._number(print_constraints.get("min_feature_size", nozzle), "minimum feature size", 0.1, 20.0)
+        strict = bool(print_constraints.get("strict", False))
+        result["print_constraints"] = {"nozzle_diameter": nozzle, "min_wall_thickness": min_wall,
+                                       "min_feature_size": min_feature, "strict": strict}
+        if shape == "enclosure" and result["dimensions"]["wall_thickness"] < min_wall:
+            message = "enclosure wall thickness is below the requested printable minimum"
+            if strict:
+                raise CadGenerationError(message)
+            result["metadata"].setdefault("printability_warnings", []).append(message)
+        for feature_name, features in (("ribs", result["ribs"]), ("tabs", result["tabs"])):
+            for feature in features:
+                if min(feature["width"], feature["height"]) < min_feature:
+                    message = "%s feature is below the requested printable minimum" % feature_name[:-1]
+                    if strict:
+                        raise CadGenerationError(message)
+                    result["metadata"].setdefault("printability_warnings", []).append(message)
+        for hole in result["holes"]:
+            if hole["diameter"] < min_feature:
+                message = "hole diameter is below the requested printable minimum"
+                if strict:
+                    raise CadGenerationError(message)
+                result["metadata"].setdefault("printability_warnings", []).append(message)
         result["mounting_pattern"] = mounting_pattern
         return result
 
@@ -593,6 +620,10 @@ class CadGenerationService:
                     "location_pass": location_ok,
                     "pass": diameter_ok and location_ok,
                 })
+        print_constraints = spec.get("print_constraints") or {}
+        printability_warnings = list(spec.get("metadata", {}).get("printability_warnings", []))
+        checks.append({"measurement": "printability", "warnings": printability_warnings,
+                       "pass": not printability_warnings or not print_constraints.get("strict", False)})
         checks.append({"measurement": "rib_features", "requested": len(spec.get("ribs", [])), "actual": len(spec.get("ribs", [])), "pass": True})
         checks.append({"measurement": "tab_features", "requested": len(spec.get("tabs", [])), "actual": len(spec.get("tabs", [])), "pass": True})
         edge_treatment = spec.get("edge_treatment") or {}
