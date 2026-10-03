@@ -20,7 +20,7 @@ class CadGenerationError(ValueError):
 
 
 class CadGenerationService:
-    SHAPES = {"box", "plate", "cylinder", "ring", "bracket", "mounting_plate", "flange"}
+    SHAPES = {"box", "plate", "cylinder", "ring", "bracket", "mounting_plate", "flange", "enclosure"}
     MAX_FEATURES = 32
 
     def __init__(self, settings=None, database=None, ai=None, design_vault=None):
@@ -92,6 +92,18 @@ class CadGenerationService:
                 raise CadGenerationError("inner_diameter must be smaller than outer_diameter")
             result["dimensions"].update({"outer_diameter": outer, "inner_diameter": inner,
                                          "height": self._number(dimensions.get("height", 5), "height")})
+        elif shape == "enclosure":
+            width = self._number(dimensions.get("width", 100), "width")
+            depth = self._number(dimensions.get("depth", 60), "depth")
+            height = self._number(dimensions.get("height", 40), "height")
+            wall = self._number(dimensions.get("wall_thickness", 2), "wall_thickness")
+            floor = self._number(dimensions.get("floor_thickness", wall), "floor_thickness")
+            if wall * 2 >= min(width, depth):
+                raise CadGenerationError("wall_thickness is too large for enclosure footprint")
+            if floor >= height:
+                raise CadGenerationError("floor_thickness must be smaller than enclosure height")
+            result["dimensions"] = {"width": width, "depth": depth, "height": height,
+                                    "wall_thickness": wall, "floor_thickness": floor}
         else:
             result["dimensions"] = {
                 "width": self._number(dimensions.get("width", 100), "width"),
@@ -128,7 +140,7 @@ class CadGenerationService:
         bosses = spec.get("bosses") or []
         if not isinstance(bosses, list):
             raise CadGenerationError("bosses must be an array")
-        if bosses and shape not in {"box", "plate", "mounting_plate"}:
+        if bosses and shape not in {"box", "plate", "mounting_plate", "enclosure"}:
             raise CadGenerationError("bosses are currently supported only on box-like parts")
         for boss in bosses[:self.MAX_FEATURES]:
             if not isinstance(boss, dict):
@@ -145,7 +157,7 @@ class CadGenerationService:
         ribs = spec.get("ribs") or []
         if not isinstance(ribs, list):
             raise CadGenerationError("ribs must be an array")
-        if ribs and shape not in {"box", "plate", "mounting_plate", "bracket"}:
+        if ribs and shape not in {"box", "plate", "mounting_plate", "bracket", "enclosure"}:
             raise CadGenerationError("ribs are currently supported only on box-like parts and brackets")
         for rib in ribs[:self.MAX_FEATURES]:
             if not isinstance(rib, dict):
@@ -164,7 +176,7 @@ class CadGenerationService:
         tabs = spec.get("tabs") or []
         if not isinstance(tabs, list):
             raise CadGenerationError("tabs must be an array")
-        if tabs and shape not in {"box", "plate", "mounting_plate", "bracket"}:
+        if tabs and shape not in {"box", "plate", "mounting_plate", "bracket", "enclosure"}:
             raise CadGenerationError("tabs are currently supported only on box-like parts and brackets")
         for tab in tabs[:self.MAX_FEATURES]:
             if not isinstance(tab, dict):
@@ -371,6 +383,15 @@ class CadGenerationService:
         d, shape = spec["dimensions"], spec["shape"]
         if shape in {"box", "plate", "mounting_plate"}:
             model = cq.Workplane("XY").box(d["width"], d["depth"], d["height"], centered=(True, True, False))
+        elif shape == "enclosure":
+            outer = cq.Workplane("XY").box(d["width"], d["depth"], d["height"], centered=(True, True, False))
+            inner = (cq.Workplane("XY")
+                     .box(d["width"] - 2 * d["wall_thickness"],
+                          d["depth"] - 2 * d["wall_thickness"],
+                          d["height"] - d["floor_thickness"],
+                          centered=(True, True, False))
+                     .translate((0, 0, d["floor_thickness"])))
+            model = outer.cut(inner)
         elif shape == "flange":
             model = cq.Workplane("XY").circle(d["outer_diameter"] / 2).extrude(d["height"])
         elif shape == "cylinder":
