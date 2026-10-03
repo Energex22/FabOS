@@ -455,6 +455,38 @@ class CadGenerationTests(unittest.TestCase):
                 "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
                 "cable_openings": [{"side": "top", "width": 10, "height": 5}],
             })
+    
+    def test_rejects_rotated_divider_that_exceeds_interior(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 60, "depth": 50, "height": 30, "wall_thickness": 3, "floor_thickness": 4},
+                "dividers": [{"length": 55, "thickness": 4, "height": 20, "x": 0, "y": 0, "angle": 45}],
+            })
+
+    def test_rejects_cable_opening_outside_wall_span(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+                "cable_openings": [{"side": "front", "width": 12, "height": 8, "offset": 50, "z": 15}],
+            })
+
+    def test_rejects_internal_post_above_enclosure_interior(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+                "internal_posts": [{"diameter": 10, "height": 37, "x": 0, "y": 0}],
+            })
+
+    def test_rejects_lid_lip_wall_that_collapses_interface(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 40, "depth": 30, "height": 20, "wall_thickness": 3, "floor_thickness": 4},
+                "lid_interface": {"lip_height": 2, "clearance": 0.25, "lip_wall": 14},
+            })
 
     @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_enclosure_internal_features_generation(self):
