@@ -353,6 +353,13 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(len(result["verification"]["holes"]), 4)
 
 
+    def test_fallback_parser_recognizes_enclosure(self):
+        spec = self.service.parse_prompt("Create a 100 x 80 x 40 mm enclosure with 3 mm walls")
+        self.assertEqual(spec["shape"], "enclosure")
+        self.assertEqual(spec["dimensions"]["width"], 100.0)
+        self.assertEqual(spec["dimensions"]["wall_thickness"], 3.0)
+
+
     def test_enclosure_spec_validation(self):
         spec = self.service.normalize_spec({
             "shape": "enclosure",
