@@ -57,8 +57,8 @@ flowchart TB
     Internet --> TLS[HTTPS :443]
     TLS --> Caddy[Caddy]
     Caddy --> Web[FabOS-Web static build]
-    Caddy --> API[/api/*]
-    API --> App[FabOS FastAPI/Uvicorn]
+    Caddy --> API["/api/*"]
+    API --> App["FabOS FastAPI/Uvicorn"]
     App --> DB[(SQLite)]
     App --> Vault[(Design Vault)]
     App --> Stripe[Stripe]
@@ -83,31 +83,29 @@ These diagrams are descriptive rather than a substitute for the architecture doc
 
 ## Architecture
 
-~~~text
-FABVEX
-  |
-  +--> FabOS-Web
-  |       Customer / Web Experience
-  |
-  +--> HTTPS / JSON
-          |
-          v
-       FabOS
-       Business Engine
-          |
-   +------+-------+----------------+
-   |              |                |
-Commerce      Design Vault     Manufacturing
-Customers     Versions         Production jobs
-Catalog       Proofs           Printers
-Quotes        Uploads          QC / Rework
-Orders                         Materials
-Payments
-   |
-   +-------------------+----------------+
-                       |                |
-                       v                v
-                 Marketing Hub     AI / Automation
+~~~mermaid
+flowchart TB
+    Brand[FABVEX] --> Web[FabOS-Web]
+    Web --> Experience[Customer / Web Experience]
+    Brand --> HTTPS[HTTPS / JSON]
+    HTTPS --> App[FabOS Business Engine]
+    App --> Commerce[Commerce]
+    App --> Customers[Customers]
+    App --> Catalog[Catalog]
+    App --> Quotes[Quotes]
+    App --> Orders[Orders]
+    App --> Payments[Payments]
+    App --> Vault[Design Vault]
+    Vault --> Versions[Versions]
+    Vault --> Proofs[Proofs]
+    Vault --> Uploads[Uploads]
+    App --> Manufacturing[Manufacturing]
+    Manufacturing --> Jobs[Production Jobs]
+    Manufacturing --> Printers[Printers]
+    Manufacturing --> QC[QC / Rework]
+    Manufacturing --> Materials[Materials]
+    App --> Marketing[Marketing Hub]
+    App --> AI[AI / Automation]
 ~~~
 
 ### Core architectural rule
@@ -132,41 +130,25 @@ The frontend must not become a second business-logic or persistence layer.
 
 ## Customer-to-production workflow
 
-~~~text
-Customer
-   |
-   +--> Browse catalog
-   +--> Configure product
-   +--> Request custom work
-             |
-             v
-        Quote / Design
-             |
-       +-----+------+
-       |            |
-    Pricing       Proof
-                    |
-             Customer approval
-                    |
-                    v
-                  Order
-                    |
-          +---------+---------+
-          |                   |
-       Payment            Production
-                              |
-                            Print
-                              |
-                             QC
-                         +----+----+
-                         |         |
-                        Pass     Rework
-                         |         |
-                         +----<----+
-                              |
-                         Fulfillment
-                              |
-                           Customer
+~~~mermaid
+flowchart TB
+    Customer[Customer] --> Browse[Browse catalog]
+    Customer --> Configure[Configure product]
+    Customer --> Custom[Request custom work]
+    Browse --> Quote[Quote / Design]
+    Configure --> Quote
+    Custom --> Quote
+    Quote --> Pricing[Pricing]
+    Quote --> Proof[Proof]
+    Proof --> Approval[Customer approval]
+    Approval --> Order[Order]
+    Order --> Payment[Payment]
+    Order --> Production[Production]
+    Production --> Print[Print]
+    Print --> QC[QC]
+    QC -->|Pass| Fulfillment[Fulfillment]
+    QC -->|Rework| Production
+    Fulfillment --> Customer
 ~~~
 
 For customer-designed work, production is server-enforced to wait for the required latest design proof to be approved.
@@ -460,26 +442,15 @@ Payment credentials, printer API keys, AI keys, marketplace credentials, and sim
 
 The intended public Windows deployment is:
 
-~~~text
-Internet
-   |
- HTTPS :443
-   |
-   v
-+---------+
-|  Caddy  |
-+----+----+
-     |
-     +---- /       -> FabOS-Web static files
-     |
-     +---- /api/*  -> 127.0.0.1:8000
-                         |
-                         v
-                       FabOS
-                         |
-                         v
-                 Persistent data
-                 + Design Vault
+~~~mermaid
+flowchart TB
+    Internet[Internet] --> HTTPS[HTTPS :443]
+    HTTPS --> Caddy[Caddy]
+    Caddy --> Web["/ -> FabOS-Web static files"]
+    Caddy --> API["/api/* -> 127.0.0.1:8000"]
+    API --> FabOS[FabOS]
+    FabOS --> Data[Persistent data]
+    FabOS --> Vault[Design Vault]
 ~~~
 
 The same-origin arrangement keeps the API private and avoids needing a public API hostname.
