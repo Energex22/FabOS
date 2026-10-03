@@ -418,6 +418,66 @@ class CadGenerationService:
         checks.append({"measurement": "divider_features", "requested": len(spec.get("dividers", [])), "actual": len(spec.get("dividers", [])), "pass": True})
         checks.append({"measurement": "cable_opening_features", "requested": len(spec.get("cable_openings", [])), "actual": len(spec.get("cable_openings", [])), "pass": True})
         checks.append({"measurement": "lid_interface", "requested": bool(spec.get("lid_interface")), "actual": bool(spec.get("lid_interface")), "pass": True})
+        internal_post_checks = []
+        if spec.get("internal_posts"):
+            for requested in spec["internal_posts"]:
+                target_r = requested["diameter"] / 2.0
+                candidates = []
+                for face in circles:
+                    try:
+                        radius = float(face._geomAdaptor().Radius())
+                        center = face.Center()
+                        bbox = face.BoundingBox()
+                        radius_error = abs(radius - target_r)
+                        distance = ((float(center.x) - requested["x"]) ** 2 +
+                                    (float(center.y) - requested["y"]) ** 2) ** 0.5
+                        height_error = abs(float(bbox.zlen) - requested["height"])
+                        candidates.append((radius_error, distance, height_error,
+                                           float(center.x), float(center.y), radius,
+                                           float(bbox.zlen)))
+                    except Exception:
+                        continue
+                matching = [item for item in candidates if item[0] <= 0.01 and item[1] <= 0.05]
+                best = min(matching or candidates, key=lambda item: (item[1], item[0], item[2])) if (matching or candidates) else None
+                diameter_ok = bool(best and best[0] <= 0.01)
+                location_ok = bool(best and best[1] <= 0.05)
+                height_ok = bool(best and best[2] <= 0.05)
+                bore_ok = True
+                if requested.get("bore_diameter"):
+                    bore_r = requested["bore_diameter"] / 2.0
+                    bore_candidates = []
+                    for face in circles:
+                        try:
+                            radius = float(face._geomAdaptor().Radius())
+                            center = face.Center()
+                            distance = ((float(center.x) - requested["x"]) ** 2 +
+                                        (float(center.y) - requested["y"]) ** 2) ** 0.5
+                            if abs(radius - bore_r) <= 0.01 and distance <= 0.05:
+                                bore_candidates.append(face)
+                        except Exception:
+                            continue
+                    bore_ok = bool(bore_candidates)
+                internal_post_checks.append({
+                    "requested_diameter_mm": round(requested["diameter"], 4),
+                    "actual_diameter_mm": round(best[5] * 2, 4) if best else None,
+                    "requested_height_mm": round(requested["height"], 4),
+                    "actual_height_mm": round(best[6], 4) if best else None,
+                    "requested_x_mm": round(requested["x"], 4),
+                    "requested_y_mm": round(requested["y"], 4),
+                    "actual_x_mm": round(best[3], 4) if best else None,
+                    "actual_y_mm": round(best[4], 4) if best else None,
+                    "bore_pass": bore_ok,
+                    "diameter_pass": diameter_ok,
+                    "location_pass": location_ok,
+                    "height_pass": height_ok,
+                    "pass": diameter_ok and location_ok and height_ok and bore_ok,
+                })
+        checks.append({"measurement": "internal_post_features",
+                       "requested": len(spec.get("internal_posts", [])),
+                       "actual": len(internal_post_checks),
+                       "details": internal_post_checks,
+                       "pass": len(internal_post_checks) == len(spec.get("internal_posts", [])) and
+                       all(item["pass"] for item in internal_post_checks)})
         print_constraints = spec.get("print_constraints") or {}
         if not isinstance(print_constraints, dict):
             raise CadGenerationError("print_constraints must be an object")
