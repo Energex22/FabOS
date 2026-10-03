@@ -492,148 +492,24 @@ class CadGenerationService:
                     raise CadGenerationError("slot x or length is outside the part")
                 if abs(slot["y"]) + radius > result["dimensions"]["depth"] / 2:
                     raise CadGenerationError("slot y or width is outside the part")
-        # Verify enclosure internals against actual solid volume rather than trusting the request count.
-        # This catches regressions where a requested feature is normalized but the boolean operation
-        # does not actually change the generated geometry.
-        divider_requested = len(spec.get("dividers", []))
-        divider_volume_delta = 0.0
-        divider_pass = True
-        if shape == "enclosure" and divider_requested:
-            baseline = dict(spec)
-            baseline["dividers"] = []
-            try:
-                baseline_volume = float(self._cadquery_model(baseline).val().Volume())
-                actual_volume = float(model.val().Volume())
-                divider_volume_delta = actual_volume - baseline_volume
-                expected_divider_volume = sum(
-                    float(item["length"]) * float(item["thickness"]) * float(item["height"])
-                    for item in spec.get("dividers", [])
-                )
-                divider_pass = divider_volume_delta > 0.001 and divider_volume_delta <= expected_divider_volume + max(0.1, expected_divider_volume * 0.02)
-            except Exception:
-                divider_pass = False
-        checks.append({
-            "measurement": "divider_geometry",
-            "requested": divider_requested,
-            "volume_delta_mm3": round(divider_volume_delta, 4),
-            "pass": divider_pass,
-        })
-
-        opening_requested = len(spec.get("cable_openings", []))
-        opening_volume_delta = 0.0
-        opening_pass = True
-        if shape == "enclosure" and opening_requested:
-            baseline = dict(spec)
-            baseline["cable_openings"] = []
-            try:
-                baseline_volume = float(self._cadquery_model(baseline).val().Volume())
-                actual_volume = float(model.val().Volume())
-                opening_volume_delta = baseline_volume - actual_volume
-                expected_opening_volume = sum(
-                    float(item["width"]) * float(spec["dimensions"]["wall_thickness"]) * float(item["height"])
-                    for item in spec.get("cable_openings", [])
-                )
-                opening_pass = (
-                    opening_volume_delta > 0.001
-                    and abs(opening_volume_delta - expected_opening_volume) <= max(0.1, expected_opening_volume * 0.03)
-                )
-            except Exception:
-                opening_pass = False
-        checks.append({
-            "measurement": "cable_opening_geometry",
-            "requested": opening_requested,
-            "volume_delta_mm3": round(opening_volume_delta, 4),
-            "pass": opening_pass,
-        })
-
-        lid_requested = bool(spec.get("lid_interface"))
-        lid_volume_delta = 0.0
-        lid_pass = True
-        if shape == "enclosure" and lid_requested:
-            baseline = dict(spec)
-            baseline["lid_interface"] = {}
-            try:
-                baseline_volume = float(self._cadquery_model(baseline).val().Volume())
-                actual_volume = float(model.val().Volume())
-                lid_volume_delta = actual_volume - baseline_volume
-                lid = spec["lid_interface"]
-                inner_w = spec["dimensions"]["width"] - 2 * spec["dimensions"]["wall_thickness"] - 2 * lid["clearance"]
-                inner_d = spec["dimensions"]["depth"] - 2 * spec["dimensions"]["wall_thickness"] - 2 * lid["clearance"]
-                cut_w = max(0.1, inner_w - 2 * lid["lip_wall"])
-                cut_d = max(0.1, inner_d - 2 * lid["lip_wall"])
-                expected_lid_volume = (inner_w * inner_d - cut_w * cut_d) * lid["lip_height"]
-                lid_pass = (
-                    lid_volume_delta > 0.001
-                    and abs(lid_volume_delta - expected_lid_volume) <= max(0.1, expected_lid_volume * 0.03)
-                )
-            except Exception:
-                lid_pass = False
-        checks.append({
-            "measurement": "lid_interface_geometry",
-            "requested": lid_requested,
-            "volume_delta_mm3": round(lid_volume_delta, 4),
-            "pass": lid_pass,
-        })
-        internal_post_checks = []
-        if spec.get("internal_posts"):
-            for requested in spec["internal_posts"]:
-                target_r = requested["diameter"] / 2.0
-                candidates = []
-                for face in circles:
-                    try:
-                        radius = float(face._geomAdaptor().Radius())
-                        center = face.Center()
-                        bbox = face.BoundingBox()
-                        radius_error = abs(radius - target_r)
-                        distance = ((float(center.x) - requested["x"]) ** 2 +
-                                    (float(center.y) - requested["y"]) ** 2) ** 0.5
-                        height_error = abs(float(bbox.zlen) - requested["height"])
-                        candidates.append((radius_error, distance, height_error,
-                                           float(center.x), float(center.y), radius,
-                                           float(bbox.zlen)))
-                    except Exception:
-                        continue
-                matching = [item for item in candidates if item[0] <= 0.01 and item[1] <= 0.05]
-                best = min(matching or candidates, key=lambda item: (item[1], item[0], item[2])) if (matching or candidates) else None
-                diameter_ok = bool(best and best[0] <= 0.01)
-                location_ok = bool(best and best[1] <= 0.05)
-                height_ok = bool(best and best[2] <= 0.05)
-                bore_ok = True
-                if requested.get("bore_diameter"):
-                    bore_r = requested["bore_diameter"] / 2.0
-                    bore_candidates = []
-                    for face in circles:
-                        try:
-                            radius = float(face._geomAdaptor().Radius())
-                            center = face.Center()
-                            distance = ((float(center.x) - requested["x"]) ** 2 +
-                                        (float(center.y) - requested["y"]) ** 2) ** 0.5
-                            if abs(radius - bore_r) <= 0.01 and distance <= 0.05:
-                                bore_candidates.append(face)
-                        except Exception:
-                            continue
-                    bore_ok = bool(bore_candidates)
-                internal_post_checks.append({
-                    "requested_diameter_mm": round(requested["diameter"], 4),
-                    "actual_diameter_mm": round(best[5] * 2, 4) if best else None,
-                    "requested_height_mm": round(requested["height"], 4),
-                    "actual_height_mm": round(best[6], 4) if best else None,
-                    "requested_x_mm": round(requested["x"], 4),
-                    "requested_y_mm": round(requested["y"], 4),
-                    "actual_x_mm": round(best[3], 4) if best else None,
-                    "actual_y_mm": round(best[4], 4) if best else None,
-                    "bore_pass": bore_ok,
-                    "diameter_pass": diameter_ok,
-                    "location_pass": location_ok,
-                    "height_pass": height_ok,
-                    "pass": diameter_ok and location_ok and height_ok and bore_ok,
-                })
-        checks.append({"measurement": "internal_post_features",
-                       "requested": len(spec.get("internal_posts", [])),
-                       "actual": len(internal_post_checks),
-                       "details": internal_post_checks,
-                       "pass": len(internal_post_checks) == len(spec.get("internal_posts", [])) and
-                       all(item["pass"] for item in internal_post_checks)})
+        # Reject feature interference before CAD generation. These checks are intentionally
+        # conservative: a requested through-hole must not overlap another cut or a raised
+        # cylindrical feature, because the resulting boolean would no longer represent the
+        # requested dimensions independently.
+        holes = result["holes"]
+        for index, first in enumerate(holes):
+            for second in holes[index + 1:]:
+                distance = math.hypot(first["x"] - second["x"], first["y"] - second["y"])
+                if distance < (first["diameter"] + second["diameter"]) / 2.0:
+                    raise CadGenerationError("holes overlap in the requested XY layout")
+        for hole in holes:
+            hole_radius = hole["diameter"] / 2.0
+            for boss in result["bosses"]:
+                if math.hypot(hole["x"] - boss["x"], hole["y"] - boss["y"]) < hole_radius + boss["diameter"] / 2.0:
+                    raise CadGenerationError("hole overlaps a boss in the requested XY layout")
+            for post in result["internal_posts"]:
+                if math.hypot(hole["x"] - post["x"], hole["y"] - post["y"]) < hole_radius + post["diameter"] / 2.0:
+                    raise CadGenerationError("hole overlaps an internal post in the requested XY layout")
         print_constraints = spec.get("print_constraints") or {}
         if not isinstance(print_constraints, dict):
             raise CadGenerationError("print_constraints must be an object")
@@ -980,6 +856,148 @@ class CadGenerationService:
                     "location_pass": location_ok,
                     "pass": diameter_ok and location_ok,
                 })
+        # Verify enclosure internals against actual solid volume rather than trusting the request count.
+        # This catches regressions where a requested feature is normalized but the boolean operation
+        # does not actually change the generated geometry.
+        divider_requested = len(spec.get("dividers", []))
+        divider_volume_delta = 0.0
+        divider_pass = True
+        if shape == "enclosure" and divider_requested:
+            baseline = dict(spec)
+            baseline["dividers"] = []
+            try:
+                baseline_volume = float(self._cadquery_model(baseline).val().Volume())
+                actual_volume = float(model.val().Volume())
+                divider_volume_delta = actual_volume - baseline_volume
+                expected_divider_volume = sum(
+                    float(item["length"]) * float(item["thickness"]) * float(item["height"])
+                    for item in spec.get("dividers", [])
+                )
+                divider_pass = divider_volume_delta > 0.001 and divider_volume_delta <= expected_divider_volume + max(0.1, expected_divider_volume * 0.02)
+            except Exception:
+                divider_pass = False
+        checks.append({
+            "measurement": "divider_geometry",
+            "requested": divider_requested,
+            "volume_delta_mm3": round(divider_volume_delta, 4),
+            "pass": divider_pass,
+        })
+
+        opening_requested = len(spec.get("cable_openings", []))
+        opening_volume_delta = 0.0
+        opening_pass = True
+        if shape == "enclosure" and opening_requested:
+            baseline = dict(spec)
+            baseline["cable_openings"] = []
+            try:
+                baseline_volume = float(self._cadquery_model(baseline).val().Volume())
+                actual_volume = float(model.val().Volume())
+                opening_volume_delta = baseline_volume - actual_volume
+                expected_opening_volume = sum(
+                    float(item["width"]) * float(spec["dimensions"]["wall_thickness"]) * float(item["height"])
+                    for item in spec.get("cable_openings", [])
+                )
+                opening_pass = (
+                    opening_volume_delta > 0.001
+                    and abs(opening_volume_delta - expected_opening_volume) <= max(0.1, expected_opening_volume * 0.03)
+                )
+            except Exception:
+                opening_pass = False
+        checks.append({
+            "measurement": "cable_opening_geometry",
+            "requested": opening_requested,
+            "volume_delta_mm3": round(opening_volume_delta, 4),
+            "pass": opening_pass,
+        })
+
+        lid_requested = bool(spec.get("lid_interface"))
+        lid_volume_delta = 0.0
+        lid_pass = True
+        if shape == "enclosure" and lid_requested:
+            baseline = dict(spec)
+            baseline["lid_interface"] = {}
+            try:
+                baseline_volume = float(self._cadquery_model(baseline).val().Volume())
+                actual_volume = float(model.val().Volume())
+                lid_volume_delta = actual_volume - baseline_volume
+                lid = spec["lid_interface"]
+                inner_w = spec["dimensions"]["width"] - 2 * spec["dimensions"]["wall_thickness"] - 2 * lid["clearance"]
+                inner_d = spec["dimensions"]["depth"] - 2 * spec["dimensions"]["wall_thickness"] - 2 * lid["clearance"]
+                cut_w = max(0.1, inner_w - 2 * lid["lip_wall"])
+                cut_d = max(0.1, inner_d - 2 * lid["lip_wall"])
+                expected_lid_volume = (inner_w * inner_d - cut_w * cut_d) * lid["lip_height"]
+                lid_pass = (
+                    lid_volume_delta > 0.001
+                    and abs(lid_volume_delta - expected_lid_volume) <= max(0.1, expected_lid_volume * 0.03)
+                )
+            except Exception:
+                lid_pass = False
+        checks.append({
+            "measurement": "lid_interface_geometry",
+            "requested": lid_requested,
+            "volume_delta_mm3": round(lid_volume_delta, 4),
+            "pass": lid_pass,
+        })
+        internal_post_checks = []
+        if spec.get("internal_posts"):
+            for requested in spec["internal_posts"]:
+                target_r = requested["diameter"] / 2.0
+                candidates = []
+                for face in circles:
+                    try:
+                        radius = float(face._geomAdaptor().Radius())
+                        center = face.Center()
+                        bbox = face.BoundingBox()
+                        radius_error = abs(radius - target_r)
+                        distance = ((float(center.x) - requested["x"]) ** 2 +
+                                    (float(center.y) - requested["y"]) ** 2) ** 0.5
+                        height_error = abs(float(bbox.zlen) - requested["height"])
+                        candidates.append((radius_error, distance, height_error,
+                                           float(center.x), float(center.y), radius,
+                                           float(bbox.zlen)))
+                    except Exception:
+                        continue
+                matching = [item for item in candidates if item[0] <= 0.01 and item[1] <= 0.05]
+                best = min(matching or candidates, key=lambda item: (item[1], item[0], item[2])) if (matching or candidates) else None
+                diameter_ok = bool(best and best[0] <= 0.01)
+                location_ok = bool(best and best[1] <= 0.05)
+                height_ok = bool(best and best[2] <= 0.05)
+                bore_ok = True
+                if requested.get("bore_diameter"):
+                    bore_r = requested["bore_diameter"] / 2.0
+                    bore_candidates = []
+                    for face in circles:
+                        try:
+                            radius = float(face._geomAdaptor().Radius())
+                            center = face.Center()
+                            distance = ((float(center.x) - requested["x"]) ** 2 +
+                                        (float(center.y) - requested["y"]) ** 2) ** 0.5
+                            if abs(radius - bore_r) <= 0.01 and distance <= 0.05:
+                                bore_candidates.append(face)
+                        except Exception:
+                            continue
+                    bore_ok = bool(bore_candidates)
+                internal_post_checks.append({
+                    "requested_diameter_mm": round(requested["diameter"], 4),
+                    "actual_diameter_mm": round(best[5] * 2, 4) if best else None,
+                    "requested_height_mm": round(requested["height"], 4),
+                    "actual_height_mm": round(best[6], 4) if best else None,
+                    "requested_x_mm": round(requested["x"], 4),
+                    "requested_y_mm": round(requested["y"], 4),
+                    "actual_x_mm": round(best[3], 4) if best else None,
+                    "actual_y_mm": round(best[4], 4) if best else None,
+                    "bore_pass": bore_ok,
+                    "diameter_pass": diameter_ok,
+                    "location_pass": location_ok,
+                    "height_pass": height_ok,
+                    "pass": diameter_ok and location_ok and height_ok and bore_ok,
+                })
+        checks.append({"measurement": "internal_post_features",
+                       "requested": len(spec.get("internal_posts", [])),
+                       "actual": len(internal_post_checks),
+                       "details": internal_post_checks,
+                       "pass": len(internal_post_checks) == len(spec.get("internal_posts", [])) and
+                       all(item["pass"] for item in internal_post_checks)})
         print_constraints = spec.get("print_constraints") or {}
         printability_warnings = list(spec.get("metadata", {}).get("printability_warnings", []))
         checks.append({"measurement": "printability", "warnings": printability_warnings,
