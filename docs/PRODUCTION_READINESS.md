@@ -16,7 +16,7 @@ Set these before exposing the customer API publicly:
 - FABOS_DATA_DIR — persistent writable application-data directory.
 - FABOS_CORS_ORIGINS — comma-separated production storefront origins only. Do not leave localhost defaults in production. Applies only when running the FastAPI server (`fabos_core.cli serve`) with the storefront on a separate origin; the standard same-origin Caddy deployment does not use CORS at all.
 - FABOS_API_DOCS — leave unset/false in production unless API documentation is intentionally public. Read only by the FastAPI server.
-- FABOS_API_ALLOW_ORIGIN — the equivalent setting for the Waitress server (`fabos_api.server`), which is what the Windows production launcher runs. It does not read the three variables above.
+- FABOS_API_ALLOW_ORIGIN — the equivalent setting for the alternative/legacy Waitress server (`fabos_api.server`). The current Windows storefront production path uses FastAPI/Uvicorn instead and reads the FastAPI settings described above.
 - Configure the selected payment provider credentials/secrets using the provider settings already supported by FabOS.
 - Configure the payment webhook endpoint/signature secret in the payment provider and FabOS settings.
 - Configure OctoPrint URLs/API keys only for printers that should be remotely controlled.
