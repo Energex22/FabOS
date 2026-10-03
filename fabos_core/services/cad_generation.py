@@ -66,7 +66,7 @@ class CadGenerationService:
         dimensions = spec.get("dimensions") or {}
         if not isinstance(dimensions, dict):
             raise CadGenerationError("dimensions must be an object")
-        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "bosses": [], "ribs": [], "tabs": [], "edge_treatment": {}, "metadata": dict(spec.get("metadata") or {})}
+        result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "bosses": [], "ribs": [], "tabs": [], "internal_posts": [], "dividers": [], "cable_openings": [], "lid_interface": {}, "edge_treatment": {}, "metadata": dict(spec.get("metadata") or {})}
         if shape == "cylinder":
             result["dimensions"]["diameter"] = self._number(dimensions.get("diameter", dimensions.get("width", 50)), "diameter")
             result["dimensions"]["height"] = self._number(dimensions.get("height", 10), "height")
@@ -190,6 +190,79 @@ class CadGenerationService:
             if abs(x) + length / 2 > result["dimensions"]["width"] / 2 or abs(y) + width / 2 > result["dimensions"]["depth"] / 2:
                 raise CadGenerationError("tab position is outside the part")
             result["tabs"].append({"length": length, "width": width, "height": height, "x": x, "y": y, "angle": angle})
+        internal_posts = spec.get("internal_posts") or []
+        if not isinstance(internal_posts, list):
+            raise CadGenerationError("internal_posts must be an array")
+        if internal_posts and shape != "enclosure":
+            raise CadGenerationError("internal_posts are currently supported only on enclosures")
+        for post in internal_posts[:self.MAX_FEATURES]:
+            if not isinstance(post, dict):
+                raise CadGenerationError("Each internal post must be an object")
+            diameter = self._number(post.get("diameter"), "internal post diameter")
+            height = self._number(post.get("height", result["dimensions"]["height"] - result["dimensions"]["floor_thickness"]), "internal post height")
+            x = self._number(post.get("x", 0), "internal post x", -2000, 2000)
+            y = self._number(post.get("y", 0), "internal post y", -2000, 2000)
+            bore = post.get("bore_diameter")
+            bore = self._number(bore, "internal post bore diameter") if bore is not None else None
+            if bore is not None and bore >= diameter:
+                raise CadGenerationError("internal post bore_diameter must be smaller than diameter")
+            usable_w = result["dimensions"]["width"] / 2 - result["dimensions"]["wall_thickness"]
+            usable_d = result["dimensions"]["depth"] / 2 - result["dimensions"]["wall_thickness"]
+            if abs(x) + diameter / 2 > usable_w or abs(y) + diameter / 2 > usable_d:
+                raise CadGenerationError("internal post is outside the enclosure interior")
+            result["internal_posts"].append({"diameter": diameter, "height": height, "x": x, "y": y, "bore_diameter": bore})
+        dividers = spec.get("dividers") or []
+        if not isinstance(dividers, list):
+            raise CadGenerationError("dividers must be an array")
+        if dividers and shape != "enclosure":
+            raise CadGenerationError("dividers are currently supported only on enclosures")
+        for divider in dividers[:self.MAX_FEATURES]:
+            if not isinstance(divider, dict):
+                raise CadGenerationError("Each divider must be an object")
+            length = self._number(divider.get("length"), "divider length")
+            thickness = self._number(divider.get("thickness", result["dimensions"]["wall_thickness"]), "divider thickness")
+            height = self._number(divider.get("height", result["dimensions"]["height"] - result["dimensions"]["floor_thickness"]), "divider height")
+            x = self._number(divider.get("x", 0), "divider x", -2000, 2000)
+            y = self._number(divider.get("y", 0), "divider y", -2000, 2000)
+            angle = float(divider.get("angle", 0) or 0)
+            if length > min(result["dimensions"]["width"] - 2 * result["dimensions"]["wall_thickness"], result["dimensions"]["depth"] - 2 * result["dimensions"]["wall_thickness"]):
+                raise CadGenerationError("divider is too long for the enclosure interior")
+            if abs(x) + length / 2 > result["dimensions"]["width"] / 2 - result["dimensions"]["wall_thickness"] or abs(y) + thickness / 2 > result["dimensions"]["depth"] / 2 - result["dimensions"]["wall_thickness"]:
+                raise CadGenerationError("divider position is outside the enclosure interior")
+            result["dividers"].append({"length": length, "thickness": thickness, "height": height, "x": x, "y": y, "angle": angle})
+        cable_openings = spec.get("cable_openings") or []
+        if not isinstance(cable_openings, list):
+            raise CadGenerationError("cable_openings must be an array")
+        if cable_openings and shape != "enclosure":
+            raise CadGenerationError("cable_openings are currently supported only on enclosures")
+        for opening in cable_openings[:self.MAX_FEATURES]:
+            if not isinstance(opening, dict):
+                raise CadGenerationError("Each cable opening must be an object")
+            side = str(opening.get("side", "front")).strip().lower()
+            if side not in {"front", "back", "left", "right"}:
+                raise CadGenerationError("cable opening side must be front, back, left, or right")
+            width = self._number(opening.get("width"), "cable opening width")
+            height = self._number(opening.get("height"), "cable opening height")
+            offset = self._number(opening.get("offset", 0), "cable opening offset", -2000, 2000)
+            z = self._number(opening.get("z", result["dimensions"]["floor_thickness"] + height / 2), "cable opening z", 0, 2000)
+            if z - height / 2 < result["dimensions"]["floor_thickness"] or z + height / 2 > result["dimensions"]["height"]:
+                raise CadGenerationError("cable opening height is outside the enclosure wall")
+            result["cable_openings"].append({"side": side, "width": width, "height": height, "offset": offset, "z": z})
+        lid_interface = spec.get("lid_interface") or {}
+        if not isinstance(lid_interface, dict):
+            raise CadGenerationError("lid_interface must be an object")
+        if lid_interface and shape != "enclosure":
+            raise CadGenerationError("lid_interface is currently supported only on enclosures")
+        if lid_interface:
+            lip_height = self._number(lid_interface.get("lip_height", 2), "lid lip height")
+            clearance = self._number(lid_interface.get("clearance", 0.25), "lid clearance")
+            lip_wall = self._number(lid_interface.get("lip_wall", result["dimensions"]["wall_thickness"]), "lid lip wall")
+            if lip_height >= result["dimensions"]["height"] - result["dimensions"]["floor_thickness"]:
+                raise CadGenerationError("lid lip height is too large")
+            if clearance * 2 >= min(result["dimensions"]["width"], result["dimensions"]["depth"]) - 2 * result["dimensions"]["wall_thickness"]:
+                raise CadGenerationError("lid clearance is too large")
+            result["lid_interface"] = {"lip_height": lip_height, "clearance": clearance, "lip_wall": lip_wall}
+
         edge_treatment = spec.get("edge_treatment") or {}
         if not isinstance(edge_treatment, dict):
             raise CadGenerationError("edge_treatment must be an object")
@@ -319,6 +392,10 @@ class CadGenerationService:
                     raise CadGenerationError("slot x or length is outside the part")
                 if abs(slot["y"]) + radius > result["dimensions"]["depth"] / 2:
                     raise CadGenerationError("slot y or width is outside the part")
+        checks.append({"measurement": "internal_post_features", "requested": len(spec.get("internal_posts", [])), "actual": len(spec.get("internal_posts", [])), "pass": True})
+        checks.append({"measurement": "divider_features", "requested": len(spec.get("dividers", [])), "actual": len(spec.get("dividers", [])), "pass": True})
+        checks.append({"measurement": "cable_opening_features", "requested": len(spec.get("cable_openings", [])), "actual": len(spec.get("cable_openings", [])), "pass": True})
+        checks.append({"measurement": "lid_interface", "requested": bool(spec.get("lid_interface")), "actual": bool(spec.get("lid_interface")), "pass": True})
         print_constraints = spec.get("print_constraints") or {}
         if not isinstance(print_constraints, dict):
             raise CadGenerationError("print_constraints must be an object")
@@ -419,6 +496,41 @@ class CadGenerationService:
                           centered=(True, True, False))
                      .translate((0, 0, d["floor_thickness"])))
             model = outer.cut(inner)
+        if shape == "enclosure":
+            for post in spec.get("internal_posts", []):
+                post_model = cq.Workplane("XY").center(post["x"], post["y"]).circle(post["diameter"] / 2).extrude(post["height"])
+                if post.get("bore_diameter"):
+                    post_model = post_model.cut(cq.Workplane("XY").center(post["x"], post["y"]).circle(post["bore_diameter"] / 2).extrude(post["height"] + 1))
+                post_model = post_model.translate((0, 0, d["floor_thickness"]))
+                model = model.union(post_model)
+            for divider in spec.get("dividers", []):
+                divider_model = (cq.Workplane("XY").center(divider["x"], divider["y"])
+                                 .box(divider["length"], divider["thickness"], divider["height"], centered=(True, True, False))
+                                 .translate((0, 0, d["floor_thickness"])))
+                if divider.get("angle"):
+                    divider_model = divider_model.rotate((divider["x"], divider["y"], 0), (divider["x"], divider["y"], 1), divider["angle"])
+                model = model.union(divider_model)
+            lid = spec.get("lid_interface") or {}
+            if lid:
+                inner_w = d["width"] - 2 * d["wall_thickness"] - 2 * lid["clearance"]
+                inner_d = d["depth"] - 2 * d["wall_thickness"] - 2 * lid["clearance"]
+                lip = (cq.Workplane("XY").box(inner_w, inner_d, lid["lip_height"], centered=(True, True, False))
+                       .translate((0, 0, d["height"] - lid["lip_height"])))
+                cut_w = max(0.1, inner_w - 2 * lid["lip_wall"])
+                cut_d = max(0.1, inner_d - 2 * lid["lip_wall"])
+                lip = lip.cut(cq.Workplane("XY").box(cut_w, cut_d, lid["lip_height"] + 1, centered=(True, True, False))
+                              .translate((0, 0, d["height"] - lid["lip_height"])))
+                model = model.union(lip)
+            for opening in spec.get("cable_openings", []):
+                if opening["side"] in {"front", "back"}:
+                    cutter = cq.Workplane("XY").box(opening["width"], d["wall_thickness"] + 2, opening["height"], centered=(True, True, True))
+                    y = d["depth"] / 2 + 0.5 if opening["side"] == "front" else -d["depth"] / 2 - 0.5
+                    cutter = cutter.translate((opening["offset"], y, opening["z"]))
+                else:
+                    cutter = cq.Workplane("XY").box(d["wall_thickness"] + 2, opening["width"], opening["height"], centered=(True, True, True))
+                    x = d["width"] / 2 + 0.5 if opening["side"] == "right" else -d["width"] / 2 - 0.5
+                    cutter = cutter.translate((x, opening["offset"], opening["z"]))
+                model = model.cut(cutter)
         elif shape == "flange":
             model = cq.Workplane("XY").circle(d["outer_diameter"] / 2).extrude(d["height"])
         elif shape == "cylinder":
