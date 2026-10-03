@@ -98,12 +98,15 @@ class CadGenerationService:
             height = self._number(dimensions.get("height", 40), "height")
             wall = self._number(dimensions.get("wall_thickness", 2), "wall_thickness")
             floor = self._number(dimensions.get("floor_thickness", wall), "floor_thickness")
+            corner = self._number(dimensions.get("corner_radius", 0), "corner_radius", 0.0, min(width, depth) / 4)
+            if corner >= min(width, depth) / 2 - wall:
+                raise CadGenerationError("corner_radius is too large for enclosure wall thickness")
             if wall * 2 >= min(width, depth):
                 raise CadGenerationError("wall_thickness is too large for enclosure footprint")
             if floor >= height:
                 raise CadGenerationError("floor_thickness must be smaller than enclosure height")
             result["dimensions"] = {"width": width, "depth": depth, "height": height,
-                                    "wall_thickness": wall, "floor_thickness": floor}
+                                    "wall_thickness": wall, "floor_thickness": floor, "corner_radius": corner}
         else:
             result["dimensions"] = {
                 "width": self._number(dimensions.get("width", 100), "width"),
@@ -495,12 +498,16 @@ class CadGenerationService:
             model = cq.Workplane("XY").box(d["width"], d["depth"], d["height"], centered=(True, True, False))
         elif shape == "enclosure":
             outer = cq.Workplane("XY").box(d["width"], d["depth"], d["height"], centered=(True, True, False))
+            if d.get("corner_radius", 0):
+                outer = outer.edges("|Z").fillet(d["corner_radius"])
             inner = (cq.Workplane("XY")
                      .box(d["width"] - 2 * d["wall_thickness"],
                           d["depth"] - 2 * d["wall_thickness"],
                           d["height"] - d["floor_thickness"],
                           centered=(True, True, False))
                      .translate((0, 0, d["floor_thickness"])))
+            if d.get("corner_radius", 0):
+                inner = inner.edges("|Z").fillet(max(0.01, d["corner_radius"] - d["wall_thickness"]))
             model = outer.cut(inner)
         if shape == "enclosure":
             for post in spec.get("internal_posts", []):
