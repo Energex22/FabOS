@@ -579,9 +579,18 @@ class CadGenerationTests(unittest.TestCase):
         post_check = next(c for c in result["verification"]["checks"] if c["measurement"] == "internal_post_features")
         self.assertEqual(post_check["actual"], 2)
         self.assertTrue(all(item["pass"] for item in post_check["details"]))
-        self.assertEqual(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "divider_features"), 1)
-        self.assertEqual(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "cable_opening_features"), 1)
-        self.assertTrue(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "lid_interface"))
+        divider_check = next(c for c in result["verification"]["checks"] if c["measurement"] == "divider_geometry")
+        opening_check = next(c for c in result["verification"]["checks"] if c["measurement"] == "cable_opening_geometry")
+        lid_check = next(c for c in result["verification"]["checks"] if c["measurement"] == "lid_interface_geometry")
+        self.assertEqual(divider_check["requested"], 1)
+        self.assertGreater(divider_check["volume_delta_mm3"], 0)
+        self.assertTrue(divider_check["pass"])
+        self.assertEqual(opening_check["requested"], 1)
+        self.assertGreater(opening_check["volume_delta_mm3"], 0)
+        self.assertTrue(opening_check["pass"])
+        self.assertTrue(lid_check["requested"])
+        self.assertGreater(lid_check["volume_delta_mm3"], 0)
+        self.assertTrue(lid_check["pass"])
 
 
 
