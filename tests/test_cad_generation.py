@@ -353,5 +353,32 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(len(result["verification"]["holes"]), 4)
 
 
+    def test_enclosure_spec_validation(self):
+        spec = self.service.normalize_spec({
+            "shape": "enclosure",
+            "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+        })
+        self.assertEqual(spec["dimensions"]["wall_thickness"], 3.0)
+        self.assertEqual(spec["dimensions"]["floor_thickness"], 4.0)
+
+    def test_rejects_thick_enclosure_walls(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 40, "depth": 30, "height": 20, "wall_thickness": 20},
+            })
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_enclosure_generation_and_dimensions(self):
+        result = self.service.generate(spec={
+            "shape": "enclosure",
+            "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+        }, output_formats=["step"])
+        self.assertTrue(result["verification"]["passed"])
+        self.assertEqual(result["verification"]["checks"][0]["actual_mm"], 100.0)
+        self.assertEqual(result["verification"]["checks"][1]["actual_mm"], 80.0)
+        self.assertEqual(result["verification"]["checks"][2]["actual_mm"], 40.0)
+
+
 if __name__ == "__main__":
     unittest.main()
