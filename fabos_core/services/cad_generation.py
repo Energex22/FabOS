@@ -803,7 +803,7 @@ class CadGenerationService:
                         head_actual_diameter = round(candidate_head[3], 4)
                         head_actual_depth = round(candidate_head[4], 4)
                         head_diameter_ok = candidate_head[0] <= 0.05 and candidate_head[2] <= 0.05
-                        head_depth_ok = candidate_head[1] <= 0.05 and abs(candidate_head[5] - d["height"]) <= 0.05
+                        head_depth_ok = candidate_head[1] <= 0.05 and abs(candidate_head[5] - spec["dimensions"]["height"]) <= 0.05
                     else:
                         head_diameter_ok = False
                         head_depth_ok = False
@@ -835,16 +835,18 @@ class CadGenerationService:
                     try:
                         radius = float(face._geomAdaptor().Radius())
                         center = face.Center()
+                        bbox = face.BoundingBox()
                         radius_error = abs(radius - target_r)
                         distance = ((float(center.x) - requested["x"]) ** 2 +
                                     (float(center.y) - requested["y"]) ** 2) ** 0.5
-                        candidates.append((radius_error, distance, float(center.x), float(center.y), radius))
+                        candidates.append((radius_error, distance, float(center.x), float(center.y), radius, float(bbox.zlen)))
                     except Exception:
                         continue
                 matching = [item for item in candidates if item[0] <= 0.01]
                 best = min(matching or candidates, key=lambda item: (item[1], item[0])) if (matching or candidates) else None
                 diameter_ok = bool(best and best[0] <= 0.01)
                 location_ok = bool(best and abs(best[2] - requested["x"]) <= 0.05 and abs(best[3] - requested["y"]) <= 0.05)
+                height_ok = bool(best and abs(best[5] - requested["height"]) <= 0.05)
                 boss_checks.append({
                     "requested_diameter_mm": round(requested["diameter"], 4),
                     "actual_diameter_mm": round(best[4] * 2, 4) if best else None,
@@ -852,9 +854,12 @@ class CadGenerationService:
                     "requested_y_mm": round(requested["y"], 4),
                     "actual_x_mm": round(best[2], 4) if best else None,
                     "actual_y_mm": round(best[3], 4) if best else None,
+                    "requested_height_mm": round(requested["height"], 4),
+                    "actual_height_mm": round(best[5], 4) if best else None,
                     "diameter_pass": diameter_ok,
                     "location_pass": location_ok,
-                    "pass": diameter_ok and location_ok,
+                    "height_pass": height_ok,
+                    "pass": diameter_ok and location_ok and height_ok,
                 })
         # Verify enclosure internals against actual solid volume rather than trusting the request count.
         # This catches regressions where a requested feature is normalized but the boolean operation
