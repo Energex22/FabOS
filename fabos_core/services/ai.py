@@ -356,7 +356,7 @@ class AIService:
             "Use only dimensions explicitly supplied in the reference note; if scale is insufficient, "
             "put missing measurements in metadata.missing_dimensions and set metadata.scale_confirmed=false. "
             "Describe visible geometry/features in metadata.features. Allowed shapes: box, plate, cylinder, "
-            "ring, bracket, mounting_plate, flange. Slots are rounded rectangular cutouts. "
+            "ring, bracket, mounting_plate, flange, enclosure. Enclosures are open-top boxes with wall_thickness and floor_thickness. "
             "Bosses are cylindrical raised features on box-like parts. Ribs and tabs are rectangular raised features on box-like parts; preserve supplied dimensions and placement. Mounting patterns expand into explicit holes and support rectangular/grid or radial layouts. Enclosures may also use internal_posts for screw standoffs, dividers for internal compartments, cable_openings on the four side walls, and lid_interface for a removable-lid locating lip. Edge treatments may use one fillet_radius or one chamfer_distance on box-like parts. All dimensions are millimeters."
         )
         if reference_note:
