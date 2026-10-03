@@ -310,7 +310,7 @@ class AIService:
             "bolt_circle_diameter?:number,bolt_hole_diameter?:number,bolt_hole_count?:number}, "
             "holes:[{diameter:number,x:number,y:number,head_type?:countersink|counterbore,head_diameter?:number,head_depth?:number}], "
             "slots:[{length:number,width:number,x:number,y:number,angle?:number}], "
-            "bosses:[{diameter:number,height:number,x:number,y:number}], ribs:[{length:number,width:number,height:number,x:number,y:number,angle?:number}], tabs:[{length:number,width:number,height?:number,x:number,y:number,angle?:number}], mounting_pattern:{type?:rectangular|grid|radial,diameter?:number,spacing_x?:number,spacing_y?:number,count_x?:number,count_y?:number,radius?:number,count?:number,center_x?:number,center_y?:number,start_angle?:number}, edge_treatment:{fillet_radius?:number,chamfer_distance?:number}, metadata:{}}. "
+            "bosses:[{diameter:number,height:number,x:number,y:number}], ribs:[{length:number,width:number,height:number,x:number,y:number,angle?:number}], tabs:[{length:number,width:number,height?:number,x:number,y:number,angle?:number}], mounting_pattern:{type?:rectangular|grid|radial,diameter?:number,spacing_x?:number,spacing_y?:number,count_x?:number,count_y?:number,radius?:number,count?:number,center_x?:number,center_y?:number,start_angle?:number}, print_constraints:{nozzle_diameter?:number,min_wall_thickness?:number,min_feature_size?:number,strict?:boolean}, edge_treatment:{fillet_radius?:number,chamfer_distance?:number}, metadata:{}}. "
             "Do not include code, formulas, comments, or unsupported fields."
         )
         messages = [{"role": "system", "content": system}, {"role": "user", "content": str(prompt).strip()[:12000]}]
