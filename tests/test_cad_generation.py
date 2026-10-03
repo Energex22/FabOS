@@ -502,7 +502,9 @@ class CadGenerationTests(unittest.TestCase):
             "lid_interface": {"lip_height": 2, "clearance": 0.25, "lip_wall": 2},
         }, output_formats=["step"])
         self.assertTrue(result["verification"]["passed"])
-        self.assertEqual(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "internal_post_features"), 2)
+        post_check = next(c for c in result["verification"]["checks"] if c["measurement"] == "internal_post_features")
+        self.assertEqual(post_check["actual"], 2)
+        self.assertTrue(all(item["pass"] for item in post_check["details"]))
         self.assertEqual(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "divider_features"), 1)
         self.assertEqual(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "cable_opening_features"), 1)
         self.assertTrue(next(c["actual"] for c in result["verification"]["checks"] if c["measurement"] == "lid_interface"))
