@@ -5,6 +5,7 @@ arbitrary AI-generated Python. CadQuery is optional at import time but required 
 actually export CAD artifacts.
 """
 import json
+import math
 import re
 import uuid
 from pathlib import Path
