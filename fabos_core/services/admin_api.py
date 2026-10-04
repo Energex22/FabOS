@@ -395,3 +395,57 @@ def register_admin_routes(app, get_application, administrator_user):
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"sale": dict(sale)}
+
+    class QCUpdate(BaseModel):
+        items: list = Field(default_factory=list)
+        notes: str = Field(default="", max_length=4000)
+        status: str = Field(default="pending", max_length=20)
+
+    @app.get("/api/v1/admin/designs")
+    def admin_designs(q: str = "", user=Depends(administrator_user), application=Depends(get_application)):
+        rows = application.design_vault.list(q)
+        return {"designs": [dict(row) for row in rows]}
+
+    @app.get("/api/v1/admin/designs/{design_id}")
+    def admin_design(design_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        design = application.design_vault.get(design_id)
+        if not design:
+            raise HTTPException(status_code=404, detail="Design not found")
+        return {
+            "design": dict(design),
+            "versions": [dict(row) for row in application.design_vault.versions(design_id)],
+            "assets": [dict(row) for row in application.design_vault.assets(design_id)],
+            "model": application.design_vault.model_set_summary(design_id),
+            "production_history": [dict(row) for row in application.design_vault.production_history(design_id)],
+        }
+
+    @app.get("/api/v1/admin/qc")
+    def admin_qc(user=Depends(administrator_user), application=Depends(get_application)):
+        return {"inspections": [dict(row) for row in application.manufacturing.qc_list()]}
+
+    @app.get("/api/v1/admin/qc/{inspection_id}")
+    def admin_qc_detail(inspection_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        rows = [dict(row) for row in application.manufacturing.qc_list() if str(row["id"]) == str(inspection_id)]
+        if not rows:
+            raise HTTPException(status_code=404, detail="QC inspection not found")
+        item = rows[0]
+        try:
+            item["checklist"] = __import__("json").loads(item.get("checklist_json") or "[]")
+        except Exception:
+            item["checklist"] = []
+        return {"inspection": item}
+
+    @app.put("/api/v1/admin/qc/{inspection_id}")
+    def update_admin_qc(inspection_id: str, payload: QCUpdate, user=Depends(administrator_user), application=Depends(get_application)):
+        try:
+            application.manufacturing.qc_update(inspection_id, payload.items, payload.notes, payload.status)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        rows = [dict(row) for row in application.manufacturing.qc_list() if str(row["id"]) == str(inspection_id)]
+        return {"inspection": rows[0] if rows else None}
+
+    @app.post("/api/v1/admin/qc/reconcile")
+    def reconcile_admin_qc(user=Depends(administrator_user), application=Depends(get_application)):
+        return {"created": application.manufacturing.reconcile_qc()}
