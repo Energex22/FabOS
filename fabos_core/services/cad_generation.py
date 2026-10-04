@@ -915,24 +915,24 @@ class CadGenerationService:
                         for solid in solids:
                             for face in solid.Faces():
                                 try:
-                                if str(face.geomType()).upper() != "PLANE":
-                                    continue
-                                bbox = face.BoundingBox()
-                                center = face.Center()
-                                x_span = float(bbox.xlen)
-                                y_span = float(bbox.ylen)
-                                z_span = float(bbox.zlen)
-                                span_match = (
-                                    (abs(x_span - expected_x) <= 0.10 and abs(z_span - height) <= 0.10)
-                                    or (abs(y_span - expected_y) <= 0.10 and abs(z_span - height) <= 0.10)
-                                )
-                                near_center = (
-                                    abs(float(center.x) - target_x) <= max(0.10, thickness)
-                                    and abs(float(center.y) - target_y) <= max(0.10, thickness)
-                                )
-                                if span_match and near_center:
-                                    found = True
-                                    break
+                                    if str(face.geomType()).upper() != "PLANE":
+                                        continue
+                                    bbox = face.BoundingBox()
+                                    center = face.Center()
+                                    x_span = float(bbox.xlen)
+                                    y_span = float(bbox.ylen)
+                                    z_span = float(bbox.zlen)
+                                    span_match = (
+                                        (abs(x_span - expected_x) <= 0.10 and abs(z_span - height) <= 0.10)
+                                        or (abs(y_span - expected_y) <= 0.10 and abs(z_span - height) <= 0.10)
+                                    )
+                                    near_center = (
+                                        abs(float(center.x) - target_x) <= max(0.10, thickness)
+                                        and abs(float(center.y) - target_y) <= max(0.10, thickness)
+                                    )
+                                    if span_match and near_center:
+                                        found = True
+                                        break
                                 except Exception:
                                     continue
                             if found:
