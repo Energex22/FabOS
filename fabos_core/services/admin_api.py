@@ -5,7 +5,6 @@ def register_admin_routes(app, get_application, administrator_user):
     from typing import Optional
     from fastapi import Depends, HTTPException
     from pydantic import BaseModel, Field
-from typing import Optional
 
     class AccountUpdate(BaseModel):
         email: Optional[str] = Field(default=None, max_length=320)
