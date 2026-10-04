@@ -5,6 +5,7 @@ def register_admin_routes(app, get_application, administrator_user):
     from typing import Optional
     from fastapi import Depends, HTTPException
     from pydantic import BaseModel, Field
+from typing import Optional
 
     class AccountUpdate(BaseModel):
         email: Optional[str] = Field(default=None, max_length=320)
@@ -114,8 +115,8 @@ def register_admin_routes(app, get_application, administrator_user):
 
 
     class PrinterPreheatRequest(BaseModel):
-        hotend: float | None = Field(default=None, ge=0, le=300)
-        bed: float | None = Field(default=None, ge=0, le=130)
+        hotend: Optional[float] = Field(default=None, ge=0, le=300)
+        bed: Optional[float] = Field(default=None, ge=0, le=130)
 
     def _admin_printer(printer_id, application):
         with application.database.connect() as conn:
