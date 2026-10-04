@@ -618,7 +618,7 @@ class CadGenerationService:
             if d.get("corner_radius", 0):
                 inner = inner.edges("|Z").fillet(max(0.01, d["corner_radius"] - d["wall_thickness"]))
             model = outer.cut(inner)
-        elif shape == "enclosure":
+        if shape == "enclosure":
             for post in spec.get("internal_posts", []):
                 post_model = cq.Workplane("XY").center(post["x"], post["y"]).circle(post["diameter"] / 2).extrude(post["height"])
                 if post.get("bore_diameter"):
