@@ -722,6 +722,15 @@ class CadGenerationService:
     def _model_volume(model):
         """Return the volume of every solid contained in the CadQuery result."""
         try:
+            # Workplane.val() can expose only the first object when a boolean
+            # operation leaves multiple solids. Use the Workplane solids selector
+            # first so verification accounts for every generated solid.
+            values = list(model.solids().vals())
+            if values:
+                return sum(float(s.Volume()) for s in values)
+        except Exception:
+            pass
+        try:
             shape = model.val()
             solids = list(shape.Solids())
             if solids:
