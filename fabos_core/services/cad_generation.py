@@ -876,7 +876,7 @@ class CadGenerationService:
                     float(item["length"]) * float(item["thickness"]) * float(item["height"])
                     for item in spec.get("dividers", [])
                 )
-                divider_pass = divider_volume_delta > 0.001
+                divider_pass = divider_volume_delta > 0.001 and divider_volume_delta >= expected_divider_volume * 0.50
             except Exception:
                 divider_pass = False
         checks.append({
@@ -900,7 +900,7 @@ class CadGenerationService:
                     float(item["width"]) * float(spec["dimensions"]["wall_thickness"]) * float(item["height"])
                     for item in spec.get("cable_openings", [])
                 )
-                opening_pass = opening_volume_delta > 0.001
+                opening_pass = opening_volume_delta > 0.001 and opening_volume_delta <= expected_opening_volume * 1.10
             except Exception:
                 opening_pass = False
         checks.append({
@@ -926,7 +926,7 @@ class CadGenerationService:
                 cut_w = max(0.1, inner_w - 2 * lid["lip_wall"])
                 cut_d = max(0.1, inner_d - 2 * lid["lip_wall"])
                 expected_lid_volume = (inner_w * inner_d - cut_w * cut_d) * lid["lip_height"]
-                lid_pass = lid_volume_delta > 0.001
+                lid_pass = lid_volume_delta > 0.001 and lid_volume_delta <= expected_lid_volume * 1.10
             except Exception:
                 lid_pass = False
         checks.append({
