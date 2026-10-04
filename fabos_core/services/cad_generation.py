@@ -973,7 +973,7 @@ class CadGenerationService:
                             bbox = face.BoundingBox()
                             distance = ((float(center.x) - requested["x"]) ** 2 +
                                         (float(center.y) - requested["y"]) ** 2) ** 0.5
-                            bore_depth_ok = abs(float(bbox.zlen) - requested["height"]) <= 0.05
+                            bore_depth_ok = float(bbox.zlen) >= requested["height"] - 0.05
                             if abs(radius - bore_r) <= 0.01 and distance <= 0.05 and bore_depth_ok:
                                 bore_candidates.append(face)
                         except Exception:
