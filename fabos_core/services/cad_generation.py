@@ -895,7 +895,8 @@ class CadGenerationService:
             baseline = dict(spec)
             baseline["dividers"] = []
             try:
-                baseline_volume = self._model_volume(self._cadquery_model(baseline))
+                baseline_model = self._cadquery_model(baseline)
+                baseline_volume = self._model_volume(baseline_model)
                 actual_volume = self._model_volume(model)
                 divider_volume_delta = actual_volume - baseline_volume
                 expected_divider_volume = sum(
@@ -904,98 +905,29 @@ class CadGenerationService:
                 )
                 divider_pass = divider_volume_delta > 0.001 and divider_volume_delta >= expected_divider_volume * 0.50
                 if not divider_pass:
-                    # Boolean unions can collapse a divider into the enclosure topology
-                    # without exposing a useful top-level face or volume delta. Probe the
-                    # exact requested divider region against the generated and baseline
-                    # solids so verification remains based on actual model material.
-                    probe_delta = 0.0
-                    baseline_model = self._cadquery_model(baseline)
+                    detected = 0
+                    localized_delta = 0.0
                     for item in spec.get("dividers", []):
                         length = float(item["length"])
                         thickness = float(item["thickness"])
                         height = float(item["height"])
-                        target_x = float(item["x"])
-                        target_y = float(item["y"])
-                        angle = float(item.get("angle", 0.0) or 0.0)
-                        probe = (cq.Workplane("XY").center(target_x, target_y)
+                        angle = float(item.get("angle", 0.0))
+                        x = float(item["x"])
+                        y = float(item["y"])
+                        probe = (cq.Workplane("XY")
                                  .box(length, thickness, height, centered=(True, True, False))
-                                 .translate((0, 0, d["floor_thickness"])))
+                                 .translate((x, y, d["floor_thickness"])))
                         if angle:
-                            probe = probe.rotate((target_x, target_y, 0), (target_x, target_y, 1), angle)
-                        try:
-                            actual_probe = 0.0
-                            actual_solids = list(model.val().Solids())
-                            for solid in actual_solids:
-                                try:
-                                    actual_probe += max(0.0, float(solid.intersect(probe.val()).Volume()))
-                                except Exception:
-                                    continue
-                            baseline_probe = 0.0
-                            baseline_solids = list(baseline_model.val().Solids())
-                            for solid in baseline_solids:
-                                try:
-                                    baseline_probe += max(0.0, float(solid.intersect(probe.val()).Volume()))
-                                except Exception:
-                                    continue
-                            probe_delta += max(0.0, actual_probe - baseline_probe)
-                        except Exception:
-                            continue
-                    if probe_delta > 0.001:
-                        divider_volume_delta = max(divider_volume_delta, probe_delta)
-                        expected_added_volume = sum(
-                            float(item["length"]) * float(item["thickness"]) *
-                            max(0.0, float(item["height"]) - float(d["floor_thickness"]))
-                            for item in spec.get("dividers", [])
-                        )
-                        divider_pass = divider_volume_delta >= max(0.001, expected_added_volume * 0.50)
-                    if not divider_pass:
-                        # Final fallback: inspect planar faces across every resulting
-                        # solid. This is useful for kernels that expose the divider as
-                        # topology but do not support a stable boolean volume probe.
-                        detected = 0
-                        for item in spec.get("dividers", []):
-                            length = float(item["length"])
-                            thickness = float(item["thickness"])
-                            height = float(item["height"])
-                            target_x = float(item["x"])
-                            target_y = float(item["y"])
-                            angle = math.radians(float(item.get("angle", 0.0)))
-                            along_x = abs(math.cos(angle))
-                            along_y = abs(math.sin(angle))
-                            expected_x = length * along_x + thickness * along_y
-                            expected_y = length * along_y + thickness * along_x
-                            found = False
-                            solids = list(model.val().Solids()) or [model.val()]
-                            for solid in solids:
-                                for face in solid.Faces():
-                                    try:
-                                        if str(face.geomType()).upper() != "PLANE":
-                                            continue
-                                        bbox = face.BoundingBox()
-                                        center = face.Center()
-                                        x_span = float(bbox.xlen)
-                                        y_span = float(bbox.ylen)
-                                        z_span = float(bbox.zlen)
-                                        span_match = (
-                                            (abs(x_span - expected_x) <= 0.10 and abs(z_span - height) <= 0.10)
-                                            or (abs(y_span - expected_y) <= 0.10 and abs(z_span - height) <= 0.10)
-                                        )
-                                        near_center = (
-                                            abs(float(center.x) - target_x) <= max(0.10, thickness)
-                                            and abs(float(center.y) - target_y) <= max(0.10, thickness)
-                                        )
-                                        if span_match and near_center:
-                                            found = True
-                                            break
-                                    except Exception:
-                                        continue
-                                if found:
-                                    break
-                            if found:
-                                detected += 1
-                        divider_pass = detected == divider_requested
-                        if divider_pass:
-                            divider_volume_delta = max(divider_volume_delta, 0.001)
+                            probe = probe.rotate((x, y, 0), (x, y, 1), angle)
+                        actual_probe = model.intersect(probe)
+                        baseline_probe = baseline_model.intersect(probe)
+                        delta = max(0.0, self._model_volume(actual_probe) - self._model_volume(baseline_probe))
+                        expected_probe = max(0.001, length * thickness * max(0.0, height - d["floor_thickness"]))
+                        if delta >= expected_probe * 0.50:
+                            detected += 1
+                            localized_delta += delta
+                    divider_volume_delta = max(divider_volume_delta, localized_delta)
+                    divider_pass = detected == divider_requested
             except Exception:
                 divider_pass = False
         checks.append({
