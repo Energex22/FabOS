@@ -923,12 +923,21 @@ class CadGenerationService:
                         if angle:
                             probe = probe.rotate((target_x, target_y, 0), (target_x, target_y, 1), angle)
                         try:
-                            actual_probe = model.val().intersect(probe.val())
-                            baseline_probe = baseline_model.val().intersect(probe.val())
-                            probe_delta += max(
-                                0.0,
-                                float(actual_probe.Volume()) - float(baseline_probe.Volume()),
-                            )
+                            actual_probe = 0.0
+                            actual_solids = list(model.val().Solids())
+                            for solid in actual_solids:
+                                try:
+                                    actual_probe += max(0.0, float(solid.intersect(probe.val()).Volume()))
+                                except Exception:
+                                    continue
+                            baseline_probe = 0.0
+                            baseline_solids = list(baseline_model.val().Solids())
+                            for solid in baseline_solids:
+                                try:
+                                    baseline_probe += max(0.0, float(solid.intersect(probe.val()).Volume()))
+                                except Exception:
+                                    continue
+                            probe_delta += max(0.0, actual_probe - baseline_probe)
                         except Exception:
                             continue
                     if probe_delta > 0.001:
