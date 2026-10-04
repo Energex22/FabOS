@@ -911,8 +911,10 @@ class CadGenerationService:
                         expected_x = length * along_x + thickness * along_y
                         expected_y = length * along_y + thickness * along_x
                         found = False
-                        for face in model.val().Faces():
-                            try:
+                        solids = list(model.val().Solids()) or [model.val()]
+                        for solid in solids:
+                            for face in solid.Faces():
+                                try:
                                 if str(face.geomType()).upper() != "PLANE":
                                     continue
                                 bbox = face.BoundingBox()
@@ -931,8 +933,10 @@ class CadGenerationService:
                                 if span_match and near_center:
                                     found = True
                                     break
-                            except Exception:
-                                continue
+                                except Exception:
+                                    continue
+                            if found:
+                                break
                         if found:
                             detected += 1
                     divider_pass = detected == divider_requested
