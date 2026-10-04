@@ -631,7 +631,7 @@ class CadGenerationService:
             for divider in spec.get("dividers", []):
                 divider_model = (cq.Workplane("XY").center(divider["x"], divider["y"])
                                  .box(divider["length"], divider["thickness"], divider["height"] + 0.01, centered=(True, True, False))
-                                 .translate((0, 0, max(0.0, d["floor_thickness"] - 0.01))))
+                                 .translate((0, 0, d["floor_thickness"])))
                 if divider.get("angle"):
                     divider_model = divider_model.rotate((divider["x"], divider["y"], 0), (divider["x"], divider["y"], 1), divider["angle"])
                 model = model.union(divider_model)
