@@ -571,41 +571,6 @@ class CadGenerationService:
             spec = {"shape": shape, "dimensions": {"diameter": float(match.group(1)) if match else dims[0], "height": dims[-1]}}
         elif shape == "ring":
             spec = {"shape": shape, "dimensions": {"outer_diameter": dims[0], "inner_diameter": dims[1] if dims[1] < dims[0] else dims[0] / 2, "height": dims[2]}}
-        if shape == "enclosure":
-            for post in spec.get("internal_posts", []):
-                post_model = cq.Workplane("XY").center(post["x"], post["y"]).circle(post["diameter"] / 2).extrude(post["height"])
-                if post.get("bore_diameter"):
-                    post_model = post_model.cut(cq.Workplane("XY").center(post["x"], post["y"]).circle(post["bore_diameter"] / 2).extrude(post["height"] + 1))
-                post_model = post_model.translate((0, 0, d["floor_thickness"]))
-                model = model.union(post_model)
-            for divider in spec.get("dividers", []):
-                divider_model = (cq.Workplane("XY").center(divider["x"], divider["y"])
-                                 .box(divider["length"], divider["thickness"], divider["height"], centered=(True, True, False))
-                                 .translate((0, 0, d["floor_thickness"])))
-                if divider.get("angle"):
-                    divider_model = divider_model.rotate((divider["x"], divider["y"], 0), (divider["x"], divider["y"], 1), divider["angle"])
-                model = model.union(divider_model)
-            lid = spec.get("lid_interface") or {}
-            if lid:
-                inner_w = d["width"] - 2 * d["wall_thickness"] - 2 * lid["clearance"]
-                inner_d = d["depth"] - 2 * d["wall_thickness"] - 2 * lid["clearance"]
-                lip = (cq.Workplane("XY").box(inner_w, inner_d, lid["lip_height"], centered=(True, True, False))
-                       .translate((0, 0, d["height"] - lid["lip_height"])))
-                cut_w = max(0.1, inner_w - 2 * lid["lip_wall"])
-                cut_d = max(0.1, inner_d - 2 * lid["lip_wall"])
-                lip = lip.cut(cq.Workplane("XY").box(cut_w, cut_d, lid["lip_height"] + 1, centered=(True, True, False))
-                              .translate((0, 0, d["height"] - lid["lip_height"])))
-                model = model.union(lip)
-            for opening in spec.get("cable_openings", []):
-                if opening["side"] in {"front", "back"}:
-                    cutter = cq.Workplane("XY").box(opening["width"], d["wall_thickness"] + 2, opening["height"], centered=(True, True, True))
-                    y = d["depth"] / 2 + 0.5 if opening["side"] == "front" else -d["depth"] / 2 - 0.5
-                    cutter = cutter.translate((opening["offset"], y, opening["z"]))
-                else:
-                    cutter = cq.Workplane("XY").box(d["wall_thickness"] + 2, opening["width"], opening["height"], centered=(True, True, True))
-                    x = d["width"] / 2 + 0.5 if opening["side"] == "right" else -d["width"] / 2 - 0.5
-                    cutter = cutter.translate((x, opening["offset"], opening["z"]))
-                model = model.cut(cutter)
         elif shape == "flange":
             spec = {"shape": shape, "dimensions": {"outer_diameter": dims[0], "bore_diameter": dims[1] if dims[1] < dims[0] else dims[0] / 4, "height": dims[2]}}
         elif shape == "enclosure":
@@ -653,6 +618,41 @@ class CadGenerationService:
             if d.get("corner_radius", 0):
                 inner = inner.edges("|Z").fillet(max(0.01, d["corner_radius"] - d["wall_thickness"]))
             model = outer.cut(inner)
+        if shape == "enclosure":
+            for post in spec.get("internal_posts", []):
+                post_model = cq.Workplane("XY").center(post["x"], post["y"]).circle(post["diameter"] / 2).extrude(post["height"])
+                if post.get("bore_diameter"):
+                    post_model = post_model.cut(cq.Workplane("XY").center(post["x"], post["y"]).circle(post["bore_diameter"] / 2).extrude(post["height"] + 1))
+                post_model = post_model.translate((0, 0, d["floor_thickness"]))
+                model = model.union(post_model)
+            for divider in spec.get("dividers", []):
+                divider_model = (cq.Workplane("XY").center(divider["x"], divider["y"])
+                                 .box(divider["length"], divider["thickness"], divider["height"], centered=(True, True, False))
+                                 .translate((0, 0, d["floor_thickness"])))
+                if divider.get("angle"):
+                    divider_model = divider_model.rotate((divider["x"], divider["y"], 0), (divider["x"], divider["y"], 1), divider["angle"])
+                model = model.union(divider_model)
+            lid = spec.get("lid_interface") or {}
+            if lid:
+                inner_w = d["width"] - 2 * d["wall_thickness"] - 2 * lid["clearance"]
+                inner_d = d["depth"] - 2 * d["wall_thickness"] - 2 * lid["clearance"]
+                lip = (cq.Workplane("XY").box(inner_w, inner_d, lid["lip_height"], centered=(True, True, False))
+                       .translate((0, 0, d["height"] - lid["lip_height"])))
+                cut_w = max(0.1, inner_w - 2 * lid["lip_wall"])
+                cut_d = max(0.1, inner_d - 2 * lid["lip_wall"])
+                lip = lip.cut(cq.Workplane("XY").box(cut_w, cut_d, lid["lip_height"] + 1, centered=(True, True, False))
+                              .translate((0, 0, d["height"] - lid["lip_height"])))
+                model = model.union(lip)
+            for opening in spec.get("cable_openings", []):
+                if opening["side"] in {"front", "back"}:
+                    cutter = cq.Workplane("XY").box(opening["width"], d["wall_thickness"] + 2, opening["height"], centered=(True, True, True))
+                    y = d["depth"] / 2 + 0.5 if opening["side"] == "front" else -d["depth"] / 2 - 0.5
+                    cutter = cutter.translate((opening["offset"], y, opening["z"]))
+                else:
+                    cutter = cq.Workplane("XY").box(d["wall_thickness"] + 2, opening["width"], opening["height"], centered=(True, True, True))
+                    x = d["width"] / 2 + 0.5 if opening["side"] == "right" else -d["width"] / 2 - 0.5
+                    cutter = cutter.translate((x, opening["offset"], opening["z"]))
+                model = model.cut(cutter)
         elif shape == "flange":
             model = cq.Workplane("XY").circle(d["outer_diameter"] / 2).extrude(d["height"])
         elif shape == "cylinder":
