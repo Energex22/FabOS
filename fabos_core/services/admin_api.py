@@ -112,6 +112,66 @@ def register_admin_routes(app, get_application, administrator_user):
     def run_operations_automation(user=Depends(operations_user), application=Depends(get_application)):
         return application.production_automation.tick()
 
+
+    class PrinterPreheatRequest(BaseModel):
+        hotend: Optional[float] = Field(default=None, ge=0, le=300)
+        bed: Optional[float] = Field(default=None, ge=0, le=130)
+
+    def _admin_printer(printer_id, application):
+        with application.database.connect() as conn:
+            row = conn.execute("SELECT * FROM printers WHERE id=?", (printer_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Printer not found")
+        return row
+
+    @app.post("/api/v1/admin/printers/{printer_id}/preflight")
+    def admin_printer_preflight(printer_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        printer = _admin_printer(printer_id, application)
+        try:
+            result = application.octoprint_print.preflight(printer)
+            return {"printer_id": printer_id, "result": result}
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/admin/printers/{printer_id}/preheat")
+    def admin_printer_preheat(printer_id: str, payload: PrinterPreheatRequest, user=Depends(administrator_user), application=Depends(get_application)):
+        if payload.hotend is None and payload.bed is None:
+            raise HTTPException(status_code=400, detail="Set a hotend or bed target.")
+        printer = _admin_printer(printer_id, application)
+        try:
+            return {"printer_id": printer_id, "result": application.octoprint_print.preheat_together(printer, payload.hotend, payload.bed)}
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def _printer_job_command(printer_id, action, application):
+        printer = _admin_printer(printer_id, application)
+        try:
+            if action == "pause":
+                result = application.octoprint_print.pause(printer)
+            elif action == "resume":
+                result = application.octoprint_print.resume(printer)
+            elif action == "cancel":
+                result = application.octoprint_print.cancel(printer)
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported printer action")
+            return {"printer_id": printer_id, "action": action, "result": result}
+        except HTTPException:
+            raise
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/admin/printers/{printer_id}/pause")
+    def admin_printer_pause(printer_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        return _printer_job_command(printer_id, "pause", application)
+
+    @app.post("/api/v1/admin/printers/{printer_id}/resume")
+    def admin_printer_resume(printer_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        return _printer_job_command(printer_id, "resume", application)
+
+    @app.post("/api/v1/admin/printers/{printer_id}/cancel")
+    def admin_printer_cancel(printer_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        return _printer_job_command(printer_id, "cancel", application)
+
     @app.get("/api/v1/admin/users")
     def list_admin_users(user=Depends(administrator_user), application=Depends(get_application)):
         rows = application.accounts.list_users()
