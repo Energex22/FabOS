@@ -718,6 +718,17 @@ class CadGenerationService:
             model = model.cut(cutter)
         return model
 
+    @staticmethod
+    def _model_volume(model):
+        """Return total solid volume, including multi-solid CadQuery workplanes."""
+        try:
+            solids = list(model.solids().vals())
+        except Exception:
+            solids = []
+        if solids:
+            return sum(float(s.Volume()) for s in solids)
+        return float(model.val().Volume())
+
     def _verify(self, model, spec):
         shape = model.val()
         bb = shape.BoundingBox()
@@ -874,8 +885,8 @@ class CadGenerationService:
             baseline = dict(spec)
             baseline["dividers"] = []
             try:
-                baseline_volume = float(self._cadquery_model(baseline).val().Volume())
-                actual_volume = float(model.val().Volume())
+                baseline_volume = self._model_volume(self._cadquery_model(baseline))
+                actual_volume = self._model_volume(model)
                 divider_volume_delta = actual_volume - baseline_volume
                 expected_divider_volume = sum(
                     float(item["length"]) * float(item["thickness"]) * float(item["height"])
