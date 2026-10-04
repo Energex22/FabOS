@@ -663,7 +663,7 @@ class CadGenerationService:
             base = cq.Workplane("XY").box(d["width"], d["depth"], d["height"], centered=(True, True, False))
             wall = cq.Workplane("XZ").box(d["width"], d["height"], d["depth"], centered=(True, False, False)).translate((0, d["depth"] / 2 - d["height"] / 2, d["height"]))
             model = base.union(wall)
-        else:
+        elif shape not in {"box", "plate", "mounting_plate", "enclosure"}:
             raise CadGenerationError("Unsupported shape")
         for rib in spec.get("ribs", []):
             rib_model = (cq.Workplane("XY").center(rib["x"], rib["y"])
