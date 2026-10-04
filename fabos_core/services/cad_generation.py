@@ -622,7 +622,10 @@ class CadGenerationService:
             for post in spec.get("internal_posts", []):
                 post_model = cq.Workplane("XY").center(post["x"], post["y"]).circle(post["diameter"] / 2).extrude(post["height"])
                 if post.get("bore_diameter"):
-                    bore = (cq.Workplane("XY").center(post["x"], post["y"])\n                             .circle(post["bore_diameter"] / 2)\n                             .extrude(post["height"]))\n                    post_model = post_model.cut(bore)
+                    bore = (cq.Workplane("XY").center(post["x"], post["y"])
+                             .circle(post["bore_diameter"] / 2)
+                             .extrude(post["height"]))
+                    post_model = post_model.cut(bore)
                 post_model = post_model.translate((0, 0, d["floor_thickness"]))
                 model = model.union(post_model)
             for divider in spec.get("dividers", []):
