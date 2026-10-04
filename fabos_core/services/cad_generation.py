@@ -720,14 +720,15 @@ class CadGenerationService:
 
     @staticmethod
     def _model_volume(model):
-        """Return total solid volume, including multi-solid CadQuery workplanes."""
+        """Return the volume of every solid contained in the CadQuery result."""
         try:
-            solids = list(model.solids().vals())
+            shape = model.val()
+            solids = list(shape.Solids())
+            if solids:
+                return sum(float(s.Volume()) for s in solids)
+            return float(shape.Volume())
         except Exception:
-            solids = []
-        if solids:
-            return sum(float(s.Volume()) for s in solids)
-        return float(model.val().Volume())
+            return float(model.val().Volume())
 
     def _verify(self, model, spec):
         shape = model.val()
