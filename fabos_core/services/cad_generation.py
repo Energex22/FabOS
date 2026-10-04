@@ -637,9 +637,11 @@ class CadGenerationService:
                 model = model.union(divider_model)
             lid = spec.get("lid_interface") or {}
             if lid:
-                inner_w = d["width"] - 2 * d["wall_thickness"] - 2 * lid["clearance"]
-                inner_d = d["depth"] - 2 * d["wall_thickness"] - 2 * lid["clearance"]
-                lip = (cq.Workplane("XY").box(inner_w, inner_d, lid["lip_height"], centered=(True, True, False))
+                outer_w = d["width"] - 2 * d["wall_thickness"]
+                outer_d = d["depth"] - 2 * d["wall_thickness"]
+                inner_w = outer_w - 2 * lid["clearance"]
+                inner_d = outer_d - 2 * lid["clearance"]
+                lip = (cq.Workplane("XY").box(outer_w, outer_d, lid["lip_height"], centered=(True, True, False))
                        .translate((0, 0, d["height"] - lid["lip_height"])))
                 cut_w = max(0.1, inner_w - 2 * lid["lip_wall"])
                 cut_d = max(0.1, inner_d - 2 * lid["lip_wall"])
@@ -924,11 +926,13 @@ class CadGenerationService:
                 actual_volume = float(model.val().Volume())
                 lid_volume_delta = actual_volume - baseline_volume
                 lid = spec["lid_interface"]
-                inner_w = spec["dimensions"]["width"] - 2 * spec["dimensions"]["wall_thickness"] - 2 * lid["clearance"]
-                inner_d = spec["dimensions"]["depth"] - 2 * spec["dimensions"]["wall_thickness"] - 2 * lid["clearance"]
+                outer_w = spec["dimensions"]["width"] - 2 * spec["dimensions"]["wall_thickness"]
+                outer_d = spec["dimensions"]["depth"] - 2 * spec["dimensions"]["wall_thickness"]
+                inner_w = outer_w - 2 * lid["clearance"]
+                inner_d = outer_d - 2 * lid["clearance"]
                 cut_w = max(0.1, inner_w - 2 * lid["lip_wall"])
                 cut_d = max(0.1, inner_d - 2 * lid["lip_wall"])
-                expected_lid_volume = (inner_w * inner_d - cut_w * cut_d) * lid["lip_height"]
+                expected_lid_volume = (outer_w * outer_d - cut_w * cut_d) * lid["lip_height"]
                 lid_pass = lid_volume_delta > 0.001 and lid_volume_delta <= expected_lid_volume * 1.10
             except Exception:
                 lid_pass = False
