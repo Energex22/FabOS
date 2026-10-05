@@ -74,6 +74,27 @@ class DesignProofWorkflowTests(unittest.TestCase):
         created = production.create_jobs_from_order("order-1")
         self.assertEqual(len(created), 1)
 
+        # Customer-owned designs are printable without first being promoted to a storefront product.
+        stl = Path(self.temp.name) / "customer-part.stl"
+        stl.write_text("solid customer\\nendsolid customer\\n", encoding="utf-8")
+        import hashlib
+        sha = hashlib.sha256(stl.read_bytes()).hexdigest()
+        with self.db.connect() as conn:
+            conn.execute(
+                """INSERT INTO design_assets(
+                   id,design_id,version_id,kind,original_name,stored_path,sha256,bytes,
+                   width_mm,depth_mm,height_mm,triangle_count,is_primary)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ("asset-1", "design-1", "design-version-1", "STL", stl.name, str(stl), sha,
+                 stl.stat().st_size, 20, 20, 5, 12, 1),
+            )
+            conn.commit()
+
+        readiness = production.job_print_readiness(created[0], self.vault)
+        self.assertTrue(readiness["ready"])
+        self.assertEqual(readiness["state"], "stl")
+        self.assertEqual(readiness["gcode"], None)
+
     def test_customer_cannot_approve_another_customer_proof(self):
         proof = self.proofs.create("quote-1", status="sent")
         with self.db.connect() as conn:
