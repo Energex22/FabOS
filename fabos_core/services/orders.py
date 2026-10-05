@@ -67,9 +67,7 @@ class OrderService:
             "SELECT status FROM print_jobs WHERE order_id=?",
             (order_id,),
         ).fetchall()
-        if not jobs:
-            return True
-        if any((row["status"] or "").lower() != "completed" for row in jobs):
+        if jobs and any((row["status"] or "").lower() != "completed" for row in jobs):
             return False
         qc = conn.execute(
             "SELECT status FROM qc_inspections WHERE order_id=?",
