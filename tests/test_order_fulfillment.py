@@ -62,6 +62,20 @@ class FulfillmentTests(unittest.TestCase):
    with self.assertRaisesRegex(ValueError,"production, QC, and fulfillment"):
     OrderService(db).set_status_internal(oid,"completed")
 
+ def test_record_payment_cannot_bypass_production_completion_gates(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   oid=str(uuid.uuid4());jid=str(uuid.uuid4());qid=str(uuid.uuid4());iid=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,?)",(oid,"O-PAY-GATE","ready",1000))
+    c.execute("INSERT INTO invoices(id,invoice_number,order_id,status,subtotal_cents,tax_cents,shipping_cents,discount_cents,total_cents,paid_cents) VALUES(?,?,?,?,?,?,?,?,?,?)",(iid,"INV-PAY-GATE",oid,"open",1000,0,0,0,1000,0))
+    c.execute("INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",(jid,oid,"completed"))
+    c.execute("INSERT INTO qc_inspections(id,order_id,print_job_id,status) VALUES(?,?,?,'passed')",(qid,oid,jid))
+    c.commit()
+   from fabos_core.services.invoices import InvoiceService
+   InvoiceService(db,Path(td)/"data").record_payment(iid,1000,method="test",reference="pay-gate")
+   self.assertEqual(OrderService(db).get(oid)[0]["status"],"ready")
+
  def test_order_methods_are_on_commerce_mixin(self):
   for name in ("_build_orders_page","_order_dossier","_order_next_action","_order_fulfillment","_selected_order_id"):
    self.assertTrue(hasattr(CommerceMixin,name),name)
