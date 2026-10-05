@@ -157,8 +157,26 @@ class FulfillmentService:
         with self.db.connect() as c:
             order = c.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
         order_status = str(order["status"] or "").lower() if order else ""
-        if status in ("packed", "shipped", "delivered", "picked_up") and order_status not in ("ready", "shipped"):
-            raise ValueError("Order must be QC-approved and ready before fulfillment can advance.")
+        if status in ("packed", "shipped", "delivered", "picked_up"):
+            if order_status not in ("ready", "shipped"):
+                raise ValueError("Order must be QC-approved and ready before fulfillment can advance.")
+            # Do not rely solely on the mutable order status as proof of QC. An
+            # admin/import path can move an order to ready directly, so fulfillment
+            # must independently enforce the production/QC boundary.
+            with self.db.connect() as c:
+                jobs = c.execute(
+                    "SELECT status FROM print_jobs WHERE order_id=?",
+                    (order_id,),
+                ).fetchall()
+                if jobs:
+                    if any(str(row["status"] or "").lower() != "completed" for row in jobs):
+                        raise ValueError("Order must be QC-approved and all production jobs completed before fulfillment can advance.")
+                    qc = c.execute(
+                        "SELECT status FROM qc_inspections WHERE order_id=?",
+                        (order_id,),
+                    ).fetchall()
+                    if not qc or any(str(row["status"] or "").lower() != "passed" for row in qc):
+                        raise ValueError("Order must be QC-approved and all production inspections passed before fulfillment can advance.")
         if shipping_cost_cents is None:
             shipping_cost_cents = int(current["shipping_cost_cents"] or 0) if current else 0
         if self.STATUS_ORDER.get(status, 0) < self.STATUS_ORDER.get(current_status, 0):
