@@ -40,6 +40,23 @@ class FulfillmentLifecycleTests(unittest.TestCase):
                 self.assertIsNotNone(row["shipped_at"])
                 self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0], "shipped")
 
+
+    def test_fulfillment_cannot_advance_before_qc_ready(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            oid = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",
+                    (oid, "O-NOTREADY", "qc"),
+                )
+                c.commit()
+            service = FulfillmentService(db)
+            with self.assertRaises(ValueError):
+                service.save(oid, "shipping", "packed")
+
     def test_fulfillment_cannot_move_backwards(self):
         with tempfile.TemporaryDirectory() as td:
             db = Database(Path(td) / "fabos.sqlite3")
