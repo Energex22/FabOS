@@ -276,7 +276,16 @@ class PaymentService:
                     refund_amount=int(event.get("amount_cents") or payment_row["amount_cents"] or 0)
                     if refund_amount <= 0 or refund_amount > int(payment_row["amount_cents"] or 0):
                         raise PaymentProviderError("Refund webhook amount is invalid")
-                self._set_status(payment_id,event["status"],provider_payment_id=event.get("provider_payment_id"))
+                self._set_status(
+                    payment_id,
+                    event["status"],
+                    provider_payment_id=event.get("provider_payment_id"),
+                    refund_amount_cents=(
+                        int(event.get("amount_cents") or 0)
+                        if event.get("status") in ("partially_refunded", "refunded")
+                        else None
+                    ),
+                )
             return {"processed":True,"duplicate":False,"event_id":event_id,"status":event.get("status")}
         except Exception:
             with self.database.connect() as conn:
@@ -284,7 +293,7 @@ class PaymentService:
             raise
     def _update_gateway_fields(self,payment_id,result,status):
         with self.database.connect() as conn: conn.execute("UPDATE payment_transactions SET provider_payment_id=?,checkout_url=?,status=?,metadata_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(result.get("provider_payment_id"),result.get("checkout_url"),status,json.dumps(result.get("metadata") or {},sort_keys=True),payment_id));conn.commit()
-    def _set_status(self,payment_id,status,provider_payment_id=None):
+    def _set_status(self,payment_id,status,provider_payment_id=None,refund_amount_cents=None):
         if status not in self.VALID_STATUSES: raise ValueError("Unsupported payment status: %s"%status)
         with self.database.connect() as conn: row=conn.execute("SELECT * FROM payment_transactions WHERE id=?",(payment_id,)).fetchone()
         if not row: raise KeyError("Payment transaction not found")
@@ -300,14 +309,26 @@ class PaymentService:
         if status=="paid":
             self._settle_transaction(payment_id,status,provider_payment_id)
         elif status in ("partially_refunded","refunded"):
-            self._settle_refund(payment_id, status, provider_payment_id)
-    def _settle_refund(self,payment_id,status,provider_payment_id=None):
+            self._settle_refund(payment_id, status, provider_payment_id, refund_amount_cents)
+    def _settle_refund(self,payment_id,status,provider_payment_id=None,refund_amount_cents=None):
         with self.database.connect() as conn:
             row=conn.execute("SELECT * FROM payment_transactions WHERE id=?", (payment_id,)).fetchone()
         if not row or status not in ("partially_refunded","refunded"):
             return
-        amount=int(row["amount_cents"] or 0)
-        if amount <= 0 or not row["invoice_id"]:
+        if not row["invoice_id"]:
+            return
+        # Partial-refund webhooks carry the incremental refund amount. A final
+        # refunded state falls back to the invoice's remaining paid balance so
+        # repeated/late notifications cannot over-refund the ledger.
+        amount=int(refund_amount_cents or 0)
+        if status == "refunded" and amount <= 0:
+            with self.database.connect() as conn:
+                inv=conn.execute(
+                    "SELECT paid_cents FROM invoices WHERE id=?",
+                    (row["invoice_id"],),
+                ).fetchone()
+            amount=int(inv["paid_cents"] or 0) if inv else 0
+        if amount <= 0:
             return
         reference="refund:%s" % (provider_payment_id or payment_id)
         try:
