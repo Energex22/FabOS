@@ -86,7 +86,7 @@ class Pass19FulfillmentBoundaryTests(unittest.TestCase):
         self.assertEqual(fulfillment["tracking_number"], "TRACK-1")
 
     def test_invalid_fulfillment_method_and_status_are_rejected(self):
-        with self.assertRaisesRegex(ValueError, "method"):
+        with self.assertRaisesRegex(ValueError, "shipping-only status|pickup-only status"):
             self.fulfillment.ensure("order1", "teleport")
         with self.assertRaisesRegex(ValueError, "status"):
             self.fulfillment.save("order1", "shipping", "lost")
