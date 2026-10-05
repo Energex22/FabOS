@@ -53,6 +53,12 @@ class Pass17OrderAccessTests(unittest.TestCase):
         self.orders.set_status("order1","in_production",actor_user_id="employee")
         with self.assertRaises(ValueError): self.orders.set_status("order1","completed",actor_user_id="employee")
         self.orders.set_status("order1","ready",actor_user_id="employee")
+        with self.assertRaises(ValueError): self.orders.set_status("order1","completed",actor_user_id="employee")
+        with self.db.connect() as c:
+            import uuid
+            c.execute("INSERT INTO fulfillments(id,order_id,method,status) VALUES(?,?,?,?)",
+                      (str(uuid.uuid4()),"order1","shipping","delivered"))
+            c.commit()
         self.orders.set_status("order1","completed",actor_user_id="employee")
         with self.assertRaises(ValueError): self.orders.set_status("order1","pending",actor_user_id="employee")
 
