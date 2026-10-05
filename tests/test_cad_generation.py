@@ -314,6 +314,7 @@ class CadGenerationTests(unittest.TestCase):
                 verification_json TEXT,
                 artifacts_json TEXT,
                 error TEXT,
+                parent_job_id TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             )""")
