@@ -182,6 +182,61 @@ class DesignVaultService:
                 'stl_count':len(stls),'gcode_count':len(gcodes),'reason':reason}
   return result
 
+ def design_print_status(self,did):
+  """Return whether a customer-owned Design Vault design has a usable STL or G-code."""
+  with self.db.connect() as c:
+   rows=c.execute(
+    "SELECT * FROM design_assets WHERE design_id=? AND kind IN ('STL','GCODE') ORDER BY CASE kind WHEN 'GCODE' THEN 0 ELSE 1 END,created_at DESC",
+    (did,),
+   ).fetchall()
+  stls=[];gcodes=[]
+  for row in rows:
+   path=Path(row["stored_path"] or "")
+   if not path.exists():continue
+   if row["kind"]=="STL":stls.append(path)
+   elif row["kind"]=="GCODE":gcodes.append(path)
+  return {
+   "ready":bool(stls or gcodes),
+   "has_stl":bool(stls),
+   "has_gcode":bool(gcodes),
+   "stl_count":len(stls),
+   "gcode_count":len(gcodes),
+   "reason":"STL + G-code ready" if stls and gcodes else ("STL ready" if stls else ("Saved G-code ready" if gcodes else "Needs STL or G-code")),
+  }
+
+ def best_gcode_for_design(self,did,material=None,printer_name=None):
+  """Choose the best saved G-code for a Design Vault design."""
+  with self.db.connect() as c:
+   rows=c.execute(
+    "SELECT id,original_name,stored_path,bytes,created_at FROM design_assets WHERE design_id=? AND kind='GCODE' ORDER BY created_at DESC",
+    (did,),
+   ).fetchall()
+  if not rows:return None
+  wanted_material=str(material or "").upper().strip()
+  wanted_printer=str(printer_name or "").lower().strip()
+  ranked=[]
+  for index,row in enumerate(rows):
+   path=Path(row["stored_path"])
+   if not path.exists():continue
+   try:text=path.read_text(encoding="utf-8",errors="ignore")
+   except OSError:continue
+   def find(pattern):
+    m=re.search(pattern,text,re.I|re.M)
+    return m.group(1).strip() if m else ""
+   hinted_material=(find(r"^;\s*MATERIAL(?:_TYPE)?\s*[:=]\s*([A-Za-z0-9 _+\-]+)$") or
+                    find(r"^;\s*FILAMENT_TYPE\s*[:=]\s*([A-Za-z0-9 _+\-]+)$")).upper()
+   hinted_machine=(find(r"^;\s*MACHINE(?:_NAME)?\s*[:=]\s*(.+)$") or
+                   find(r"^;\s*PRINTER(?:_MODEL)?\s*[:=]\s*(.+)$")).lower()
+   score=0
+   if wanted_material and hinted_material:score+=100 if wanted_material==hinted_material else -100
+   elif wanted_material:score-=5
+   if wanted_printer and hinted_machine:score+=25 if wanted_printer in hinted_machine or hinted_machine in wanted_printer else -20
+   ranked.append((score,-index,row))
+  if not ranked:return None
+  ranked.sort(key=lambda item:(item[0],item[1]),reverse=True)
+  if wanted_material and ranked[0][0]<0:return None
+  return ranked[0][2]
+
  def gcode_library(self,pid):
   with self.db.connect() as c:
    design=c.execute("SELECT id FROM designs WHERE product_id=?",(pid,)).fetchone()
