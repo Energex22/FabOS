@@ -301,6 +301,80 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
                 conn.commit()
 
+    def test_reprint_reopens_ready_order_for_replacement(self):
+        app = FabOSApplication()
+        order_id = str(uuid.uuid4())
+        job_id = str(uuid.uuid4())
+        new_job_id = None
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,?)",
+                    (order_id, "REPRINT-REOPEN", "ready", 1000),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,order_id,status,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?)",
+                    (job_id, order_id, "completed", 30, 20),
+                )
+                conn.commit()
+            new_job_id = app.manufacturing.reprint(job_id)
+            with app.database.connect() as conn:
+                order = conn.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+                replacement = conn.execute(
+                    "SELECT status,printer_id,spool_id FROM print_jobs WHERE id=?", (new_job_id,)
+                ).fetchone()
+            self.assertEqual(order["status"], "in_production")
+            self.assertEqual(replacement["status"], "queued")
+            self.assertIsNone(replacement["printer_id"])
+            self.assertIsNone(replacement["spool_id"])
+        finally:
+            with app.database.connect() as conn:
+                if new_job_id:
+                    self._cleanup_print_job_fixture(conn, new_job_id, None)
+                self._cleanup_print_job_fixture(conn, job_id, None)
+                conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+                conn.commit()
+            close = getattr(app, "close", None)
+            if callable(close):
+                close()
+
+    def test_additional_copies_reopen_ready_order(self):
+        app = FabOSApplication()
+        order_id = str(uuid.uuid4())
+        source_id = str(uuid.uuid4())
+        created = []
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,?)",
+                    (order_id, "COPIES-REOPEN", "ready", 1000),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,order_id,status,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?)",
+                    (source_id, order_id, "completed", 30, 20),
+                )
+                conn.commit()
+            created = app.production.queue_additional_copies(source_id, 2)
+            with app.database.connect() as conn:
+                order = conn.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+                rows = conn.execute(
+                    "SELECT status FROM print_jobs WHERE order_id=? AND id<>?",
+                    (order_id, source_id),
+                ).fetchall()
+            self.assertEqual(order["status"], "in_production")
+            self.assertEqual(len(created), 2)
+            self.assertEqual([r["status"] for r in rows], ["queued", "queued"])
+        finally:
+            with app.database.connect() as conn:
+                for jid in created:
+                    self._cleanup_print_job_fixture(conn, jid, None)
+                self._cleanup_print_job_fixture(conn, source_id, None)
+                conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+                conn.commit()
+            close = getattr(app, "close", None)
+            if callable(close):
+                close()
+
     def test_completed_print_accounting_failure_creates_notification(self):
         app = FabOSApplication()
         job_id = str(uuid.uuid4())
