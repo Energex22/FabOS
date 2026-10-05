@@ -39,9 +39,15 @@ class ManufacturingService:
  def qc_list(self):
   with self.db.connect() as c:return c.execute("""SELECT q.*,o.order_number,c.name customer_name,p.name product_name FROM qc_inspections q LEFT JOIN orders o ON o.id=q.order_id LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN print_jobs j ON j.id=q.print_job_id LEFT JOIN products p ON p.id=j.product_id ORDER BY q.created_at DESC""").fetchall()
  def qc_save(self,qid,items,notes,passed):
+  status='passed' if passed else 'pending'
+  if not isinstance(items,list):raise ValueError("QC checklist must be a list.")
+  if passed and any(not isinstance(item,dict) or not bool(item.get('checked')) for item in items):
+   raise ValueError("QC cannot pass until every checklist item is checked.")
   with self.db.connect() as c:
-   q=c.execute('SELECT * FROM qc_inspections WHERE id=?',(qid,)).fetchone();status='passed' if passed else 'pending';c.execute('UPDATE qc_inspections SET checklist_json=?,notes=?,status=?,inspected_at=? WHERE id=?',(json.dumps(items),notes,status,datetime.now().isoformat(timespec='seconds') if passed else None,qid))
-   if passed and q and c.execute("SELECT COUNT(*) FROM qc_inspections WHERE order_id=? AND id<>? AND status<>'passed'",(q['order_id'],qid)).fetchone()[0]==0:c.execute("UPDATE orders SET status='ready' WHERE id=?",(q['order_id'],))
+   q=c.execute('SELECT * FROM qc_inspections WHERE id=?',(qid,)).fetchone()
+   if not q:raise KeyError("QC inspection not found.")
+   c.execute('UPDATE qc_inspections SET checklist_json=?,notes=?,status=?,inspected_at=? WHERE id=?',(json.dumps(items),notes,status,datetime.now().isoformat(timespec='seconds') if passed else None,qid))
+   if passed and c.execute("SELECT COUNT(*) FROM qc_inspections WHERE order_id=? AND id<>? AND status<>'passed'",(q['order_id'],qid)).fetchone()[0]==0:c.execute("UPDATE orders SET status='ready' WHERE id=?",(q['order_id'],))
    c.commit()
 
  def complete_with_inventory(self,jid,actual_minutes=None,actual_filament_g=None):
