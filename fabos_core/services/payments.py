@@ -251,7 +251,7 @@ class PaymentService:
             if not payment_id and event.get("order_id"):
                 with self.database.connect() as conn:
                     row=conn.execute("SELECT id FROM payment_transactions WHERE order_id=? ORDER BY created_at DESC LIMIT 1",(event["order_id"],)).fetchone();payment_id=row["id"] if row else None
-            if event.get("status") in self.VALID_STATUSES and "refund" not in str(event.get("event_type") or "").lower():
+            if event.get("status") in self.VALID_STATUSES:
                 if not payment_id:
                     raise PaymentProviderError("Webhook could not be matched to a FabOS payment")
                 with self.database.connect() as conn:
@@ -270,8 +270,12 @@ class PaymentService:
                     provider_amount=event.get("amount_cents")
                     if provider_amount is None or int(provider_amount) <= 0:
                         raise PaymentProviderError("Paid webhook is missing a valid amount")
-                    if not payment_row or int(payment_row["amount_cents"] or 0) != int(provider_amount):
+                    if int(payment_row["amount_cents"] or 0) != int(provider_amount):
                         raise PaymentProviderError("Paid webhook amount does not match the FabOS payment amount")
+                elif event.get("status") in ("partially_refunded","refunded"):
+                    refund_amount=int(event.get("amount_cents") or payment_row["amount_cents"] or 0)
+                    if refund_amount <= 0 or refund_amount > int(payment_row["amount_cents"] or 0):
+                        raise PaymentProviderError("Refund webhook amount is invalid")
                 self._set_status(payment_id,event["status"],provider_payment_id=event.get("provider_payment_id"))
             return {"processed":True,"duplicate":False,"event_id":event_id,"status":event.get("status")}
         except Exception:
@@ -293,7 +297,26 @@ class PaymentService:
             if provider_payment_id: conn.execute("UPDATE payment_transactions SET status=?,provider_payment_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(status,provider_payment_id,payment_id))
             else: conn.execute("UPDATE payment_transactions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(status,payment_id))
             conn.commit()
-        if status=="paid": self._settle_transaction(payment_id,status,provider_payment_id)
+        if status=="paid":
+            self._settle_transaction(payment_id,status,provider_payment_id)
+        elif status in ("partially_refunded","refunded"):
+            self._settle_refund(payment_id, status, provider_payment_id)
+    def _settle_refund(self,payment_id,status,provider_payment_id=None):
+        with self.database.connect() as conn:
+            row=conn.execute("SELECT * FROM payment_transactions WHERE id=?", (payment_id,)).fetchone()
+        if not row or status not in ("partially_refunded","refunded"):
+            return
+        amount=int(row["amount_cents"] or 0)
+        if amount <= 0 or not row["invoice_id"]:
+            return
+        reference="refund:%s" % (provider_payment_id or payment_id)
+        try:
+            self.invoices.record_refund(
+                row["invoice_id"], amount, reference=reference,
+                notes="Gateway refund reconciled by FabOS",
+            )
+        except ValueError:
+            return
     def _settle_transaction(self,payment_id,status,provider_payment_id=None):
         with self.database.connect() as conn: row=conn.execute("SELECT * FROM payment_transactions WHERE id=?",(payment_id,)).fetchone()
         if not row or status!="paid": return
