@@ -150,6 +150,11 @@ class FulfillmentService:
             c.execute("BEGIN IMMEDIATE")
             current = c.execute("SELECT method,status,shipping_cost_cents FROM fulfillments WHERE id=?", (fid,)).fetchone()
         current_status = str(current["status"] or "pending").lower() if current else "pending"
+        with self.db.connect() as c:
+            order = c.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+        order_status = str(order["status"] or "").lower() if order else ""
+        if status in ("packed", "shipped", "delivered", "picked_up") and order_status not in ("ready", "shipped"):
+            raise ValueError("Order must be QC-approved and ready before fulfillment can advance.")
         if shipping_cost_cents is None:
             shipping_cost_cents = int(current["shipping_cost_cents"] or 0) if current else 0
         if self.STATUS_ORDER.get(status, 0) < self.STATUS_ORDER.get(current_status, 0):
