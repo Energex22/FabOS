@@ -603,7 +603,12 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Order not found") from exc
         order = _order_payload(row)
         order["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
-        return {"order": order, "items": [_order_item_payload(item) for item in items]}
+        dossier = application.orders.dossier(order_id)
+        return {
+            "order": order,
+            "items": [_order_item_payload(item) for item in items],
+            "designs": [_json(design) for design in dossier.get("designs", [])],
+        }
 
     @app.get("/api/v1/admin/quotes")
     def admin_quotes(q: str = "", status: str = "All", group: str = "all", user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
