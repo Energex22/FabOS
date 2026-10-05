@@ -5,6 +5,7 @@ from pathlib import Path
 from fabos_core.db.database import Database
 from fabos_core.db.migrations import migrate
 from fabos_core.services.quotes import QuoteService
+from fabos_core.services.orders import OrderService
 
 
 class QuoteOrderSnapshotTests(unittest.TestCase):
@@ -69,6 +70,31 @@ class QuoteOrderSnapshotTests(unittest.TestCase):
             count = conn.execute("SELECT COUNT(*) FROM order_items WHERE order_id=?", (first,)).fetchone()[0]
         self.assertEqual(first, second)
         self.assertEqual(count, 1)
+
+    def test_quote_design_remains_visible_from_order_dossier(self):
+        quote_id = self.quotes.save(
+            {"customer_id": "customer-1", "status": "approved"},
+            [{"product_id": None, "description": "Customer CAD design", "quantity": 1, "unit_price_cents": 6500}],
+        )
+        with self.db.connect() as conn:
+            conn.execute(
+                "INSERT INTO designs(id,product_id,name,current_version,notes) VALUES(?,?,?,?,?)",
+                ("design-1", None, "Customer CAD", 1, "Generated customer design"),
+            )
+            conn.execute(
+                "INSERT INTO design_versions(id,design_id,version,label,notes) VALUES(?,?,?,?,?)",
+                ("version-1", "design-1", 1, "Generated", "Verified CAD artifact"),
+            )
+            conn.execute("INSERT INTO quote_designs(quote_id,design_id) VALUES(?,?)", (quote_id, "design-1"))
+            conn.commit()
+
+        order_id = self.quotes.convert_to_order(quote_id)
+        dossier = OrderService(self.db).dossier(order_id)
+        self.assertEqual(order_id, dossier["order"]["id"])
+        self.assertEqual(len(dossier["designs"]), 1)
+        self.assertEqual(dossier["designs"][0]["id"], "design-1")
+        self.assertEqual(dossier["designs"][0]["design_version"], 1)
+        self.assertEqual(dossier["designs"][0]["design_version_label"], "Generated")
 
     def test_quote_versions_record_each_saved_price_revision(self):
         quote_id = self.quotes.save(
