@@ -5,17 +5,21 @@ serializes only customer-safe fields and never exposes the internal order dossie
 Administrator routes are separately protected and are not part of the customer UI.
 """
 
+import json
+import base64
 import os
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+import re
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fabos_core.services.rate_limit import RateLimiter, request_client_key
 from pydantic import BaseModel, Field
+from fabos_core.services.cad_generation import CadGenerationError
 
 from fabos_core.application import FabOSApplication
 from fabos_core.services.admin_api import register_admin_routes
@@ -119,6 +123,16 @@ class LoginRequest(BaseModel):
     identifier: str = Field(min_length=1, max_length=320)
     password: str = Field(min_length=1, max_length=1024)
 
+
+class CadGenerationRequest(BaseModel):
+    prompt: Optional[str] = Field(default=None, max_length=12000)
+    spec: Optional[Dict[str, Any]] = None
+    output_formats: List[str] = Field(default_factory=lambda: ["stl", "step", "3mf"])
+    printer_id: Optional[str] = Field(default=None, max_length=128)
+
+class CadRevisionRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=8000)
+    output_formats: List[str] = Field(default_factory=lambda: ["stl", "step"])
 
 class StorefrontUpdate(BaseModel):
     visibility: str = Field(default="draft", min_length=1, max_length=20)
@@ -329,6 +343,158 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             return {"logged_out": True}
         application.auth.logout(authorization[7:].strip())
         return {"logged_out": True}
+
+    @app.get("/api/v1/customer/cad/capabilities")
+    def customer_cad_capabilities(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        return application.cad_generation.capabilities()
+
+    @app.get("/api/v1/customer/cad/printers")
+    def customer_cad_printers(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        return {"printers": application.cad_generation.list_printers()}
+
+    @app.post("/api/v1/customer/cad/generate")
+    def customer_cad_generate(payload: CadGenerationRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        if not payload.prompt and not payload.spec:
+            raise HTTPException(status_code=400, detail="Provide a design prompt or structured specification")
+        try:
+            result = application.cad_generation.generate(
+                spec=payload.spec,
+                prompt=payload.prompt,
+                output_formats=payload.output_formats,
+                owner_id=user["id"],
+            )
+        except CadGenerationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="CAD generation failed: %s" % exc) from exc
+        artifacts = [
+            {"format": item["format"], "bytes": item["bytes"],
+             "url": "/api/v1/customer/cad/artifacts/%s/%s" % (result["job_id"], item["format"])}
+            for item in result["artifacts"]
+        ]
+        return {"job_id": result["job_id"], "spec": result["spec"],
+                "verification": result["verification"], "artifacts": artifacts}
+
+    @app.post("/api/v1/customer/cad/analyze-reference")
+    async def customer_cad_analyze_reference(
+        reference_note: str = Form(default=""),
+        files: List[UploadFile] = File(default=[]),
+        user: Any = Depends(customer_user),
+        application: FabOSApplication = Depends(get_application),
+    ):
+        if not files:
+            raise HTTPException(status_code=400, detail="Upload at least one reference image")
+        if len(files) > 4:
+            raise HTTPException(status_code=400, detail="A maximum of 4 reference images is supported")
+        images = []
+        for uploaded in files:
+            content_type = str(uploaded.content_type or "").lower()
+            if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+                raise HTTPException(status_code=400, detail="Only PNG, JPEG, and WebP reference images are supported")
+            raw = await uploaded.read(5 * 1024 * 1024 + 1)
+            if len(raw) > 5 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Each reference image must be 5 MB or smaller")
+            images.append("data:%s;base64,%s" % (content_type, base64.b64encode(raw).decode("ascii")))
+        try:
+            result = application.ai.design_spec_from_images(images, reference_note=reference_note)
+            metadata = result.get("metadata") or {}
+            return {
+                "spec": result,
+                "scale_confirmed": bool(metadata.get("scale_confirmed")),
+                "scale_source": metadata.get("scale_source", "none"),
+                "reference_kind": metadata.get("reference_kind", "mixed"),
+                "confidence": metadata.get("confidence", 0.0),
+                "missing_dimensions": metadata.get("missing_dimensions", []),
+                "feature_uncertainties": metadata.get("feature_uncertainties", []),
+                "needs_user_confirmation": bool(metadata.get("needs_user_confirmation")),
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Reference analysis failed: %s" % exc) from exc
+
+    @app.post("/api/v1/customer/cad/preflight")
+    def customer_cad_preflight(payload: CadGenerationRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        if not payload.prompt and not payload.spec:
+            raise HTTPException(status_code=400, detail="Provide a design prompt or structured specification")
+        printer_id = payload.printer_id
+        try:
+            return application.cad_generation.preflight(spec=payload.spec, prompt=payload.prompt, printer_id=printer_id)
+        except CadGenerationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="CAD preflight failed: %s" % exc) from exc
+
+    @app.post("/api/v1/customer/cad/jobs/{job_id}/revise")
+    def customer_cad_revise(job_id: str, payload: CadRevisionRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        if not re.fullmatch(r"[0-9a-fA-F-]{20,80}", job_id):
+            raise HTTPException(status_code=404, detail="CAD job not found")
+        try:
+            result = application.cad_generation.revise(
+                job_id=job_id,
+                instruction=payload.instruction,
+                output_formats=payload.output_formats,
+                owner_id=user["id"],
+            )
+        except CadGenerationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="CAD revision failed: %s" % exc) from exc
+        artifacts = [
+            {"format": item["format"], "bytes": item["bytes"],
+             "url": "/api/v1/customer/cad/artifacts/%s/%s" % (result["job_id"], item["format"])}
+            for item in result["artifacts"]
+        ]
+        return {"job_id": result["job_id"], "spec": result["spec"],
+                "verification": result["verification"], "artifacts": artifacts}
+
+    @app.get("/api/v1/customer/cad/jobs")
+    def customer_cad_jobs(limit: int = 50, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            jobs = application.cad_generation.list_jobs(user["id"], limit=limit)
+            for job in jobs:
+                job["artifacts"] = [
+                    {"format": item.get("format"), "bytes": item.get("bytes"),
+                     "url": "/api/v1/customer/cad/artifacts/%s/%s" % (job["id"], item.get("format"))}
+                    for item in (job.get("artifacts") or [])
+                    if item.get("format") in {"stl", "step", "3mf"}
+                ]
+            return {"jobs": jobs}
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid CAD history limit")
+
+    @app.get("/api/v1/customer/cad/jobs/{job_id}")
+    def customer_cad_job(job_id: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        if not re.fullmatch(r"[0-9a-fA-F-]{20,80}", job_id):
+            raise HTTPException(status_code=404, detail="CAD job not found")
+        result = application.cad_generation.get_job(job_id, owner_id=user["id"])
+        if not result:
+            raise HTTPException(status_code=404, detail="CAD job not found")
+        result["artifacts"] = [
+            {"format": item.get("format"), "bytes": item.get("bytes"),
+             "url": "/api/v1/customer/cad/artifacts/%s/%s" % (job_id, item.get("format"))}
+            for item in (result.get("artifacts") or [])
+            if item.get("format") in {"stl", "step", "3mf"}
+        ]
+        return result
+
+    @app.get("/api/v1/customer/cad/artifacts/{job_id}/{fmt}")
+    def customer_cad_artifact(job_id: str, fmt: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        if not re.fullmatch(r"[0-9a-fA-F-]{20,80}", job_id):
+            raise HTTPException(status_code=404, detail="CAD artifact not found")
+        if fmt.lower() not in {"stl", "step", "3mf"}:
+            raise HTTPException(status_code=404, detail="CAD artifact not found")
+        root = application.cad_generation.root.resolve()
+        target = (root / job_id / ("model." + fmt.lower())).resolve()
+        try:
+            if target.parent.parent != root or not target.is_file():
+                raise HTTPException(status_code=404, detail="CAD artifact not found")
+            metadata = json.loads((target.parent / "metadata.json").read_text(encoding="utf-8"))
+            if str(metadata.get("owner_id") or "") != str(user["id"]):
+                raise HTTPException(status_code=404, detail="CAD artifact not found")
+        except HTTPException:
+            raise
+        except (OSError, ValueError, json.JSONDecodeError):
+            raise HTTPException(status_code=404, detail="CAD artifact not found")
+        return FileResponse(str(target), filename=target.name)
 
     @app.get("/api/v1/customer/me")
     def me(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):

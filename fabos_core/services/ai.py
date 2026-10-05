@@ -292,6 +292,40 @@ class AIService:
                 messages.append(tool_message)
         raise RuntimeError("AI exceeded the safe tool-call limit")
 
+    def design_spec_from_prompt(self, prompt):
+        """Convert a natural-language part request into a constrained CAD spec.
+
+        The model is only asked for structured dimensions/features. FabOS validates
+        the returned specification before any geometry is executed.
+        """
+        if not str(prompt or "").strip():
+            raise ValueError("Design prompt is required")
+        system = (
+            "You convert 3D-printing part descriptions into a strict JSON CAD specification. "
+            "Return JSON only. Allowed shapes: box, plate, cylinder, ring, bracket, mounting_plate, flange, enclosure. "
+            "All dimensions are millimeters. Never invent a measurement when the user supplied one; "
+            "use conservative primitive defaults only when a dimension is genuinely omitted. "
+            "JSON schema: {shape:string, dimensions:{width?:number,depth?:number,height:number, "
+            "diameter?:number,outer_diameter?:number,inner_diameter?:number,bore_diameter?:number,"
+            "bolt_circle_diameter?:number,bolt_hole_diameter?:number,bolt_hole_count?:number}, "
+            "holes:[{diameter:number,x:number,y:number,head_type?:countersink|counterbore,head_diameter?:number,head_depth?:number}], "
+            "slots:[{length:number,width:number,x:number,y:number,angle?:number}], "
+            "bosses:[{diameter:number,height:number,x:number,y:number}], ribs:[{length:number,width:number,height:number,x:number,y:number,angle?:number}], tabs:[{length:number,width:number,height?:number,x:number,y:number,angle?:number}], mounting_pattern:{type?:rectangular|grid|radial,diameter?:number,spacing_x?:number,spacing_y?:number,count_x?:number,count_y?:number,radius?:number,count?:number,center_x?:number,center_y?:number,start_angle?:number}, internal_posts:[{diameter:number,height?:number,x:number,y:number,bore_diameter?:number}], dividers:[{length:number,thickness?:number,height?:number,x:number,y:number,angle?:number}], cable_openings:[{side:front|back|left|right,width:number,height:number,offset?:number,z?:number}], lid_interface:{lip_height?:number,clearance?:number,lip_wall?:number}, print_constraints:{nozzle_diameter?:number,min_wall_thickness?:number,min_feature_size?:number,strict?:boolean}, edge_treatment:{fillet_radius?:number,chamfer_distance?:number}, metadata:{}}. "
+            "Do not include code, formulas, comments, or unsupported fields."
+        )
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": str(prompt).strip()[:12000]}]
+        response, _ = self._request(messages, use_tools=False)
+        content = response.get("content", "")
+        if isinstance(content, list):
+            content = "".join(str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in content)
+        content = str(content).strip()
+        if content.startswith("```"):
+            content = content.replace("```json", "", 1).replace("```", "", 1).strip()
+        result = json.loads(content)
+        if not isinstance(result, dict):
+            raise ValueError("AI CAD response was not an object")
+        return result
+
     def product_assistant(self, product_id, instruction="Create useful marketing copy for this product."):
         product = self.products.get(product_id)
         if not product:
@@ -310,3 +344,71 @@ class AIService:
             "Facebook/Instagram/TikTok/Pinterest captions, 5-10 relevant hashtags, and a clear call to action. "
             "Do not invent materials, dimensions, certifications, licensing rights, shipping times, or capabilities.",
         )
+
+
+    def design_spec_from_images(self, images, reference_note=""):
+        """Extract a constrained CAD spec from reference images without executing model code."""
+        if not images:
+            raise ValueError("At least one reference image is required")
+        prompt = (
+            "Analyze these reference images as a dimensional CAD engineer. Return JSON only using the same CAD schema as design_spec_from_prompt. "
+            "First classify the references in metadata.reference_kind as photo, dimensioned_drawing, sketch, or mixed. "
+            "Separate metadata.explicit_dimensions (measurements visibly labeled or explicitly supplied in the reference note) from metadata.inferred_dimensions (estimates based on geometry). "
+            "Never treat pixel proportions, perspective, or visual scale as an exact measurement. "
+            "Set metadata.scale_confirmed=true only when a trustworthy scale source exists, such as labeled drawing dimensions or an explicitly supplied physical reference measurement. "
+            "Set metadata.scale_source to drawing_dimension, user_measurement, physical_scale_reference, or none. "
+            "For dimensioned drawings, extract every readable labeled dimension and use drawing views to resolve width/depth/height and feature locations. "
+            "For photos and ordinary sketches without a trustworthy scale, identify the measurements required to make a dimensionally accurate model and list them in metadata.missing_dimensions. "
+            "List unresolved critical geometry ambiguities in metadata.feature_uncertainties and set metadata.needs_user_confirmation=true when any critical ambiguity remains. "
+            "Set metadata.confidence to a number from 0 to 1 reflecting extraction confidence, not confidence that an unmeasured dimension is correct. "
+            "Do not invent exact dimensions from pixels. Use only dimensions explicitly supplied in the reference note or labeled in the reference. "
+            "If scale is insufficient, metadata.scale_confirmed must be false and direct generation must remain blocked. "
+            "Describe visible geometry/features in metadata.features. Allowed shapes: box, plate, cylinder, ring, bracket, mounting_plate, flange, enclosure. "
+            "Enclosures are open-top boxes with wall_thickness and floor_thickness. Bosses are cylindrical raised features on box-like parts. "
+            "Ribs and tabs are rectangular raised features on box-like parts; preserve supplied dimensions and placement. "
+            "Mounting patterns expand into explicit holes and support rectangular/grid or radial layouts. "
+            "Enclosures may also use internal_posts for screw standoffs, dividers for internal compartments, cable_openings on the four side walls, and lid_interface for a removable-lid locating lip. "
+            "Edge treatments may use one fillet_radius or one chamfer_distance on box-like parts. All dimensions are millimeters."
+        )
+        if reference_note:
+            prompt += "\nReference measurements/context: " + str(reference_note).strip()[:4000]
+        content = [{"type": "text", "text": prompt}]
+        for item in images[:4]:
+            content.append({"type": "image_url", "image_url": {"url": item}})
+        messages = [
+            {"role": "system", "content": "You are a dimensional CAD reference analyzer. JSON only."},
+            {"role": "user", "content": content},
+        ]
+        response, _ = self._request(messages, use_tools=False)
+        raw = response.get("content", "")
+        if isinstance(raw, list):
+            raw = "".join(str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in raw)
+        raw = str(raw).strip()
+        if raw.startswith("```"):
+            raw = raw.replace("```json", "", 1).replace("```", "", 1).strip()
+        result = json.loads(raw)
+        if not isinstance(result, dict):
+            raise ValueError("AI CAD image response was not an object")
+        metadata = result.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        metadata.setdefault("reference_analysis", True)
+        metadata.setdefault("reference_kind", "mixed")
+        metadata.setdefault("scale_confirmed", False)
+        metadata.setdefault("scale_source", "none")
+        metadata.setdefault("confidence", 0.0)
+        metadata.setdefault("missing_dimensions", [])
+        metadata.setdefault("explicit_dimensions", {})
+        metadata.setdefault("inferred_dimensions", {})
+        metadata.setdefault("feature_uncertainties", [])
+        metadata.setdefault("needs_user_confirmation", False)
+        if not isinstance(metadata["missing_dimensions"], list):
+            metadata["missing_dimensions"] = [str(metadata["missing_dimensions"])]
+        if not isinstance(metadata["feature_uncertainties"], list):
+            metadata["feature_uncertainties"] = [str(metadata["feature_uncertainties"])]
+        try:
+            metadata["confidence"] = max(0.0, min(1.0, float(metadata.get("confidence", 0.0))))
+        except (TypeError, ValueError):
+            metadata["confidence"] = 0.0
+        result["metadata"] = metadata
+        return result
