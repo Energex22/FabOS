@@ -40,6 +40,10 @@ class ManufacturingService:
   with self.db.connect() as c:return c.execute("""SELECT q.*,o.order_number,c.name customer_name,p.name product_name FROM qc_inspections q LEFT JOIN orders o ON o.id=q.order_id LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN print_jobs j ON j.id=q.print_job_id LEFT JOIN products p ON p.id=j.product_id ORDER BY q.created_at DESC""").fetchall()
  def qc_save(self,qid,items,notes,passed):
   status='passed' if passed else 'pending'
+  # Accept the legacy keyed checklist shape while normalizing it to the
+  # structured checklist used by the current QC UI.
+  if isinstance(items,dict):
+   items=[{"label":str(k),"value":v,"checked":True} for k,v in items.items()]
   if not isinstance(items,list):raise ValueError("QC checklist must be a list.")
   if passed and any(not isinstance(item,dict) or not bool(item.get('checked')) for item in items):
    raise ValueError("QC cannot pass until every checklist item is checked.")
