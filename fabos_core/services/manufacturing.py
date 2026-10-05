@@ -99,6 +99,11 @@ class ManufacturingService:
     VALUES(?,?,?,?,NULL,NULL,'queued',?,?,?,?,?)""",
     (nid,j['order_id'],j['product_id'],j['variant_id'],j['gcode_path'],
      j['octoprint_file'],j['estimated_minutes'],j['estimated_filament_g'],j['slicer_metadata_json']))
+   if j['order_id']:
+    # A reprint after QC/fulfillment reopens the order so the replacement cannot
+    # silently sit behind a ready/completed order.
+    c.execute("""UPDATE orders SET status='in_production'
+       WHERE id=? AND status IN ('qc','ready','completed')""",(j['order_id'],))
    c.commit();return nid
  def parse_gcode_file(self,path):
   text=Path(path).read_text(encoding='utf-8',errors='ignore');mins=None;grams=None
