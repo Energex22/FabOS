@@ -64,15 +64,19 @@ class OrderService:
     def _production_completion_ready(conn, order_id):
         """Require every real production/fulfillment gate before closing an order."""
         jobs = conn.execute(
-            "SELECT status FROM print_jobs WHERE order_id=?",
-            (order_id,),
+            "SELECT status FROM print_jobs WHERE order_id=? AND status<>?",
+            (order_id, "cancelled"),
         ).fetchall()
         if jobs:
             if any((row["status"] or "").lower() != "completed" for row in jobs):
                 return False
             qc = conn.execute(
-                "SELECT status FROM qc_inspections WHERE order_id=?",
-                (order_id,),
+                """SELECT q.status
+                   FROM qc_inspections q
+                   LEFT JOIN print_jobs j ON j.id=q.print_job_id
+                   WHERE q.order_id=?
+                     AND (q.print_job_id IS NULL OR COALESCE(j.status,'')<>?)""",
+                (order_id, "cancelled"),
             ).fetchall()
             if not qc or any((row["status"] or "").lower() != "passed" for row in qc):
                 return False
