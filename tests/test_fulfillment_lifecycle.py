@@ -89,5 +89,75 @@ class FulfillmentLifecycleTests(unittest.TestCase):
                 service.save(oid, "shipping", "packed", shipping_cost_cents=250)
 
 
+    def test_terminal_fulfillment_cannot_bypass_production_completion_gates(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            oid = str(uuid.uuid4())
+            jid = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",
+                    (oid, "O-QC-GATE", "ready"),
+                )
+                c.execute(
+                    "INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",
+                    (jid, oid, "queued"),
+                )
+                c.commit()
+
+            service = FulfillmentService(db)
+            service.save(oid, "shipping", "delivered")
+            with db.connect() as c:
+                self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0], "shipped")
+
+    def test_terminal_fulfillment_can_complete_when_all_gates_are_met(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            oid = str(uuid.uuid4())
+            jid = str(uuid.uuid4())
+            qid = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",
+                    (oid, "O-COMPLETE", "ready"),
+                )
+                c.execute(
+                    "INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",
+                    (jid, oid, "completed"),
+                )
+                c.execute(
+                    "INSERT INTO qc_inspections(id,order_id,print_job_id,status) VALUES(?,?,?,'passed')",
+                    (qid, oid, jid),
+                )
+                c.commit()
+
+            FulfillmentService(db).save(oid, "shipping", "delivered")
+            with db.connect() as c:
+                self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0], "completed")
+
+    def test_fulfillment_method_cannot_use_the_other_method_statuses(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            oid = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",
+                    (oid, "O-METHOD", "ready"),
+                )
+                c.commit()
+
+            service = FulfillmentService(db)
+            with self.assertRaises(ValueError):
+                service.save(oid, "pickup", "shipped")
+            with self.assertRaises(ValueError):
+                service.save(oid, "shipping", "picked_up")
+
+
 if __name__ == "__main__":
     unittest.main()
