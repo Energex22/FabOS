@@ -133,6 +133,66 @@ def register_admin_routes(app, get_application, administrator_user):
     def run_operations_automation(user=Depends(operations_user), application=Depends(get_application)):
         return application.production_automation.tick()
 
+
+    class PrinterPreheatRequest(BaseModel):
+        hotend: Optional[float] = Field(default=None, ge=0, le=300)
+        bed: Optional[float] = Field(default=None, ge=0, le=130)
+
+    def _admin_printer(printer_id, application):
+        with application.database.connect() as conn:
+            row = conn.execute("SELECT * FROM printers WHERE id=?", (printer_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Printer not found")
+        return row
+
+    @app.post("/api/v1/admin/printers/{printer_id}/preflight")
+    def admin_printer_preflight(printer_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        printer = _admin_printer(printer_id, application)
+        try:
+            result = application.octoprint_print.preflight(printer)
+            return {"printer_id": printer_id, "result": result}
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/admin/printers/{printer_id}/preheat")
+    def admin_printer_preheat(printer_id: str, payload: PrinterPreheatRequest, user=Depends(administrator_user), application=Depends(get_application)):
+        if payload.hotend is None and payload.bed is None:
+            raise HTTPException(status_code=400, detail="Set a hotend or bed target.")
+        printer = _admin_printer(printer_id, application)
+        try:
+            return {"printer_id": printer_id, "result": application.octoprint_print.preheat_together(printer, payload.hotend, payload.bed)}
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def _printer_job_command(printer_id, action, application):
+        printer = _admin_printer(printer_id, application)
+        try:
+            if action == "pause":
+                result = application.octoprint_print.pause(printer)
+            elif action == "resume":
+                result = application.octoprint_print.resume(printer)
+            elif action == "cancel":
+                result = application.octoprint_print.cancel(printer)
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported printer action")
+            return {"printer_id": printer_id, "action": action, "result": result}
+        except HTTPException:
+            raise
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/v1/admin/printers/{printer_id}/pause")
+    def admin_printer_pause(printer_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        return _printer_job_command(printer_id, "pause", application)
+
+    @app.post("/api/v1/admin/printers/{printer_id}/resume")
+    def admin_printer_resume(printer_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        return _printer_job_command(printer_id, "resume", application)
+
+    @app.post("/api/v1/admin/printers/{printer_id}/cancel")
+    def admin_printer_cancel(printer_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        return _printer_job_command(printer_id, "cancel", application)
+
     @app.get("/api/v1/admin/users")
     def list_admin_users(user=Depends(administrator_user), application=Depends(get_application)):
         rows = application.accounts.list_users()
@@ -416,3 +476,57 @@ def register_admin_routes(app, get_application, administrator_user):
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"sale": dict(sale)}
+
+    class QCUpdate(BaseModel):
+        items: list = Field(default_factory=list)
+        notes: str = Field(default="", max_length=4000)
+        status: str = Field(default="pending", max_length=20)
+
+    @app.get("/api/v1/admin/designs")
+    def admin_designs(q: str = "", user=Depends(administrator_user), application=Depends(get_application)):
+        rows = application.design_vault.list(q)
+        return {"designs": [dict(row) for row in rows]}
+
+    @app.get("/api/v1/admin/designs/{design_id}")
+    def admin_design(design_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        design = application.design_vault.get(design_id)
+        if not design:
+            raise HTTPException(status_code=404, detail="Design not found")
+        return {
+            "design": dict(design),
+            "versions": [dict(row) for row in application.design_vault.versions(design_id)],
+            "assets": [dict(row) for row in application.design_vault.assets(design_id)],
+            "model": application.design_vault.model_set_summary(design_id),
+            "production_history": [dict(row) for row in application.design_vault.production_history(design_id)],
+        }
+
+    @app.get("/api/v1/admin/qc")
+    def admin_qc(user=Depends(administrator_user), application=Depends(get_application)):
+        return {"inspections": [dict(row) for row in application.manufacturing.qc_list()]}
+
+    @app.get("/api/v1/admin/qc/{inspection_id}")
+    def admin_qc_detail(inspection_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        rows = [dict(row) for row in application.manufacturing.qc_list() if str(row["id"]) == str(inspection_id)]
+        if not rows:
+            raise HTTPException(status_code=404, detail="QC inspection not found")
+        item = rows[0]
+        try:
+            item["checklist"] = __import__("json").loads(item.get("checklist_json") or "[]")
+        except Exception:
+            item["checklist"] = []
+        return {"inspection": item}
+
+    @app.put("/api/v1/admin/qc/{inspection_id}")
+    def update_admin_qc(inspection_id: str, payload: QCUpdate, user=Depends(administrator_user), application=Depends(get_application)):
+        try:
+            application.manufacturing.qc_update(inspection_id, payload.items, payload.notes, payload.status)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        rows = [dict(row) for row in application.manufacturing.qc_list() if str(row["id"]) == str(inspection_id)]
+        return {"inspection": rows[0] if rows else None}
+
+    @app.post("/api/v1/admin/qc/reconcile")
+    def reconcile_admin_qc(user=Depends(administrator_user), application=Depends(get_application)):
+        return {"created": application.manufacturing.reconcile_qc()}
