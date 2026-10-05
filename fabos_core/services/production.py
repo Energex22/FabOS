@@ -382,7 +382,10 @@ class ProductionService:
             if created and source["order_id"]:
                 # Additional copies are new production work. If the order had
                 # already reached QC/ready/completed, reopen it before the copies
-                # can be auto-assigned or started.
+                # can be auto-assigned or started. A prior terminal fulfillment
+                # is also reopened so the new work cannot inherit old delivery.
+                from fabos_core.services.orders import OrderService
+                OrderService._reset_fulfillment_for_rework(conn, source["order_id"], "Additional copies requested")
                 conn.execute("""UPDATE orders SET status='in_production'
                     WHERE id=? AND status IN ('qc','ready','completed')""",(source["order_id"],))
             conn.commit()
