@@ -145,6 +145,10 @@ class FulfillmentService:
             raise ValueError("Unsupported fulfillment method")
         if status not in self.STATUSES:
             raise ValueError("Unsupported fulfillment status")
+        if method == "shipping" and status in ("ready_for_pickup", "picked_up"):
+            raise ValueError("Shipping fulfillment cannot use pickup-only status.")
+        if method == "pickup" and status in ("packed", "shipped", "delivered"):
+            raise ValueError("Pickup fulfillment cannot use shipping-only status.")
         fid = self.ensure(order_id, method)
         with self.db.connect() as c:
             c.execute("BEGIN IMMEDIATE")
@@ -195,7 +199,7 @@ class FulfillmentService:
                 # Fulfillment must not bypass the central order-completion gates.
                 # In particular, production orders still require every print job and
                 # QC inspection to be complete before the order can close.
-                c.execute("UPDATE orders SET status='shipped' WHERE id=? AND status='ready'", (order_id,))
+                pass
             c.commit()
 
         if status in ("delivered", "picked_up"):
