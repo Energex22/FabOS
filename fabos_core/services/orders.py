@@ -63,10 +63,13 @@ class OrderService:
     @staticmethod
     def _production_completion_ready(conn, order_id):
         """Require every real production/fulfillment gate before closing an order."""
-        jobs = conn.execute(
-            "SELECT status FROM print_jobs WHERE order_id=? AND status<>?",
-            (order_id, "cancelled"),
+        all_jobs = conn.execute(
+            "SELECT status FROM print_jobs WHERE order_id=?",
+            (order_id,),
         ).fetchall()
+        jobs = [row for row in all_jobs if (row["status"] or "").lower() != "cancelled"]
+        if all_jobs and not jobs:
+            return False
         if jobs:
             if any((row["status"] or "").lower() != "completed" for row in jobs):
                 return False
