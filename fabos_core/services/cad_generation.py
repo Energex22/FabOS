@@ -634,7 +634,7 @@ class CadGenerationService:
                                  .translate((0, 0, max(0.0, d["floor_thickness"] - 0.5))))
                 if divider.get("angle"):
                     divider_model = divider_model.rotate((divider["x"], divider["y"], 0), (divider["x"], divider["y"], 1), divider["angle"])
-                model = model.union(divider_model)
+                model = model.union(divider_model).clean()
             lid = spec.get("lid_interface") or {}
             if lid:
                 outer_w = d["width"] - 2 * d["wall_thickness"]
