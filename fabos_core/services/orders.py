@@ -67,14 +67,15 @@ class OrderService:
             "SELECT status FROM print_jobs WHERE order_id=?",
             (order_id,),
         ).fetchall()
-        if jobs and any((row["status"] or "").lower() != "completed" for row in jobs):
-            return False
-        qc = conn.execute(
-            "SELECT status FROM qc_inspections WHERE order_id=?",
-            (order_id,),
-        ).fetchall()
-        if not qc or any((row["status"] or "").lower() != "passed" for row in qc):
-            return False
+        if jobs:
+            if any((row["status"] or "").lower() != "completed" for row in jobs):
+                return False
+            qc = conn.execute(
+                "SELECT status FROM qc_inspections WHERE order_id=?",
+                (order_id,),
+            ).fetchall()
+            if not qc or any((row["status"] or "").lower() != "passed" for row in qc):
+                return False
         fulfillment = conn.execute(
             "SELECT status FROM fulfillments WHERE order_id=? ORDER BY created_at DESC LIMIT 1",
             (order_id,),
