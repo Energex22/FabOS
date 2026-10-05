@@ -196,10 +196,10 @@ class FulfillmentService:
             if status == "shipped":
                 c.execute("UPDATE orders SET status='shipped' WHERE id=?", (order_id,))
             elif status in ("delivered", "picked_up"):
-                # Fulfillment must not bypass the central order-completion gates.
-                # In particular, production orders still require every print job and
-                # QC inspection to be complete before the order can close.
-                pass
+                # Shipping reaches the shipped order state before attempting central
+                # completion; pickup remains in ready until the completion gate passes.
+                if method == "shipping":
+                    c.execute("UPDATE orders SET status='shipped' WHERE id=? AND status='ready'", (order_id,))
             c.commit()
 
         if status in ("delivered", "picked_up"):
