@@ -80,7 +80,39 @@ class ProductionService:
     def job_print_readiness(self,job_id,design_vault):
         job=self.get(job_id)
         if not job["product_id"]:
-            return {"ready":False,"state":"attention","reason":"No Catalog product attached","gcode":None}
+            if not job["order_id"]:
+                return {"ready":False,"state":"attention","reason":"No Catalog product or customer design attached","gcode":None}
+            with self.database.connect() as conn:
+                link=conn.execute(
+                    """SELECT qd.design_id
+                       FROM orders o
+                       JOIN quote_designs qd ON qd.quote_id=o.quote_id
+                       WHERE o.id=? LIMIT 1""",
+                    (job["order_id"],),
+                ).fetchone()
+            if not link:
+                return {"ready":False,"state":"attention","reason":"No Catalog product or customer design attached","gcode":None}
+            status=design_vault.design_print_status(link["design_id"])
+            if not status.get("ready"):
+                return {"ready":False,"state":"attention","reason":"Customer design needs an STL or saved G-code","gcode":None}
+            if job["spool_id"]:
+                with self.database.connect() as conn:
+                    spool=conn.execute("SELECT * FROM filament_spools WHERE id=?",(job["spool_id"],)).fetchone()
+            else:spool=None
+            if job["printer_id"]:
+                with self.database.connect() as conn:
+                    printer=conn.execute("SELECT * FROM printers WHERE id=?",(job["printer_id"],)).fetchone()
+            else:printer=None
+            if status.get("has_gcode"):
+                match=design_vault.best_gcode_for_design(
+                    link["design_id"],
+                    spool["material"] if spool else None,
+                    printer["name"] if printer else None)
+                if match:
+                    return {"ready":True,"state":"gcode","reason":"Matching saved G-code ready","gcode":str(match["stored_path"])}
+            if status.get("has_stl"):
+                return {"ready":True,"state":"stl","reason":"Customer STL ready to slice","gcode":None}
+            return {"ready":False,"state":"attention","reason":"Saved G-code does not match assigned material","gcode":None}
         status=design_vault.product_print_status(job["product_id"])
         if not status.get("ready"):
             return {"ready":False,"state":"attention","reason":"Product needs an STL or saved G-code","gcode":None}
