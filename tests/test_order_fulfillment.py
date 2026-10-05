@@ -27,7 +27,10 @@ class FulfillmentTests(unittest.TestCase):
    with self.assertRaises(ValueError):
     svc.set_status_internal(oid,"completed")
    with db.connect() as c:
-    c.execute("UPDATE invoices SET paid_cents=1000,status='paid' WHERE order_id=?",(oid,));c.commit()
+    c.execute("UPDATE invoices SET paid_cents=1000,status='paid' WHERE order_id=?",(oid,))
+    c.execute("INSERT INTO qc_inspections(id,order_id,status,checklist_json) VALUES(?,?,?,?)",(str(uuid.uuid4()),oid,"passed","[]"))
+    c.execute("INSERT INTO fulfillments(id,order_id,method,status) VALUES(?,?,?,?)",(str(uuid.uuid4()),oid,"shipping","delivered"))
+    c.commit()
    svc.set_status_internal(oid,"completed")
    self.assertEqual(svc.get(oid)[0]["status"],"completed")
  def test_production_order_cannot_complete_before_fulfillment(self):
