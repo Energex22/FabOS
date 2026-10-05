@@ -36,6 +36,39 @@ class CadGenerationTests(unittest.TestCase):
         self.assertTrue(result["verification"]["passed"])
         self.assertTrue(any(a["format"] == "stl" for a in result["artifacts"]))
         self.assertTrue(any(a["format"] == "3mf" for a in result["artifacts"]))
+    def test_customer_history_preserves_revision_parent(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute("""CREATE TABLE cad_generation_jobs(
+            id TEXT PRIMARY KEY, user_id TEXT, status TEXT, prompt TEXT,
+            spec_json TEXT, verification_json TEXT, artifacts_json TEXT,
+            error TEXT, parent_job_id TEXT, created_at TEXT, updated_at TEXT
+        )""")
+        connection.execute(
+            """INSERT INTO cad_generation_jobs
+               (id,user_id,status,prompt,spec_json,verification_json,artifacts_json,error,parent_job_id,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            ("parent", "customer-1", "completed", "base", "{}", "{}", "[]", None, None, "2026-10-01", "2026-10-01"),
+        )
+        connection.execute(
+            """INSERT INTO cad_generation_jobs
+               (id,user_id,status,prompt,spec_json,verification_json,artifacts_json,error,parent_job_id,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+            ("child", "customer-1", "completed", "revision", "{}", "{}", "[]", None, "parent", "2026-10-02", "2026-10-02"),
+        )
+        connection.commit()
+
+        class Database:
+            def connect(self):
+                return connection
+
+        service = CadGenerationService(settings=SimpleNamespace(data_dir=self.temp.name), database=Database())
+        jobs = service.list_jobs("customer-1")
+        child = next(job for job in jobs if job["id"] == "child")
+        self.assertEqual(child["parent_job_id"], "parent")
+
+        connection.close()
+
     def test_reference_cad_requires_confirmed_scale(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
