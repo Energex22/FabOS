@@ -44,7 +44,7 @@ class Pass19FulfillmentBoundaryTests(unittest.TestCase):
     @staticmethod
     def _insert_order(c, order_id, number, customer_id):
         columns = {r[1]: r for r in c.execute("PRAGMA table_info(orders)").fetchall()}
-        values = {"id": order_id, "order_number": number, "customer_id": customer_id, "status": "pending"}
+        values = {"id": order_id, "order_number": number, "customer_id": customer_id, "status": "ready"}
         if "total_cents" in columns:
             values["total_cents"] = 1000
         cols = ["id", "order_number", "customer_id", "status"]
