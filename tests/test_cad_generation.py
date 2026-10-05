@@ -301,6 +301,31 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual([job["id"] for job in jobs], ["job-a"])
         self.assertEqual(jobs[0]["spec"]["shape"], "box")
 
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_revision_creates_parent_job_lineage(self):
+        db_file = Path(self.temp.name) / "cad-lineage.sqlite3"
+
+        class Database:
+            def connect(self):
+                conn = sqlite3.connect(str(db_file))
+                conn.row_factory = sqlite3.Row
+                return conn
+
+        with Database().connect() as conn:
+            conn.execute("""CREATE TABLE cad_generation_jobs(
+                id TEXT PRIMARY KEY, user_id TEXT, status TEXT, prompt TEXT,
+                spec_json TEXT, verification_json TEXT, artifacts_json TEXT,
+                error TEXT, parent_job_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )""")
+            conn.commit()
+
+        service = CadGenerationService(settings=SimpleNamespace(data_dir=self.temp.name), database=Database())
+        first = service.generate(spec={"shape": "plate", "dimensions": {"width": 60, "depth": 40, "height": 5}}, output_formats=["step"], owner_id="user-a")
+        revised = service.revise(first["job_id"], "make the width 70 mm", owner_id="user-a", output_formats=["step"])
+        parent = service.get_job(revised["job_id"], owner_id="user-a")
+        self.assertEqual(parent["parent_job_id"], first["job_id"])
+        self.assertNotEqual(revised["job_id"], first["job_id"])
     def test_job_detail_isolated_by_owner(self):
         db_file = Path(self.temp.name) / "cad-detail.sqlite3"
 

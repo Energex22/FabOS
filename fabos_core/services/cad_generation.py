@@ -1085,23 +1085,24 @@ class CadGenerationService:
         checks.append({"measurement": "solid_valid", "actual": valid, "pass": valid})
         return {"passed": all(x["pass"] for x in checks), "checks": checks, "holes": hole_checks}
 
-    def _save_job(self, job_id, owner_id, status, prompt, spec=None, verification=None, artifacts=None, error=None):
+    def _save_job(self, job_id, owner_id, status, prompt, spec=None, verification=None, artifacts=None, error=None, parent_job_id=None):
         if self.database is None:
             return
         try:
             with self.database.connect() as conn:
                 conn.execute(
                     """INSERT INTO cad_generation_jobs
-                       (id,user_id,status,prompt,spec_json,verification_json,artifacts_json,error)
-                       VALUES(?,?,?,?,?,?,?,?)
+                       (id,user_id,status,prompt,spec_json,verification_json,artifacts_json,error,parent_job_id)
+                       VALUES(?,?,?,?,?,?,?,?,?)
                        ON CONFLICT(id) DO UPDATE SET
                          status=excluded.status,prompt=excluded.prompt,spec_json=excluded.spec_json,
                          verification_json=excluded.verification_json,artifacts_json=excluded.artifacts_json,
-                         error=excluded.error,updated_at=CURRENT_TIMESTAMP""",
+                         error=excluded.error,parent_job_id=excluded.parent_job_id,updated_at=CURRENT_TIMESTAMP""",
                     (job_id, str(owner_id) if owner_id is not None else None, status,
                      str(prompt or "")[:12000], json.dumps(spec or {}, default=str),
                      json.dumps(verification or {}, default=str),
-                     json.dumps(artifacts or [], default=str), error),
+                     json.dumps(artifacts or [], default=str), error,
+                     str(parent_job_id) if parent_job_id else None),
                 )
                 conn.commit()
         except Exception:
@@ -1285,6 +1286,7 @@ class CadGenerationService:
             prompt="Revision of %s: %s" % (job_id, str(instruction).strip()[:8000]),
             output_formats=output_formats or ["stl", "step", "3mf"],
             owner_id=owner_id,
+            parent_job_id=job_id,
         )
 
     def _apply_simple_revision(self, original, instruction):
@@ -1336,11 +1338,11 @@ class CadGenerationService:
         # equal spec keeps the retry hook explicit while preventing silent dimension changes.
         return corrected if changed else spec
 
-    def generate(self, spec=None, prompt=None, output_formats=None, owner_id=None):
+    def generate(self, spec=None, prompt=None, output_formats=None, owner_id=None, parent_job_id=None):
         job_id = str(uuid.uuid4())
         try:
             spec = self.interpret_prompt(prompt) if spec is None else self.normalize_spec(spec)
-            self._save_job(job_id, owner_id, "generating", prompt, spec)
+            self._save_job(job_id, owner_id, "generating", prompt, spec, parent_job_id=parent_job_id)
             model = self._cadquery_model(spec)
             verification = self._verify(model, spec)
             if not verification["passed"]:
@@ -1357,7 +1359,7 @@ class CadGenerationService:
             folder = self.root / job_id
             folder.mkdir(parents=True, exist_ok=True)
             formats = [str(x).lower() for x in (output_formats or ["stl", "step", "3mf"]) if str(x).lower() in {"stl", "step", "3mf"}]
-            (folder / "metadata.json").write_text(json.dumps({"owner_id": str(owner_id or ""), "spec": spec}, default=str), encoding="utf-8")
+            (folder / "metadata.json").write_text(json.dumps({"owner_id": str(owner_id or ""), "spec": spec, "parent_job_id": parent_job_id}, default=str), encoding="utf-8")
             artifacts = []
             for fmt in (formats or ["stl"]):
                 target = folder / ("model." + fmt)
@@ -1368,10 +1370,10 @@ class CadGenerationService:
                 else:
                     cq.exporters.export(model, str(target), exportType="STEP")
                 artifacts.append({"format": fmt, "path": str(target), "bytes": target.stat().st_size})
-            self._save_job(job_id, owner_id, "completed", prompt, spec, verification, artifacts)
+            self._save_job(job_id, owner_id, "completed", prompt, spec, verification, artifacts, parent_job_id=parent_job_id)
             return {"job_id": job_id, "spec": spec, "verification": verification, "artifacts": artifacts,
                     "capabilities": self.capabilities()}
         except Exception as exc:
             self._save_job(job_id, owner_id, "failed", prompt, locals().get("spec"), locals().get("verification"),
-                           locals().get("artifacts"), str(exc)[:2000])
+                           locals().get("artifacts"), str(exc)[:2000], parent_job_id=parent_job_id)
             raise
