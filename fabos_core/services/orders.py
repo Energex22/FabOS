@@ -84,6 +84,53 @@ class OrderService:
         return bool(fulfillment and (fulfillment["status"] or "").lower() in ("delivered", "picked_up"))
 
     @staticmethod
+    def _reset_fulfillment_for_rework(conn, order_id, reason="Production rework"):
+        """Reopen fulfillment when new production work invalidates a prior terminal handoff."""
+        row = conn.execute(
+            "SELECT * FROM fulfillments WHERE order_id=?",
+            (order_id,),
+        ).fetchone()
+        if not row or str(row["status"] or "").lower() not in ("delivered", "picked_up"):
+            return False
+        try:
+            conn.execute(
+                """INSERT INTO activity_journal(
+                       id,event_type,title,detail,page,entity_id,undo_type,undo_payload_json)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    __import__("uuid").uuid4().hex,
+                    "fulfillment.reopened",
+                    "Fulfillment reopened for production rework",
+                    "%s; previous status=%s" % (reason, row["status"]),
+                    "Fulfillment",
+                    row["id"],
+                    "fulfillment_restore",
+                    __import__("json").dumps({
+                        "fulfillment_id": row["id"],
+                        "order_id": order_id,
+                        "previous_status": row["status"],
+                        "previous_method": row["method"],
+                        "previous_carrier": row["carrier"],
+                        "previous_tracking": row["tracking_number"],
+                        "previous_shipped_at": row["shipped_at"],
+                        "previous_delivered_at": row["delivered_at"],
+                        "previous_picked_up_at": row["picked_up_at"],
+                    }),
+                ),
+            )
+        except Exception:
+            pass
+        conn.execute(
+            """UPDATE fulfillments
+               SET status='pending', carrier=NULL, tracking_number=NULL,
+                   shipped_at=NULL, delivered_at=NULL, picked_up_at=NULL,
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE id=?""",
+            (row["id"],),
+        )
+        return True
+
+    @staticmethod
     def _prepare_cancellation(conn, order_id):
         """Stop cancellable production work before an order enters cancelled state."""
         active = conn.execute(
