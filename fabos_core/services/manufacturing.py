@@ -106,8 +106,10 @@ class ManufacturingService:
     (nid,j['order_id'],j['product_id'],j['variant_id'],j['gcode_path'],
      j['octoprint_file'],j['estimated_minutes'],j['estimated_filament_g'],j['slicer_metadata_json']))
    if j['order_id']:
-    # A reprint after QC/fulfillment reopens the order so the replacement cannot
-    # silently sit behind a ready/completed order.
+    # A reprint is new production work. Reopen any terminal fulfillment so the
+    # replacement must pass through packing/shipping or pickup again.
+    from fabos_core.services.orders import OrderService
+    OrderService._reset_fulfillment_for_rework(c, j['order_id'], "Reprint requested")
     c.execute("""UPDATE orders SET status='in_production'
        WHERE id=? AND status IN ('qc','ready','completed')""",(j['order_id'],))
    c.commit();return nid
