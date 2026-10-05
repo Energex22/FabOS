@@ -331,10 +331,11 @@ class ProductionAutomationTests(unittest.TestCase):
             self.assertEqual(replacement["status"], "queued")
             self.assertIsNone(replacement["printer_id"])
             self.assertIsNone(replacement["spool_id"])
-            fulfillment = conn.execute(
-                "SELECT status,tracking_number,delivered_at FROM fulfillments WHERE order_id=?",
-                (order_id,),
-            ).fetchone()
+            with app.database.connect() as verify_conn:
+                fulfillment = verify_conn.execute(
+                    "SELECT status,tracking_number,delivered_at FROM fulfillments WHERE order_id=?",
+                    (order_id,),
+                ).fetchone()
             self.assertEqual(fulfillment["status"], "pending")
             self.assertIsNone(fulfillment["tracking_number"])
             self.assertIsNone(fulfillment["delivered_at"])
