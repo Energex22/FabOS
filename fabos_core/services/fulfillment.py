@@ -164,10 +164,13 @@ class FulfillmentService:
             # admin/import path can move an order to ready directly, so fulfillment
             # must independently enforce the production/QC boundary.
             with self.db.connect() as c:
-                jobs = c.execute(
-                    "SELECT status FROM print_jobs WHERE order_id=? AND status<>?",
-                    (order_id, "cancelled"),
+                all_jobs = c.execute(
+                    "SELECT status FROM print_jobs WHERE order_id=?",
+                    (order_id,),
                 ).fetchall()
+                jobs = [row for row in all_jobs if str(row["status"] or "").lower() != "cancelled"]
+                if all_jobs and not jobs:
+                    raise ValueError("Order must have an active production job before fulfillment can advance.")
                 if jobs:
                     if any(str(row["status"] or "").lower() != "completed" for row in jobs):
                         raise ValueError("Order must be QC-approved and all active production jobs completed before fulfillment can advance.")
