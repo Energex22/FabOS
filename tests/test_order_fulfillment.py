@@ -3,6 +3,7 @@ from pathlib import Path
 from fabos_core.db.database import Database
 from fabos_core.db.migrations import migrate
 from fabos_core.services.fulfillment import FulfillmentService
+from fabos_core.services.manufacturing import ManufacturingService
 from fabos_core.services.orders import OrderService
 from fabos_desktop.commerce_ui import CommerceMixin
 
@@ -94,6 +95,32 @@ class FulfillmentTests(unittest.TestCase):
     self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?",(oid,)).fetchone()[0],"cancelled")
     statuses={r["status"] for r in c.execute("SELECT status FROM print_jobs WHERE order_id=?",(oid,)).fetchall()}
    self.assertEqual(statuses,{"cancelled"})
+
+ def test_reprint_reopens_terminal_fulfillment_before_replacement_can_complete(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   oid=str(uuid.uuid4());old_job=str(uuid.uuid4());old_qc=str(uuid.uuid4());fid=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,?)",(oid,"O-REPRINT-FULFILL","completed",1000))
+    c.execute("INSERT INTO invoices(id,invoice_number,order_id,status,subtotal_cents,tax_cents,shipping_cents,discount_cents,total_cents,paid_cents) VALUES(?,?,?,?,?,?,?,?,?,?)",(str(uuid.uuid4()),"INV-REPRINT-FULFILL",oid,"paid",1000,0,0,0,1000,1000))
+    c.execute("INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",(old_job,oid,"completed"))
+    c.execute("INSERT INTO qc_inspections(id,order_id,print_job_id,status) VALUES(?,?,?,'passed')",(old_qc,oid,old_job))
+    c.execute("INSERT INTO fulfillments(id,order_id,method,status,delivered_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP)",(fid,oid,"shipping","delivered"))
+    c.commit()
+   replacement=ManufacturingService(db).reprint(old_job)
+   with db.connect() as c:
+    self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?",(oid,)).fetchone()[0],"in_production")
+    self.assertEqual(c.execute("SELECT status FROM fulfillments WHERE order_id=?",(oid,)).fetchone()[0],"pending")
+    c.execute("UPDATE print_jobs SET status='completed',completed_at=CURRENT_TIMESTAMP,success=1 WHERE id=?",(replacement,))
+    c.execute("INSERT INTO qc_inspections(id,order_id,print_job_id,status) VALUES(?,?,?,'passed')",(str(uuid.uuid4()),oid,replacement))
+    c.execute("UPDATE orders SET status='ready' WHERE id=?",(oid,))
+    c.commit()
+   with self.assertRaisesRegex(ValueError,"production, QC, and fulfillment"):
+    OrderService(db).set_status_internal(oid,"completed")
+   FulfillmentService(db).save(oid,"shipping","shipped",carrier="Test")
+   FulfillmentService(db).save(oid,"shipping","delivered",carrier="Test")
+   OrderService(db).set_status_internal(oid,"completed")
+   self.assertEqual(OrderService(db).get(oid)[0]["status"],"completed")
 
  def test_order_methods_are_on_commerce_mixin(self):
   for name in ("_build_orders_page","_order_dossier","_order_next_action","_order_fulfillment","_selected_order_id"):
