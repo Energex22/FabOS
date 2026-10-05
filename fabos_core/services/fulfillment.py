@@ -165,18 +165,22 @@ class FulfillmentService:
             # must independently enforce the production/QC boundary.
             with self.db.connect() as c:
                 jobs = c.execute(
-                    "SELECT status FROM print_jobs WHERE order_id=?",
-                    (order_id,),
+                    "SELECT status FROM print_jobs WHERE order_id=? AND status<>?",
+                    (order_id, "cancelled"),
                 ).fetchall()
                 if jobs:
                     if any(str(row["status"] or "").lower() != "completed" for row in jobs):
-                        raise ValueError("Order must be QC-approved and all production jobs completed before fulfillment can advance.")
+                        raise ValueError("Order must be QC-approved and all active production jobs completed before fulfillment can advance.")
                     qc = c.execute(
-                        "SELECT status FROM qc_inspections WHERE order_id=?",
-                        (order_id,),
+                        """SELECT q.status
+                           FROM qc_inspections q
+                           LEFT JOIN print_jobs j ON j.id=q.print_job_id
+                           WHERE q.order_id=?
+                             AND (q.print_job_id IS NULL OR COALESCE(j.status,'')<>?)""",
+                        (order_id, "cancelled"),
                     ).fetchall()
                     if not qc or any(str(row["status"] or "").lower() != "passed" for row in qc):
-                        raise ValueError("Order must be QC-approved and all production inspections passed before fulfillment can advance.")
+                        raise ValueError("Order must be QC-approved and all active production inspections passed before fulfillment can advance.")
         if shipping_cost_cents is None:
             shipping_cost_cents = int(current["shipping_cost_cents"] or 0) if current else 0
         if self.STATUS_ORDER.get(status, 0) < self.STATUS_ORDER.get(current_status, 0):
