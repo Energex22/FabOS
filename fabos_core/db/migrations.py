@@ -168,6 +168,31 @@ CREATE INDEX IF NOT EXISTS idx_design_proofs_status ON design_proofs(status,upda
 CREATE INDEX IF NOT EXISTS idx_quote_designs_design ON quote_designs(design_id);"""),
 (53,"""ALTER TABLE cad_generation_jobs ADD COLUMN parent_job_id TEXT REFERENCES cad_generation_jobs(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_cad_generation_jobs_parent ON cad_generation_jobs(parent_job_id,created_at);"""),
+,
+(54,"""CREATE TABLE IF NOT EXISTS payment_transactions(
+ id TEXT PRIMARY KEY,
+ order_id TEXT NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
+ invoice_id TEXT REFERENCES invoices(id) ON DELETE SET NULL,
+ customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
+ amount_cents INTEGER NOT NULL,
+ currency TEXT NOT NULL DEFAULT 'USD',
+ provider TEXT NOT NULL,
+ provider_payment_id TEXT,
+ checkout_url TEXT,
+ status TEXT NOT NULL DEFAULT 'created',
+ metadata_json TEXT NOT NULL DEFAULT '{}',
+ created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_payment_transactions_customer ON payment_transactions(customer_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_payment_transactions_status ON payment_transactions(status,created_at);
+CREATE TABLE IF NOT EXISTS payment_webhook_events(
+ id TEXT PRIMARY KEY,
+ provider TEXT NOT NULL,
+ event_type TEXT,
+ payment_id TEXT,
+ received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:
