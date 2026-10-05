@@ -108,7 +108,17 @@ class OrderService:
             order=conn.execute("SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(c.email,'') customer_email,COALESCE(c.phone,'') customer_phone,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=?",(order_id,)).fetchone()
             if not order:raise KeyError("Order not found")
             items=self._items_for_order(conn,order_id,order["quote_id"])
-            jobs=conn.execute("SELECT j.*,COALESCE(p.name,'Custom Job') product_name,COALESCE(v.name,'') variant_name,COALESCE(pr.name,'Unassigned') printer_name FROM print_jobs j LEFT JOIN products p ON p.id=j.product_id LEFT JOIN product_variants v ON v.id=j.variant_id LEFT JOIN printers pr ON pr.id=j.printer_id WHERE j.order_id=? ORDER BY j.created_at",(order_id,)).fetchall()
+            designs=conn.execute(
+                """SELECT d.*,qd.quote_id,dv.version design_version,dv.label design_version_label
+                   FROM quote_designs qd
+                   JOIN designs d ON d.id=qd.design_id
+                   LEFT JOIN design_versions dv
+                     ON dv.design_id=d.id AND dv.version=d.current_version
+                   WHERE qd.quote_id=?
+                   ORDER BY d.created_at""",
+                (order["quote_id"],),
+            ).fetchall() if order["quote_id"] else []
+            jobs=conn.execute("SELECT j.*,COALESCE(p.name,'Custom Job') product_name,COALESCE(v.name,'') variant_name,COALESCE(pr.name,'Unassigned') printer_name FROM print_jobs j LEFT JOIN orders o ON o.id=j.order_id LEFT JOIN products p ON p.id=j.product_id LEFT JOIN product_variants v ON v.id=j.variant_id LEFT JOIN printers pr ON pr.id=j.printer_id WHERE j.order_id=? ORDER BY j.created_at",(order_id,)).fetchall()
             qc=conn.execute("SELECT q.*,COALESCE(p.name,'Custom Job') product_name FROM qc_inspections q LEFT JOIN print_jobs j ON j.id=q.print_job_id LEFT JOIN products p ON p.id=j.product_id WHERE q.order_id=? ORDER BY q.created_at",(order_id,)).fetchall()
             invoices=conn.execute("SELECT i.*,(i.total_cents-i.paid_cents) balance_cents FROM invoices i WHERE i.order_id=? ORDER BY i.created_at DESC",(order_id,)).fetchall()
             payments=conn.execute("SELECT p.*,i.invoice_number FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.order_id=? ORDER BY p.paid_at DESC",(order_id,)).fetchall()
@@ -123,4 +133,4 @@ class OrderService:
         elif not fulfillment:next_action="Set fulfillment"
         elif fulfillment["status"] not in ("delivered","picked_up"):next_action="Complete fulfillment"
         else:next_action="Complete order"
-        return {"order":order,"items":items,"jobs":jobs,"qc":qc,"invoices":invoices,"payments":payments,"fulfillment":fulfillment,"total_jobs":total_jobs,"completed_jobs":completed_jobs,"qc_total":qc_total,"qc_passed":qc_passed,"paid_cents":paid,"next_action":next_action}
+        return {"order":order,"items":items,"designs":designs,"jobs":jobs,"qc":qc,"invoices":invoices,"payments":payments,"fulfillment":fulfillment,"total_jobs":total_jobs,"completed_jobs":completed_jobs,"qc_total":qc_total,"qc_passed":qc_passed,"paid_cents":paid,"next_action":next_action}
