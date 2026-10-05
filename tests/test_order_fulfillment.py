@@ -76,6 +76,25 @@ class FulfillmentTests(unittest.TestCase):
    InvoiceService(db,Path(td)/"data").record_payment(iid,1000,method="test",reference="pay-gate")
    self.assertEqual(OrderService(db).get(oid)[0]["status"],"ready")
 
+ def test_cancelling_order_cancels_queued_jobs_but_not_active_prints(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   oid=str(uuid.uuid4());queued=str(uuid.uuid4());printing=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",(oid,"O-CANCEL","in_production"))
+    c.execute("INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",(queued,oid,"queued"))
+    c.execute("INSERT INTO print_jobs(id,order_id,status,started_at) VALUES(?,?,?,CURRENT_TIMESTAMP)",(printing,oid,"printing"))
+    c.commit()
+   with self.assertRaisesRegex(ValueError,"actively printing"):
+    OrderService(db).set_status_internal(oid,"cancelled")
+   with db.connect() as c:
+    c.execute("UPDATE print_jobs SET status='queued',started_at=NULL WHERE id=?",(printing,));c.commit()
+   OrderService(db).set_status_internal(oid,"cancelled")
+   with db.connect() as c:
+    self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?",(oid,)).fetchone()[0],"cancelled")
+    statuses={r["status"] for r in c.execute("SELECT status FROM print_jobs WHERE order_id=?",(oid,)).fetchall()}
+   self.assertEqual(statuses,{"cancelled"})
+
  def test_order_methods_are_on_commerce_mixin(self):
   for name in ("_build_orders_page","_order_dossier","_order_next_action","_order_fulfillment","_selected_order_id"):
    self.assertTrue(hasattr(CommerceMixin,name),name)
