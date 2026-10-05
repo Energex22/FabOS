@@ -104,6 +104,9 @@ class ManufacturingService:
  def qc_update(self,qid,items,notes="",status="pending"):
   allowed=("pending","rework","passed")
   if status not in allowed:raise ValueError("Invalid QC status.")
+  if not isinstance(items,list):raise ValueError("QC checklist must be a list.")
+  if status=="passed" and any(not isinstance(item,dict) or not bool(item.get("checked")) for item in items):
+   raise ValueError("QC cannot pass until every checklist item is checked.")
   with self.db.connect() as c:
    q=c.execute("SELECT * FROM qc_inspections WHERE id=?",(qid,)).fetchone()
    if not q:raise KeyError("QC inspection not found.")
