@@ -379,6 +379,12 @@ class ProductionService:
                      source["estimated_minutes"] or 0, source["estimated_filament_g"] or 0),
                 )
                 created.append(new_id)
+            if created and source["order_id"]:
+                # Additional copies are new production work. If the order had
+                # already reached QC/ready/completed, reopen it before the copies
+                # can be auto-assigned or started.
+                conn.execute("""UPDATE orders SET status='in_production'
+                    WHERE id=? AND status IN ('qc','ready','completed')""",(source["order_id"],))
             conn.commit()
         return created
 
