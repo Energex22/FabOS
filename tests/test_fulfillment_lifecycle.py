@@ -181,6 +181,46 @@ class FulfillmentLifecycleTests(unittest.TestCase):
                 self.assertEqual(c.execute("SELECT status FROM invoices WHERE id=?", (iid,)).fetchone()[0], "paid")
                 self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0], "completed")
 
+    def test_cancelled_historical_job_does_not_block_fulfillment(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            oid = str(uuid.uuid4())
+            old_job = str(uuid.uuid4())
+            new_job = str(uuid.uuid4())
+            old_qc = str(uuid.uuid4())
+            new_qc = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",
+                    (oid, "O-REPRINT-FULFILL", "ready"),
+                )
+                c.execute(
+                    "INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",
+                    (old_job, oid, "cancelled"),
+                )
+                c.execute(
+                    "INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",
+                    (new_job, oid, "completed"),
+                )
+                c.execute(
+                    "INSERT INTO qc_inspections(id,order_id,print_job_id,status) VALUES(?,?,?,'pending')",
+                    (old_qc, oid, old_job),
+                )
+                c.execute(
+                    "INSERT INTO qc_inspections(id,order_id,print_job_id,status) VALUES(?,?,?,'passed')",
+                    (new_qc, oid, new_job),
+                )
+                c.commit()
+
+            FulfillmentService(db).save(oid, "shipping", "delivered")
+            with db.connect() as c:
+                self.assertEqual(
+                    c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0],
+                    "completed",
+                )
+
     def test_terminal_fulfillment_can_complete_when_all_gates_are_met(self):
         with tempfile.TemporaryDirectory() as td:
             db = Database(Path(td) / "fabos.sqlite3")
