@@ -125,6 +125,22 @@ class FulfillmentTests(unittest.TestCase):
    OrderService(db).set_status_internal(oid,"completed")
    self.assertEqual(OrderService(db).get(oid)[0]["status"],"completed")
 
+ def test_replacement_job_can_complete_after_cancelled_history(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   oid=str(uuid.uuid4());old_job=str(uuid.uuid4());new_job=str(uuid.uuid4());old_qc=str(uuid.uuid4());new_qc=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,?)",(oid,"O-REPRINT-COMPLETE","ready",1000))
+    c.execute("INSERT INTO invoices(id,invoice_number,order_id,status,subtotal_cents,tax_cents,shipping_cents,discount_cents,total_cents,paid_cents) VALUES(?,?,?,?,?,?,?,?,?,?)",(str(uuid.uuid4()),"INV-REPRINT-COMPLETE",oid,"paid",1000,0,0,0,1000,1000))
+    c.execute("INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",(old_job,oid,"cancelled"))
+    c.execute("INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",(new_job,oid,"completed"))
+    c.execute("INSERT INTO qc_inspections(id,order_id,print_job_id,status) VALUES(?,?,?,'pending')",(old_qc,oid,old_job))
+    c.execute("INSERT INTO qc_inspections(id,order_id,print_job_id,status) VALUES(?,?,?,'passed')",(new_qc,oid,new_job))
+    c.execute("INSERT INTO fulfillments(id,order_id,method,status) VALUES(?,?,?,?)",(str(uuid.uuid4()),oid,"shipping","delivered"))
+    c.commit()
+   OrderService(db).set_status_internal(oid,"completed")
+   self.assertEqual(OrderService(db).get(oid)[0]["status"],"completed")
+
  def test_order_methods_are_on_commerce_mixin(self):
   for name in ("_build_orders_page","_order_dossier","_order_next_action","_order_fulfillment","_selected_order_id"):
    self.assertTrue(hasattr(CommerceMixin,name),name)
