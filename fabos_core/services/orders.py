@@ -61,6 +61,29 @@ class OrderService:
         if not customer:return []
         return [row for row in self.list(query,status,sort_column,descending,group) if row["customer_id"]==customer["id"]]
     @staticmethod
+    def _production_completion_ready(conn, order_id):
+        """Require every real production/fulfillment gate before closing an order."""
+        jobs = conn.execute(
+            "SELECT status FROM print_jobs WHERE order_id=?",
+            (order_id,),
+        ).fetchall()
+        if not jobs:
+            return True
+        if any((row["status"] or "").lower() != "completed" for row in jobs):
+            return False
+        qc = conn.execute(
+            "SELECT status FROM qc_inspections WHERE order_id=?",
+            (order_id,),
+        ).fetchall()
+        if not qc or any((row["status"] or "").lower() != "passed" for row in qc):
+            return False
+        fulfillment = conn.execute(
+            "SELECT status FROM fulfillments WHERE order_id=? ORDER BY created_at DESC LIMIT 1",
+            (order_id,),
+        ).fetchone()
+        return bool(fulfillment and (fulfillment["status"] or "").lower() in ("delivered", "picked_up"))
+
+    @staticmethod
     def _completion_payment_ready(conn, order_id):
         order = conn.execute("SELECT total_cents FROM orders WHERE id=?", (order_id,)).fetchone()
         if not order:
@@ -85,8 +108,11 @@ class OrderService:
             allowed=self.ORDER_TRANSITIONS.get(current)
             if allowed is None:raise ValueError("Order has unsupported current status: %s"%current)
             if requested not in allowed:raise ValueError("Invalid order transition: %s -> %s"%(current,requested))
-            if requested == "completed" and not self._completion_payment_ready(conn, order_id):
-                raise ValueError("Order cannot be completed until the order total is fully paid")
+            if requested == "completed":
+                if not self._completion_payment_ready(conn, order_id):
+                    raise ValueError("Order cannot be completed until the order total is fully paid")
+                if not self._production_completion_ready(conn, order_id):
+                    raise ValueError("Order cannot be completed until production, QC, and fulfillment are complete")
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
         return self.get(order_id)[0]
     def set_status_internal(self,order_id,status,reason=""):
@@ -99,8 +125,11 @@ class OrderService:
             if current==requested:return self.get(order_id)[0]
             allowed=self.ORDER_TRANSITIONS.get(current)
             if allowed is None or requested not in allowed:raise ValueError("Invalid order transition: %s -> %s"%(current,requested))
-            if requested == "completed" and not self._completion_payment_ready(conn, order_id):
-                raise ValueError("Order cannot be completed until the order total is fully paid")
+            if requested == "completed":
+                if not self._completion_payment_ready(conn, order_id):
+                    raise ValueError("Order cannot be completed until the order total is fully paid")
+                if not self._production_completion_ready(conn, order_id):
+                    raise ValueError("Order cannot be completed until production, QC, and fulfillment are complete")
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
         return self.get(order_id)[0]
     def dossier(self, order_id):
