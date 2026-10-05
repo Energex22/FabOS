@@ -221,6 +221,26 @@ class FulfillmentLifecycleTests(unittest.TestCase):
                     "completed",
                 )
 
+    def test_fulfillment_rejects_orders_with_only_cancelled_jobs(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            oid = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",
+                    (oid, "O-CANCELLED-ONLY", "ready"),
+                )
+                c.execute(
+                    "INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",
+                    (str(uuid.uuid4()), oid, "cancelled"),
+                )
+                c.commit()
+
+            with self.assertRaisesRegex(ValueError, "active production job"):
+                FulfillmentService(db).save(oid, "shipping", "packed")
+
     def test_terminal_fulfillment_can_complete_when_all_gates_are_met(self):
         with tempfile.TemporaryDirectory() as td:
             db = Database(Path(td) / "fabos.sqlite3")
