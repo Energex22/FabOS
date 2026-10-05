@@ -741,6 +741,7 @@ class CadGenerationService:
 
     def _verify(self, model, spec):
         shape = model.val()
+        shape_type = spec["shape"]
         bb = shape.BoundingBox()
         actual = {"width_mm": round(bb.xlen, 4), "depth_mm": round(bb.ylen, 4), "height_mm": round(bb.zlen, 4)}
         d = spec["dimensions"]
@@ -891,7 +892,7 @@ class CadGenerationService:
         divider_requested = len(spec.get("dividers", []))
         divider_volume_delta = 0.0
         divider_pass = True
-        if shape == "enclosure" and divider_requested:
+        if shape_type == "enclosure" and divider_requested:
             baseline = dict(spec)
             baseline["dividers"] = []
             try:
@@ -940,7 +941,7 @@ class CadGenerationService:
         opening_requested = len(spec.get("cable_openings", []))
         opening_volume_delta = 0.0
         opening_pass = True
-        if shape == "enclosure" and opening_requested:
+        if shape_type == "enclosure" and opening_requested:
             baseline = dict(spec)
             baseline["cable_openings"] = []
             try:
@@ -964,7 +965,7 @@ class CadGenerationService:
         lid_requested = bool(spec.get("lid_interface"))
         lid_volume_delta = 0.0
         lid_pass = True
-        if shape == "enclosure" and lid_requested:
+        if shape_type == "enclosure" and lid_requested:
             baseline = dict(spec)
             baseline["lid_interface"] = {}
             try:
