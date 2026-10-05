@@ -102,10 +102,15 @@ class InvoiceService:
    c.execute("INSERT INTO payments(id,invoice_id,amount_cents,method,reference,notes) VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),iid,amount,method,reference,notes));paid=recorded+amount;status="paid" if paid>=int(inv["total_cents"] or 0) else "partial";c.execute("UPDATE invoices SET paid_cents=?,status=? WHERE id=?",(paid,status,iid))
    try:c.execute("INSERT INTO activity_journal(id,event_type,title,detail,page,entity_id) VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),'invoice.payment','Payment recorded','$%.2f • %s'%(amount/100.0,method or 'Payment'),'Invoices',iid))
    except Exception:pass
-   if status=="paid" and inv["order_id"]:
-    fulfillment=c.execute("SELECT status FROM fulfillments WHERE order_id=?",(inv["order_id"],)).fetchone()
-    if fulfillment and fulfillment["status"] in ("delivered","picked_up"):c.execute("UPDATE orders SET status='completed' WHERE id=?",(inv["order_id"],))
    c.commit()
+  if status=="paid" and inv["order_id"]:
+   try:
+    from fabos_core.services.orders import OrderService
+    OrderService(self.db).set_status_internal(inv["order_id"],"completed",reason="Invoice paid")
+   except ValueError:
+    # Payment settlement may occur before production/QC/fulfillment are complete.
+    # The order remains in its current lifecycle state until those gates finish.
+    pass
  def record_refund(self,iid,amount_cents,reference="",notes=""):
   amount=int(amount_cents)
   if amount<=0:raise ValueError("Refund must be greater than $0.")
