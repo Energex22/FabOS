@@ -316,6 +316,10 @@ class ProductionAutomationTests(unittest.TestCase):
                     "INSERT INTO print_jobs(id,order_id,status,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?)",
                     (job_id, order_id, "completed", 30, 20),
                 )
+                conn.execute(
+                    "INSERT INTO fulfillments(id,order_id,method,status) VALUES(?,?,?,?)",
+                    (str(uuid.uuid4()), order_id, "shipping", "delivered"),
+                )
                 conn.commit()
             new_job_id = app.manufacturing.reprint(job_id)
             with app.database.connect() as conn:
@@ -327,6 +331,13 @@ class ProductionAutomationTests(unittest.TestCase):
             self.assertEqual(replacement["status"], "queued")
             self.assertIsNone(replacement["printer_id"])
             self.assertIsNone(replacement["spool_id"])
+            fulfillment = conn.execute(
+                "SELECT status,tracking_number,delivered_at FROM fulfillments WHERE order_id=?",
+                (order_id,),
+            ).fetchone()
+            self.assertEqual(fulfillment["status"], "pending")
+            self.assertIsNone(fulfillment["tracking_number"])
+            self.assertIsNone(fulfillment["delivered_at"])
         finally:
             with app.database.connect() as conn:
                 if new_job_id:
