@@ -112,6 +112,49 @@ class FulfillmentLifecycleTests(unittest.TestCase):
             with db.connect() as c:
                 self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0], "shipped")
 
+    def test_payment_can_finish_order_after_fulfillment_was_already_completed(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            oid = str(uuid.uuid4())
+            jid = str(uuid.uuid4())
+            qid = str(uuid.uuid4())
+            iid = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,?)",
+                    (oid, "O-PAY-AFTER-FULFILLMENT", "ready", 1000),
+                )
+                c.execute(
+                    "INSERT INTO invoices(id,invoice_number,order_id,status,subtotal_cents,tax_cents,shipping_cents,discount_cents,total_cents,paid_cents) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (iid, "INV-PAY-AFTER-FULFILLMENT", oid, "open", 1000, 0, 0, 0, 1000, 0),
+                )
+                c.execute(
+                    "INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",
+                    (jid, oid, "completed"),
+                )
+                c.execute(
+                    "INSERT INTO qc_inspections(id,order_id,print_job_id,status) VALUES(?,?,?,'passed')",
+                    (qid, oid, jid),
+                )
+                c.commit()
+
+            service = FulfillmentService(db)
+            service.save(oid, "shipping", "delivered")
+
+            with db.connect() as c:
+                self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0], "shipped")
+
+            from fabos_core.services.invoices import InvoiceService
+            InvoiceService(db, Path(td) / "data").record_payment(
+                iid, 1000, method="test", reference="pay-after-fulfillment"
+            )
+
+            with db.connect() as c:
+                self.assertEqual(c.execute("SELECT status FROM invoices WHERE id=?", (iid,)).fetchone()[0], "paid")
+                self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0], "completed")
+
     def test_terminal_fulfillment_can_complete_when_all_gates_are_met(self):
         with tempfile.TemporaryDirectory() as td:
             db = Database(Path(td) / "fabos.sqlite3")
