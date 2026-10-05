@@ -393,6 +393,7 @@ class CadGenerationTests(unittest.TestCase):
             self.assertIsNotNone(linked)
             self.assertIsNotNone(conn.execute("SELECT id FROM designs WHERE id=?", (linked["design_id"],)).fetchone())
 
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_revision_creates_parent_job_lineage(self):
         db_file = Path(self.temp.name) / "cad-lineage.sqlite3"
 
