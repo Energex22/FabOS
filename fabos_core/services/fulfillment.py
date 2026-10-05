@@ -192,11 +192,18 @@ class FulfillmentService:
             if status == "shipped":
                 c.execute("UPDATE orders SET status='shipped' WHERE id=?", (order_id,))
             elif status in ("delivered", "picked_up"):
-                inv = c.execute("""SELECT * FROM invoices WHERE order_id=? AND status<>'void'
-                                 ORDER BY created_at DESC LIMIT 1""", (order_id,)).fetchone()
-                if inv and int(inv["paid_cents"] or 0) >= int(inv["total_cents"] or 0):
-                    c.execute("UPDATE orders SET status='completed' WHERE id=?", (order_id,))
-                else:
-                    c.execute("UPDATE orders SET status='shipped' WHERE id=?", (order_id,))
+                # Fulfillment must not bypass the central order-completion gates.
+                # In particular, production orders still require every print job and
+                # QC inspection to be complete before the order can close.
+                c.execute("UPDATE orders SET status='shipped' WHERE id=? AND status='ready'", (order_id,))
             c.commit()
+
+        if status in ("delivered", "picked_up"):
+            from fabos_core.services.orders import OrderService
+            try:
+                OrderService(self.db).set_status_internal(order_id, "completed", reason="Fulfillment completed")
+            except ValueError:
+                # A completed fulfillment is still recorded even when another
+                # completion gate (payment/production/QC) remains outstanding.
+                pass
         return fid
