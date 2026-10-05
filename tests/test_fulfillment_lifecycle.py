@@ -41,6 +41,32 @@ class FulfillmentLifecycleTests(unittest.TestCase):
                 self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0], "shipped")
 
 
+    def test_fulfillment_cannot_advance_when_ready_status_bypasses_qc(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "fabos.sqlite3")
+            db.initialize()
+            migrate(db)
+            oid = str(uuid.uuid4())
+            jid = str(uuid.uuid4())
+            qid = str(uuid.uuid4())
+            with db.connect() as c:
+                c.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",
+                    (oid, "O-READY-NO-QC", "ready"),
+                )
+                c.execute(
+                    "INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",
+                    (jid, oid, "completed"),
+                )
+                c.execute(
+                    "INSERT INTO qc_inspections(id,order_id,print_job_id,status) VALUES(?,?,?,'pending')",
+                    (qid, oid, jid),
+                )
+                c.commit()
+
+            with self.assertRaisesRegex(ValueError, "inspections passed"):
+                FulfillmentService(db).save(oid, "shipping", "packed")
+
     def test_fulfillment_cannot_advance_before_qc_ready(self):
         with tempfile.TemporaryDirectory() as td:
             db = Database(Path(td) / "fabos.sqlite3")
