@@ -106,6 +106,26 @@ class InvoiceService:
     fulfillment=c.execute("SELECT status FROM fulfillments WHERE order_id=?",(inv["order_id"],)).fetchone()
     if fulfillment and fulfillment["status"] in ("delivered","picked_up"):c.execute("UPDATE orders SET status='completed' WHERE id=?",(inv["order_id"],))
    c.commit()
+ def record_refund(self,iid,amount_cents,reference="",notes=""):
+  amount=int(amount_cents)
+  if amount<=0:raise ValueError("Refund must be greater than $0.")
+  with self.db.connect() as c:
+   c.execute("BEGIN IMMEDIATE")
+   inv=c.execute("SELECT * FROM invoices WHERE id=?",(iid,)).fetchone()
+   if not inv:raise KeyError("Invoice not found.")
+   if inv["status"]=="void":raise ValueError("Cannot refund a void invoice.")
+   existing=c.execute("SELECT 1 FROM payments WHERE invoice_id=? AND reference=? LIMIT 1",(iid,reference)).fetchone() if reference else None
+   if existing:return
+   recorded=int(c.execute("SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE invoice_id=?",(iid,)).fetchone()[0])
+   if amount>recorded:raise ValueError("Refund exceeds the recorded payment balance.")
+   c.execute("INSERT INTO payments(id,invoice_id,amount_cents,method,reference,notes) VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),iid,-amount,"refund",reference,notes))
+   paid=max(0,recorded-amount)
+   total=int(inv["total_cents"] or 0)
+   status="paid" if paid>=total and total>0 else ("partial" if paid>0 else "open")
+   c.execute("UPDATE invoices SET paid_cents=?,status=? WHERE id=?",(paid,status,iid))
+   try:c.execute("INSERT INTO activity_journal(id,event_type,title,detail,page,entity_id) VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),'invoice.refund','Payment refunded','$%.2f'% (amount/100.0),'Invoices',iid))
+   except Exception:pass
+   c.commit()
  def void(self,iid):
   with self.db.connect() as c:
    c.execute("BEGIN IMMEDIATE")
