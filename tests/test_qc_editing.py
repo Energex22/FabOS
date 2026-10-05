@@ -23,6 +23,8 @@ class QCEditingTests(unittest.TestCase):
    self.assertEqual(json.loads(r["checklist_json"])[0]["text"],"Surface finish checked")
    with self.assertRaises(ValueError):
     svc.qc_update(qid,[{"text":"Surface finish checked","checked":True},{"text":"Packaging checked","checked":False}],"not ready","passed")
+   with self.assertRaises(ValueError):
+    svc.qc_save(qid,[{"text":"Surface finish checked","checked":True},{"text":"Packaging checked","checked":False}],"not ready",True)
    passed=[{"text":"Surface finish checked","checked":True},{"text":"Packaging checked","checked":True}]
    svc.qc_update(qid,passed,"done","passed")
    with db.connect() as c:
