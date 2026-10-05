@@ -47,7 +47,13 @@ class ManufacturingService:
    q=c.execute('SELECT * FROM qc_inspections WHERE id=?',(qid,)).fetchone()
    if not q:raise KeyError("QC inspection not found.")
    c.execute('UPDATE qc_inspections SET checklist_json=?,notes=?,status=?,inspected_at=? WHERE id=?',(json.dumps(items),notes,status,datetime.now().isoformat(timespec='seconds') if passed else None,qid))
-   if passed and c.execute("SELECT COUNT(*) FROM qc_inspections WHERE order_id=? AND id<>? AND status<>'passed'",(q['order_id'],qid)).fetchone()[0]==0:c.execute("UPDATE orders SET status='ready' WHERE id=?",(q['order_id'],))
+   if passed:
+    remaining=c.execute("SELECT COUNT(*) FROM qc_inspections WHERE order_id=? AND id<>? AND status<>'passed'",(q['order_id'],qid)).fetchone()[0]
+    unfinished_jobs=c.execute("SELECT COUNT(*) FROM print_jobs WHERE order_id=? AND status<>'completed'",(q['order_id'],)).fetchone()[0]
+    if remaining==0 and unfinished_jobs==0:
+     c.execute("UPDATE orders SET status='ready' WHERE id=?",(q['order_id'],))
+    else:
+     c.execute("UPDATE orders SET status='qc' WHERE id=?",(q['order_id'],))
    c.commit()
 
  def complete_with_inventory(self,jid,actual_minutes=None,actual_filament_g=None):
@@ -127,7 +133,14 @@ class ManufacturingService:
    if status=="passed":
     remaining=c.execute("""SELECT COUNT(*) FROM qc_inspections
       WHERE order_id=? AND id<>? AND status<>'passed'""",(q["order_id"],qid)).fetchone()[0]
-    if remaining==0:c.execute("UPDATE orders SET status='ready' WHERE id=?",(q["order_id"],))
+    unfinished_jobs=c.execute(
+      "SELECT COUNT(*) FROM print_jobs WHERE order_id=? AND status<>'completed'",
+      (q["order_id"],),
+    ).fetchone()[0]
+    if remaining==0 and unfinished_jobs==0:
+     c.execute("UPDATE orders SET status='ready' WHERE id=?",(q["order_id"],))
+    else:
+     c.execute("UPDATE orders SET status='qc' WHERE id=?",(q["order_id"],))
    elif status=="rework":
     c.execute("UPDATE orders SET status='qc' WHERE id=?",(q["order_id"],))
    try:
