@@ -165,7 +165,7 @@ CREATE INDEX IF NOT EXISTS idx_design_proofs_status ON design_proofs(status,upda
  design_id TEXT NOT NULL UNIQUE REFERENCES designs(id) ON DELETE CASCADE,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_quote_designs_design ON quote_designs(design_id);""")
+CREATE INDEX IF NOT EXISTS idx_quote_designs_design ON quote_designs(design_id);"""),
 (53,"""ALTER TABLE cad_generation_jobs ADD COLUMN parent_job_id TEXT REFERENCES cad_generation_jobs(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_cad_generation_jobs_parent ON cad_generation_jobs(parent_job_id,created_at);"""),
 ]
