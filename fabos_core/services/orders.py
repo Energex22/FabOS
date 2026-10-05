@@ -84,6 +84,26 @@ class OrderService:
         return bool(fulfillment and (fulfillment["status"] or "").lower() in ("delivered", "picked_up"))
 
     @staticmethod
+    def _prepare_cancellation(conn, order_id):
+        """Stop cancellable production work before an order enters cancelled state."""
+        active = conn.execute(
+            """SELECT id,status FROM print_jobs
+               WHERE order_id=? AND status IN ('printing','paused')
+               LIMIT 1""",
+            (order_id,),
+        ).fetchone()
+        if active:
+            raise ValueError(
+                "Order cannot be cancelled while a print job is actively printing or paused; stop the printer job first."
+            )
+        conn.execute(
+            """UPDATE print_jobs
+               SET status='cancelled', completed_at=CURRENT_TIMESTAMP, success=0
+               WHERE order_id=? AND status IN ('queued','scheduled')""",
+            (order_id,),
+        )
+
+    @staticmethod
     def _completion_payment_ready(conn, order_id):
         order = conn.execute("SELECT total_cents FROM orders WHERE id=?", (order_id,)).fetchone()
         if not order:
@@ -113,6 +133,8 @@ class OrderService:
                     raise ValueError("Order cannot be completed until the order total is fully paid")
                 if not self._production_completion_ready(conn, order_id):
                     raise ValueError("Order cannot be completed until production, QC, and fulfillment are complete")
+            elif requested == "cancelled":
+                self._prepare_cancellation(conn, order_id)
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
         return self.get(order_id)[0]
     def set_status_internal(self,order_id,status,reason=""):
@@ -130,6 +152,8 @@ class OrderService:
                     raise ValueError("Order cannot be completed until the order total is fully paid")
                 if not self._production_completion_ready(conn, order_id):
                     raise ValueError("Order cannot be completed until production, QC, and fulfillment are complete")
+            elif requested == "cancelled":
+                self._prepare_cancellation(conn, order_id)
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
         return self.get(order_id)[0]
     def dossier(self, order_id):
