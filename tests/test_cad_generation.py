@@ -378,7 +378,7 @@ class CadGenerationTests(unittest.TestCase):
                 );
                 CREATE TABLE customer_accounts(user_id TEXT PRIMARY KEY, customer_id TEXT);
                 CREATE TABLE quotes(id TEXT PRIMARY KEY, customer_id TEXT, quote_number TEXT);
-                CREATE TABLE quote_designs(quote_id TEXT, design_id TEXT, PRIMARY KEY(quote_id, design_id));
+                CREATE TABLE quote_designs(quote_id TEXT PRIMARY KEY, design_id TEXT);
                 CREATE TABLE designs(id TEXT PRIMARY KEY, product_id TEXT, name TEXT, current_version INTEGER, notes TEXT);
                 CREATE TABLE design_versions(id TEXT PRIMARY KEY, design_id TEXT, version INTEGER, label TEXT, notes TEXT);
             """)
@@ -414,8 +414,8 @@ class CadGenerationTests(unittest.TestCase):
             self.assertIsNotNone(conn.execute("SELECT id FROM designs WHERE id=?", (linked["design_id"],)).fetchone())
 
     @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
-    def test_attach_adds_ai_design_without_replacing_uploaded_quote_design(self):
-        db_file = Path(self.temp.name) / "attach-multi.sqlite3"
+    def test_attach_merges_ai_artifact_into_existing_quote_design(self):
+        db_file = Path(self.temp.name) / "attach-existing.sqlite3"
 
         class Database:
             def connect(self):
@@ -434,13 +434,14 @@ class CadGenerationTests(unittest.TestCase):
                 );
                 CREATE TABLE customer_accounts(user_id TEXT PRIMARY KEY, customer_id TEXT);
                 CREATE TABLE quotes(id TEXT PRIMARY KEY, customer_id TEXT, quote_number TEXT);
-                CREATE TABLE quote_designs(quote_id TEXT, design_id TEXT, PRIMARY KEY(quote_id, design_id));
+                CREATE TABLE quote_designs(quote_id TEXT PRIMARY KEY, design_id TEXT);
                 CREATE TABLE designs(id TEXT PRIMARY KEY, product_id TEXT, name TEXT, current_version INTEGER, notes TEXT);
                 CREATE TABLE design_versions(id TEXT PRIMARY KEY, design_id TEXT, version INTEGER, label TEXT, notes TEXT);
             """)
             conn.execute("INSERT INTO customer_accounts VALUES (?,?)", ("user-a", "customer-a"))
             conn.execute("INSERT INTO quotes VALUES (?,?,?)", ("quote-a", "customer-a", "Q-202610-0002"))
             conn.execute("INSERT INTO designs VALUES (?,?,?,?,?)", ("upload-design", None, "Uploaded Model", 1, "Customer upload"))
+            conn.execute("INSERT INTO design_versions VALUES (?,?,?,?,?)", ("upload-version", "upload-design", 1, "Customer upload", "Uploaded source"))
             conn.execute("INSERT INTO quote_designs VALUES (?,?)", ("quote-a", "upload-design"))
             conn.execute(
                 "INSERT INTO cad_generation_jobs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -461,11 +462,11 @@ class CadGenerationTests(unittest.TestCase):
         )
         result = service.attach_to_quote("job-a", "quote-a", "user-a")
         self.assertTrue(result["attached"])
-        self.assertNotEqual(result["design_id"], "upload-design")
-        self.assertEqual(len(vault.imported), 1)
+        self.assertEqual(result["design_id"], "upload-design")
+        self.assertEqual(vault.imported, [("upload-design", "generated.stl", True)])
         with Database().connect() as conn:
             rows = conn.execute("SELECT design_id FROM quote_designs WHERE quote_id=?", ("quote-a",)).fetchall()
-            self.assertEqual({row["design_id"] for row in rows}, {"upload-design", result["design_id"]})
+            self.assertEqual([row["design_id"] for row in rows], ["upload-design"])
 
     @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_revision_creates_parent_job_lineage(self):
