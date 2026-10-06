@@ -18,6 +18,26 @@ class CadGenerationTests(unittest.TestCase):
         self.temp.cleanup()
 
     @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_rejects_unsupported_output_format(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.generate(
+                spec={"shape": "plate", "dimensions": {"width": 20, "depth": 20, "height": 5}},
+                output_formats=["stl", "iges"],
+            )
+
+    def test_rejects_empty_output_formats(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.generate(
+                spec={"shape": "plate", "dimensions": {"width": 20, "depth": 20, "height": 5}},
+                output_formats=[],
+            )
+
+    def test_deduplicates_requested_output_formats(self):
+        self.assertEqual(
+            self.service._normalize_output_formats(["STL", "step", "stl"]),
+            ["stl", "step"],
+        )
+
     def test_parse_prompt_and_generate_plate(self):
         result = self.service.generate(prompt="Create a 120 x 80 x 5 mm mounting plate with 4 5 mm holes.", output_formats=["stl", "step", "3mf"])
         self.assertEqual(result["spec"]["shape"], "mounting_plate")
