@@ -59,6 +59,21 @@ class CadGenerationService:
         return result
 
     @staticmethod
+    def _integer(value, name, minimum=None, maximum=None):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            raise CadGenerationError("%s must be an integer" % name)
+        if not numeric.is_integer():
+            raise CadGenerationError("%s must be an integer" % name)
+        result = int(numeric)
+        if minimum is not None and result < minimum:
+            raise CadGenerationError("%s must be at least %s" % (name, minimum))
+        if maximum is not None and result > maximum:
+            raise CadGenerationError("%s must be at most %s" % (name, maximum))
+        return result
+
+    @staticmethod
     def _obb_overlap(a, b):
         """Return True when two 2D oriented rectangles overlap."""
         axes = []
@@ -153,11 +168,9 @@ class CadGenerationService:
             if result["dimensions"]["bolt_circle_diameter"] >= outer:
                 raise CadGenerationError("bolt_circle_diameter must be smaller than outer_diameter")
             try:
-                bolt_hole_count = int(result["dimensions"]["bolt_hole_count"])
-            except (TypeError, ValueError):
-                raise CadGenerationError("bolt_hole_count must be an integer")
-            if bolt_hole_count < 2 or bolt_hole_count > self.MAX_FEATURES:
-                raise CadGenerationError("bolt_hole_count must be between 2 and %s" % self.MAX_FEATURES)
+                bolt_hole_count = self._integer(
+                    result["dimensions"]["bolt_hole_count"], "bolt_hole_count", 2, self.MAX_FEATURES - 1
+                )
             result["dimensions"]["bolt_hole_count"] = bolt_hole_count
         elif shape == "ring":
             outer = self._number(dimensions.get("outer_diameter", dimensions.get("diameter", 50)), "outer_diameter")
@@ -436,12 +449,8 @@ class CadGenerationService:
                 spacing_x = self._number(mounting_pattern.get("spacing_x", 20), "mounting pattern spacing_x")
                 spacing_y = self._number(mounting_pattern.get("spacing_y", spacing_x), "mounting pattern spacing_y")
                 try:
-                    count_x = int(mounting_pattern.get("count_x", 2))
-                    count_y = int(mounting_pattern.get("count_y", 2))
-                except (TypeError, ValueError):
-                    raise CadGenerationError("mounting pattern counts must be integers")
-                if count_x < 1 or count_x > 8 or count_y < 1 or count_y > 8:
-                    raise CadGenerationError("mounting pattern count_x/count_y must be between 1 and 8")
+                    count_x = self._integer(mounting_pattern.get("count_x", 2), "mounting pattern count_x", 1, 8)
+                    count_y = self._integer(mounting_pattern.get("count_y", 2), "mounting pattern count_y", 1, 8)
                 required = count_x * count_y
                 if len(result["holes"]) + required > self.MAX_FEATURES:
                     raise CadGenerationError("Mounting pattern would exceed the maximum of %s holes" % self.MAX_FEATURES)
@@ -453,12 +462,9 @@ class CadGenerationService:
                         y = origin_y + (iy - (count_y - 1) / 2.0) * spacing_y
                         result["holes"].append({"diameter": diameter, "x": x, "y": y, "head_type": "", "head_diameter": None, "head_depth": None})
             else:
-                try:
-                    count = int(mounting_pattern.get("count", 4))
-                except (TypeError, ValueError):
-                    raise CadGenerationError("mounting pattern count must be an integer")
-                if count < 2 or count > self.MAX_FEATURES:
-                    raise CadGenerationError("mounting pattern count must be between 2 and %s" % self.MAX_FEATURES)
+                count = self._integer(
+                    mounting_pattern.get("count", 4), "mounting pattern count", 2, self.MAX_FEATURES
+                )
                 if len(result["holes"]) + count > self.MAX_FEATURES:
                     raise CadGenerationError("Mounting pattern would exceed the maximum of %s holes" % self.MAX_FEATURES)
                 radius = self._number(mounting_pattern.get("radius", 20), "mounting pattern radius")
