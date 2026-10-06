@@ -148,12 +148,17 @@ class CadGenerationService:
                 "height": self._number(dimensions.get("height", 8), "height"),
                 "bolt_circle_diameter": self._number(dimensions.get("bolt_circle_diameter", outer * 0.7), "bolt_circle_diameter"),
                 "bolt_hole_diameter": self._number(dimensions.get("bolt_hole_diameter", 5), "bolt_hole_diameter"),
-                "bolt_hole_count": int(dimensions.get("bolt_hole_count", 4)),
+                "bolt_hole_count": dimensions.get("bolt_hole_count", 4),
             })
             if result["dimensions"]["bolt_circle_diameter"] >= outer:
                 raise CadGenerationError("bolt_circle_diameter must be smaller than outer_diameter")
-            if result["dimensions"]["bolt_hole_count"] < 2 or result["dimensions"]["bolt_hole_count"] > self.MAX_FEATURES:
+            try:
+                bolt_hole_count = int(result["dimensions"]["bolt_hole_count"])
+            except (TypeError, ValueError):
+                raise CadGenerationError("bolt_hole_count must be an integer")
+            if bolt_hole_count < 2 or bolt_hole_count > self.MAX_FEATURES:
                 raise CadGenerationError("bolt_hole_count must be between 2 and %s" % self.MAX_FEATURES)
+            result["dimensions"]["bolt_hole_count"] = bolt_hole_count
         elif shape == "ring":
             outer = self._number(dimensions.get("outer_diameter", dimensions.get("diameter", 50)), "outer_diameter")
             inner = self._number(dimensions.get("inner_diameter", 25), "inner_diameter")
