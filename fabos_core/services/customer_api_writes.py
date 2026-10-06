@@ -448,10 +448,10 @@ def register_customer_write_routes(app, get_application, current_user):
         finally:
             if not success and quote_id:
                 try:
+                    if design_id:
+                        application.design_vault.remove_design(design_id)
                     with application.database.connect() as conn:
                         conn.execute("DELETE FROM quote_designs WHERE quote_id=?", (quote_id,))
-                        if design_id:
-                            conn.execute("DELETE FROM designs WHERE id=?", (design_id,))
                         conn.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
                         conn.commit()
                 except Exception:
