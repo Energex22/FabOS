@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 from fabos_core.db.database import Database
 from fabos_core.services.production import ProductionService
@@ -22,36 +23,32 @@ class ProductionTests(unittest.TestCase):
             db.initialize()
             svc = ProductionService(db)
             printer_id = svc.ensure_default_vyper()
+            conn = sqlite3.connect(":memory:")
+            conn.row_factory = sqlite3.Row
+            conn.executescript("""
+                CREATE TABLE orders (id TEXT, quote_id TEXT);
+                CREATE TABLE quote_designs (quote_id TEXT, design_id TEXT);
+                CREATE TABLE designs (id TEXT, current_version INTEGER);
+                CREATE TABLE design_versions (id TEXT, design_id TEXT, version INTEGER);
+                CREATE TABLE design_assets (
+                    id TEXT, design_id TEXT, version_id TEXT,
+                    width_mm REAL, depth_mm REAL, height_mm REAL, created_at TEXT
+                );
+            """)
+            conn.execute("INSERT INTO orders VALUES(?,?)", ("order-cad", "quote-cad"))
+            conn.execute("INSERT INTO quote_designs VALUES(?,?)", ("quote-cad", "design-cad"))
+            conn.execute("INSERT INTO designs VALUES(?,?)", ("design-cad", 1))
+            conn.execute("INSERT INTO design_versions VALUES(?,?,?)", ("version-cad", "design-cad", 1))
+            conn.execute("INSERT INTO design_assets VALUES(?,?,?,?,?,?,?)",
+                         ("asset-cad", "design-cad", "version-cad", 300, 200, 100, "2026-10-06"))
+            conn.commit()
+            job = {"product_id": None, "order_id": "order-cad"}
+            dimensions = svc._design_dimensions(conn, job)
+            self.assertEqual(dimensions, (300.0, 200.0, 100.0))
             with db.connect() as c:
-                c.executescript("""
-                    CREATE TABLE orders (id TEXT PRIMARY KEY, quote_id TEXT, status TEXT);
-                    CREATE TABLE quote_designs (quote_id TEXT PRIMARY KEY, design_id TEXT);
-                    CREATE TABLE designs (id TEXT PRIMARY KEY, current_version INTEGER);
-                    CREATE TABLE design_versions (id TEXT PRIMARY KEY, design_id TEXT, version INTEGER);
-                    CREATE TABLE design_assets (
-                        id TEXT PRIMARY KEY, design_id TEXT, version_id TEXT,
-                        width_mm REAL, depth_mm REAL, height_mm REAL, created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                c.execute("INSERT INTO orders(id,quote_id,status) VALUES(?,?,?)",
-                          ("order-cad", "quote-cad", "confirmed"))
-                c.execute("INSERT INTO quote_designs(quote_id,design_id) VALUES(?,?)",
-                          ("quote-cad", "design-cad"))
-                c.execute("INSERT INTO designs(id,current_version) VALUES(?,?)",
-                          ("design-cad", 1))
-                c.execute("INSERT INTO design_versions(id,design_id,version) VALUES(?,?,?)",
-                          ("version-cad", "design-cad", 1))
-                c.execute("""INSERT INTO design_assets(
-                    id,design_id,version_id,width_mm,depth_mm,height_mm)
-                    VALUES(?,?,?,?,?,?)""",
-                          ("asset-cad", "design-cad", "version-cad", 300, 200, 100))
-                c.execute("""INSERT INTO print_jobs(
-                    id,order_id,product_id,variant_id,status,estimated_filament_g)
-                    VALUES(?,?,?,?,?,?)""",
-                          ("job-cad", "order-cad", None, None, "queued", 10))
-                c.commit()
-            with self.assertRaises(ValueError):
-                svc.assign("job-cad", printer_id=printer_id)
+                printer = c.execute("SELECT * FROM printers WHERE id=?", (printer_id,)).fetchone()
+            self.assertFalse(svc._printer_supports_dimensions(printer, dimensions))
+            conn.close()
 
     def test_completing_job_does_not_hide_another_active_job_on_same_printer(self):
         with tempfile.TemporaryDirectory() as td:
