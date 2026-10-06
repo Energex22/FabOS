@@ -764,6 +764,13 @@ class CadGenerationTests(unittest.TestCase):
                 "mounting_pattern": {"type": "radial", "count": 4, "radius": 20},
             })
 
+    def test_rejects_rotated_rib_and_tab_outside_part(self):
+        base = {"shape": "plate", "dimensions": {"width": 40, "depth": 40, "height": 5}}
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({**base, "ribs": [{"length": 36, "width": 6, "height": 3, "angle": 45}]})
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({**base, "tabs": [{"length": 36, "width": 6, "height": 3, "angle": 45}]})
+
     def test_rejects_rotated_slot_outside_part(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
