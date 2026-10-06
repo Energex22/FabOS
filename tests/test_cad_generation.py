@@ -801,6 +801,24 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(len(result["verification"]["holes"]), 4)
 
 
+    def test_rejects_flange_bolt_count_clamping(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "flange",
+                "dimensions": {
+                    "outer_diameter": 80, "bore_diameter": 20, "height": 8,
+                    "bolt_circle_diameter": 50, "bolt_hole_diameter": 5, "bolt_hole_count": 33,
+                },
+            })
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "flange",
+                "dimensions": {
+                    "outer_diameter": 80, "bore_diameter": 20, "height": 8,
+                    "bolt_circle_diameter": 50, "bolt_hole_diameter": 5, "bolt_hole_count": "many",
+                },
+            })
+
     def test_enclosure_corner_radius_normalization(self):
         spec = self.service.normalize_spec({
             "shape": "enclosure",
