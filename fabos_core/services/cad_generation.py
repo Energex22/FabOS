@@ -54,6 +54,8 @@ class CadGenerationService:
             result = float(value)
         except (TypeError, ValueError):
             raise CadGenerationError("%s must be a number" % name)
+        if not math.isfinite(result):
+            raise CadGenerationError("%s must be finite" % name)
         if result < minimum or result > maximum:
             raise CadGenerationError("%s must be between %s and %s mm" % (name, minimum, maximum))
         return result
