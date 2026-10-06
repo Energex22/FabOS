@@ -358,6 +358,101 @@ def register_customer_write_routes(app, get_application, current_user):
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.post("/api/v1/customer/quotes/upload")
+    async def create_customer_quote_with_file(
+        idea: str = File(..., min_length=1, max_length=4000),
+        dimensions: str = File(default="", max_length=1000),
+        material: str = File(default="", max_length=200),
+        quantity: int = File(default=1, ge=1, le=1000),
+        notes: str = File(default="", max_length=4000),
+        file: UploadFile = File(...),
+        user=Depends(current_user),
+        application=Depends(get_application),
+    ):
+        filename = Path(file.filename or "").name
+        extension = Path(filename).suffix.lower()
+        if not filename:
+            raise HTTPException(status_code=400, detail="A model filename is required")
+        if extension not in ALLOWED_CUSTOM_UPLOAD_EXTENSIONS:
+            raise HTTPException(status_code=415, detail="Unsupported 3D model file type")
+        temp_path = None
+        size = 0
+        quote_id = None
+        design_id = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
+                temp_path = tmp.name
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > MAX_CUSTOM_UPLOAD_BYTES:
+                        raise HTTPException(status_code=413, detail="3D model must be 25 MB or smaller")
+                    tmp.write(chunk)
+            try:
+                _validate_model_file(temp_path, extension)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+            project = {
+                "idea": idea,
+                "dimensions": dimensions,
+                "material": material,
+                "quantity": quantity,
+                "notes": (notes or "").strip(),
+            }
+            project["notes"] += ("\n" if project["notes"] else "") + "File: " + filename
+            quote, items = application.customer_commerce.create_quote_request(user["id"], project)
+            quote_id = str(quote["id"])
+
+            design_id = str(uuid.uuid4())
+            version_id = str(uuid.uuid4())
+            safe_name = "Custom Quote " + str(quote["quote_number"])
+            with application.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO designs(id,product_id,name,current_version,notes) VALUES(?,?,?,1,?)",
+                    (design_id, None, safe_name, "Customer custom quote %s" % quote["quote_number"]),
+                )
+                conn.execute(
+                    "INSERT INTO design_versions(id,design_id,version,label,notes) VALUES(?,?,?,?,?)",
+                    (version_id, design_id, 1, "Customer upload", "Uploaded with custom quote request"),
+                )
+                conn.execute("INSERT INTO quote_designs(quote_id,design_id) VALUES(?,?)", (quote_id, design_id))
+                conn.commit()
+            application.design_vault.import_file(design_id, temp_path, make_primary=True)
+
+            if project.get("cad_job_id"):
+                application.cad_generation.attach_to_quote(project["cad_job_id"], quote_id, user["id"])
+            return {
+                "quote": _public_quote(quote),
+                "items": [_public_quote_item(item) for item in items],
+                "request_number": str(quote["quote_number"]),
+                "design_id": design_id,
+                "file": {"name": filename, "bytes": size, "extension": extension},
+            }
+        except HTTPException:
+            raise
+        except CadGenerationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="The model could not be stored") from exc
+        finally:
+            if quote_id and design_id:
+                # Only remove the temporary design on a failed request; successful
+                # requests have already returned and this block has no error marker.
+                pass
+            try:
+                if temp_path:
+                    os.unlink(temp_path)
+            except OSError:
+                pass
+            await file.close()
+
     @app.post("/api/v1/customer/orders")
     def create_customer_order(payload: OrderRequest, user=Depends(current_user), application=Depends(get_application)):
         try:
