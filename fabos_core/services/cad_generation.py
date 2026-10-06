@@ -76,6 +76,32 @@ class CadGenerationService:
         return result
 
     @staticmethod
+    def _extract_explicit_constraints(prompt):
+        """Extract only plainly stated user dimensions for independent verification."""
+        text = str(prompt or "")
+        constraints = {}
+        patterns = {
+            "width_mm": r"\bwidth\s*(?:is|=|:|to)?\s*(\d+(?:\.\d+)?)\s*mm\b",
+            "depth_mm": r"\bdepth\s*(?:is|=|:|to)?\s*(\d+(?:\.\d+)?)\s*mm\b",
+            "height_mm": r"\b(?:height|thick(?:ness)?)\s*(?:is|=|:|to)?\s*(\d+(?:\.\d+)?)\s*mm\b",
+            "diameter_mm": r"\b(?:diameter|dia)\s*(?:is|=|:|to)?\s*(\d+(?:\.\d+)?)\s*mm\b",
+        }
+        for key, pattern in patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                constraints[key] = float(match.group(1))
+        tuple_match = re.search(
+            r"(?<!\d)(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)\s*mm\b",
+            text,
+            re.IGNORECASE,
+        )
+        if tuple_match:
+            constraints.setdefault("width_mm", float(tuple_match.group(1)))
+            constraints.setdefault("depth_mm", float(tuple_match.group(2)))
+            constraints.setdefault("height_mm", float(tuple_match.group(3)))
+        return constraints
+
+    @staticmethod
     def _angle(value, name):
         try:
             result = float(value or 0)
@@ -964,6 +990,26 @@ class CadGenerationService:
                     "depth_mm": round(d.get("depth", d.get("outer_diameter", d.get("diameter"))), 4),
                     "height_mm": round(expected_height, 4)}
         checks = []
+        source_constraints = (spec.get("metadata") or {}).get("source_constraints") or {}
+        if source_constraints:
+            for key, requested in source_constraints.items():
+                if key == "diameter_mm":
+                    actual_value = min(actual["width_mm"], actual["depth_mm"])
+                    measurement = "source_diameter_mm"
+                elif key in actual:
+                    actual_value = actual[key]
+                    measurement = "source_" + key
+                else:
+                    continue
+                delta = abs(float(actual_value) - float(requested))
+                checks.append({
+                    "measurement": measurement,
+                    "requested_mm": round(float(requested), 4),
+                    "actual_mm": round(float(actual_value), 4),
+                    "delta_mm": round(delta, 5),
+                    "pass": delta <= 0.05,
+                })
+
         for key in expected:
             delta = abs(actual[key] - expected[key])
             checks.append({"measurement": key, "expected_mm": expected[key], "actual_mm": actual[key],
@@ -1575,6 +1621,18 @@ class CadGenerationService:
         formats = self._normalize_output_formats(output_formats)
         try:
             spec = self.interpret_prompt(prompt) if spec is None else self.normalize_spec(spec)
+            if prompt:
+                source_constraints = self._extract_explicit_constraints(prompt)
+                if source_constraints:
+                    if spec.get("shape") in {"cylinder", "ring", "flange"}:
+                        source_constraints = {
+                            key: value for key, value in source_constraints.items()
+                            if key in {"diameter_mm", "height_mm"}
+                        }
+                    metadata = dict(spec.get("metadata") or {})
+                    metadata["source_constraints"] = source_constraints
+                    spec["metadata"] = metadata
+                    spec = self.normalize_spec(spec)
             self._save_job(job_id, owner_id, "generating", prompt, spec, parent_job_id=parent_job_id)
             model = self._cadquery_model(spec)
             verification = self._verify(model, spec)

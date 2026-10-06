@@ -78,6 +78,30 @@ class CadGenerationTests(unittest.TestCase):
                 "bosses": [{"diameter": 20, "height": 5, "x": 50, "y": 0}],
             })
 
+    def test_extracts_only_explicit_source_dimensions(self):
+        constraints = self.service._extract_explicit_constraints(
+            "Create a 120 x 80 x 5 mm plate, width 120 mm, and make it futuristic."
+        )
+        self.assertEqual(constraints["width_mm"], 120.0)
+        self.assertEqual(constraints["depth_mm"], 80.0)
+        self.assertEqual(constraints["height_mm"], 5.0)
+
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_source_dimensions_are_independently_verified(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 40, "depth": 30, "height": 5},
+            "metadata": {"source_constraints": {"width_mm": 42}},
+        })
+        model = self.service._cadquery_model(spec)
+        verification = self.service._verify(model, spec)
+        source_check = next(
+            check for check in verification["checks"]
+            if check["measurement"] == "source_width_mm"
+        )
+        self.assertFalse(source_check["pass"])
+        self.assertFalse(verification["passed"])
+
     def test_rejects_unsupported_output_format(self):
         with self.assertRaises(CadGenerationError):
             self.service.generate(
