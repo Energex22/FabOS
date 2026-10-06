@@ -669,6 +669,15 @@ class CadGenerationService:
                     if self._obb_overlap(first_rect, second_rect):
                         raise CadGenerationError("%s overlap in the requested XY layout" % feature_name)
 
+        for rib in result["ribs"]:
+            rib_rect = {"x": rib["x"], "y": rib["y"], "length": rib["length"],
+                        "thickness": rib["width"], "angle": rib["angle"]}
+            for tab in result["tabs"]:
+                tab_rect = {"x": tab["x"], "y": tab["y"], "length": tab["length"],
+                            "thickness": tab["width"], "angle": tab["angle"]}
+                if self._obb_overlap(rib_rect, tab_rect):
+                    raise CadGenerationError("rib overlaps a tab in the requested XY layout")
+
         for slot in result["slots"]:
             for hole in holes:
                 if self._capsule_circle_overlap(slot, hole):
@@ -676,17 +685,16 @@ class CadGenerationService:
             for boss in result["bosses"]:
                 if self._capsule_circle_overlap(slot, boss):
                     raise CadGenerationError("slot overlaps a boss in the requested XY layout")
+            slot_rect = {"x": slot["x"], "y": slot["y"], "length": slot["length"],
+                         "thickness": slot["width"], "angle": slot["angle"]}
             for feature_name in ("ribs", "tabs"):
                 for feature in result[feature_name]:
                     rect = {"x": feature["x"], "y": feature["y"], "length": feature["length"],
                             "thickness": feature["width"], "angle": feature["angle"]}
-                    if self._circle_obb_overlap({"x": slot["x"], "y": slot["y"], "diameter": slot["width"]}, rect):
-                        # Center-circle test is not sufficient for long capsules; use a
-                        # conservative OBB check as a second gate.
-                        slot_rect = {"x": slot["x"], "y": slot["y"], "length": slot["length"],
-                                     "thickness": slot["width"], "angle": slot["angle"]}
-                        if self._obb_overlap(slot_rect, rect):
-                            raise CadGenerationError("slot overlaps a %s feature in the requested XY layout" % feature_name[:-1])
+                    # The OBB is a conservative envelope around the capsule. Rejecting an
+                    # envelope intersection prevents a boolean from silently changing feature intent.
+                    if self._obb_overlap(slot_rect, rect):
+                        raise CadGenerationError("slot overlaps a %s feature in the requested XY layout" % feature_name[:-1])
             for other in result["slots"]:
                 if other is not slot and self._capsule_overlap(slot, other):
                     raise CadGenerationError("slots overlap in the requested XY layout")
