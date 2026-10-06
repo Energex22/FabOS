@@ -64,7 +64,7 @@ class FulfillmentLifecycleTests(unittest.TestCase):
                 )
                 c.commit()
 
-            with self.assertRaisesRegex(ValueError, "inspections passed"):
+            with self.assertRaisesRegex(ValueError, "passed inspection"):
                 FulfillmentService(db).save(oid, "shipping", "packed")
 
     def test_fulfillment_cannot_advance_before_qc_ready(self):
@@ -134,9 +134,8 @@ class FulfillmentLifecycleTests(unittest.TestCase):
                 c.commit()
 
             service = FulfillmentService(db)
-            service.save(oid, "shipping", "delivered")
-            with db.connect() as c:
-                self.assertEqual(c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()[0], "shipped")
+            with self.assertRaisesRegex(ValueError, "QC-approved and all active production jobs completed"):
+                service.save(oid, "shipping", "delivered")
 
     def test_payment_can_finish_order_after_fulfillment_was_already_completed(self):
         with tempfile.TemporaryDirectory() as td:
