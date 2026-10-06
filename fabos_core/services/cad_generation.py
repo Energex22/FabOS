@@ -1539,10 +1539,10 @@ class CadGenerationService:
             "diameter_mm": "diameter",
         }
         patterns = {
-            "width_mm": r"(?:increase|decrease|add|subtract|make)\\s+(?:the\\s+)?width(?:\\s+by)?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*mm|([+-]?\\d+(?:\\.\\d+)?)\\s*mm\\s+(?:wider|narrower)",
-            "depth_mm": r"(?:increase|decrease|add|subtract|make)\\s+(?:the\\s+)?depth(?:\\s+by)?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*mm|([+-]?\\d+(?:\\.\\d+)?)\\s*mm\\s+(?:deeper|shallower)",
-            "height_mm": r"(?:increase|decrease|add|subtract|make)\\s+(?:the\\s+)?(?:height|thickness)(?:\\s+by)?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*mm|([+-]?\\d+(?:\\.\\d+)?)\\s*mm\\s+(?:taller|shorter|thicker|thinner)",
-            "diameter_mm": r"(?:increase|decrease|add|subtract|make)\\s+(?:the\\s+)?diameter(?:\\s+by)?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*mm|([+-]?\\d+(?:\\.\\d+)?)\\s*mm\\s+(?:wider|narrower)\\s+(?:diameter|dia)",
+            "width_mm": r"(?:increase|decrease|add|subtract|make)\s+(?:the\s+)?width(?:\s+by)?\s*([+-]?\\d+(?:\\.\\d+)?)\s*mm|([+-]?\\d+(?:\\.\\d+)?)\s*mm\s+(?:wider|narrower)",
+            "depth_mm": r"(?:increase|decrease|add|subtract|make)\s+(?:the\s+)?depth(?:\s+by)?\s*([+-]?\\d+(?:\\.\\d+)?)\s*mm|([+-]?\\d+(?:\\.\\d+)?)\s*mm\s+(?:deeper|shallower)",
+            "height_mm": r"(?:increase|decrease|add|subtract|make)\s+(?:the\s+)?(?:height|thickness)(?:\s+by)?\s*([+-]?\\d+(?:\\.\\d+)?)\s*mm|([+-]?\\d+(?:\\.\\d+)?)\s*mm\s+(?:taller|shorter|thicker|thinner)",
+            "diameter_mm": r"(?:increase|decrease|add|subtract|make)\s+(?:the\s+)?diameter(?:\s+by)?\s*([+-]?\\d+(?:\\.\\d+)?)\s*mm|([+-]?\\d+(?:\\.\\d+)?)\s*mm\s+(?:wider|narrower)\s+(?:diameter|dia)",
         }
         for key, pattern in patterns.items():
             match = re.search(pattern, text, re.IGNORECASE)
