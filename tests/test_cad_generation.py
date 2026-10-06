@@ -102,6 +102,28 @@ class CadGenerationTests(unittest.TestCase):
         self.assertFalse(source_check["pass"])
         self.assertFalse(verification["passed"])
 
+    def test_revision_constraint_parser_preserves_and_updates_source_dimensions(self):
+        original = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 120, "depth": 80, "height": 5},
+            "metadata": {"source_constraints": {"width_mm": 120, "depth_mm": 80, "height_mm": 5}},
+        })
+        constraints = self.service._extract_revision_constraints("make it 4 mm taller and 5 mm wider", original)
+        self.assertEqual(constraints["width_mm"], 125.0)
+        self.assertEqual(constraints["depth_mm"], 80.0)
+        self.assertEqual(constraints["height_mm"], 9.0)
+
+    def test_revision_constraint_parser_handles_absolute_dimension(self):
+        original = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 120, "depth": 80, "height": 5},
+            "metadata": {"source_constraints": {"width_mm": 120, "depth_mm": 80, "height_mm": 5}},
+        })
+        constraints = self.service._extract_revision_constraints("set the height to 8 mm", original)
+        self.assertEqual(constraints["width_mm"], 120.0)
+        self.assertEqual(constraints["depth_mm"], 80.0)
+        self.assertEqual(constraints["height_mm"], 8.0)
+
     def test_rejects_unsupported_output_format(self):
         with self.assertRaises(CadGenerationError):
             self.service.generate(
