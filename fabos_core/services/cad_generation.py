@@ -456,9 +456,8 @@ class CadGenerationService:
             if pattern_type in {"rectangular", "grid"}:
                 spacing_x = self._number(mounting_pattern.get("spacing_x", 20), "mounting pattern spacing_x")
                 spacing_y = self._number(mounting_pattern.get("spacing_y", spacing_x), "mounting pattern spacing_y")
-                try:
-                    count_x = self._integer(mounting_pattern.get("count_x", 2), "mounting pattern count_x", 1, 8)
-                    count_y = self._integer(mounting_pattern.get("count_y", 2), "mounting pattern count_y", 1, 8)
+                count_x = self._integer(mounting_pattern.get("count_x", 2), "mounting pattern count_x", 1, 8)
+                count_y = self._integer(mounting_pattern.get("count_y", 2), "mounting pattern count_y", 1, 8)
                 required = count_x * count_y
                 if len(result["holes"]) + required > self.MAX_FEATURES:
                     raise CadGenerationError("Mounting pattern would exceed the maximum of %s holes" % self.MAX_FEATURES)
