@@ -679,9 +679,11 @@ class CadGenerationService:
             model = model.union(rib_model)
         for tab in spec.get("tabs", []):
             tab_model = (cq.Workplane("XY").center(tab["x"], tab["y"])
-                         .box(tab["length"], tab["width"], tab["height"], centered=(True, True, False)))
+                         .box(tab["length"], tab["width"], tab["height"], centered=(True, True, False))
+                         .translate((0, 0, d.get("height", 5))))
             if tab.get("angle"):
-                tab_model = tab_model.rotate((tab["x"], tab["y"], 0), (tab["x"], tab["y"], 1), tab["angle"])
+                tab_model = tab_model.rotate((tab["x"], tab["y"], d.get("height", 5)),
+                                             (tab["x"], tab["y"], d.get("height", 5) + 1), tab["angle"])
             model = model.union(tab_model)
         edge_treatment = spec.get("edge_treatment") or {}
         if edge_treatment.get("fillet_radius") is not None:
@@ -709,7 +711,8 @@ class CadGenerationService:
                 model = model.cut(head)
         for boss in spec.get("bosses", []):
             boss_model = (cq.Workplane("XY").center(boss["x"], boss["y"])
-                          .circle(boss["diameter"] / 2).extrude(d["height"] + boss["height"]))
+                          .circle(boss["diameter"] / 2).extrude(boss["height"])
+                          .translate((0, 0, d["height"])))
             model = model.union(boss_model)
         for slot in spec.get("slots", []):
             cutter = (cq.Workplane("XY").center(slot["x"], slot["y"])
