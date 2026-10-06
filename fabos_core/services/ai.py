@@ -372,13 +372,27 @@ class AIService:
         )
         if reference_note:
             prompt += "\nReference measurements/context: " + str(reference_note).strip()[:4000]
-        content = [{"type": "text", "text": prompt}]
-        for item in images[:4]:
-            content.append({"type": "image_url", "image_url": {"url": item}})
-        messages = [
-            {"role": "system", "content": "You are a dimensional CAD reference analyzer. JSON only."},
-            {"role": "user", "content": content},
-        ]
+        provider = self._setting("ai_provider", "disabled")
+        if provider == "ollama":
+            # Ollama vision models expect image bytes in the message's images array,
+            # while OpenAI-compatible multimodal endpoints use image_url content blocks.
+            image_data = []
+            for item in images[:4]:
+                value = str(item or "")
+                if value.startswith("data:") and ";base64," in value:
+                    image_data.append(value.split(";base64,", 1)[1])
+            messages = [
+                {"role": "system", "content": "You are a dimensional CAD reference analyzer. JSON only."},
+                {"role": "user", "content": prompt, "images": image_data},
+            ]
+        else:
+            content = [{"type": "text", "text": prompt}]
+            for item in images[:4]:
+                content.append({"type": "image_url", "image_url": {"url": item}})
+            messages = [
+                {"role": "system", "content": "You are a dimensional CAD reference analyzer. JSON only."},
+                {"role": "user", "content": content},
+            ]
         response, _ = self._request(messages, use_tools=False)
         raw = response.get("content", "")
         if isinstance(raw, list):
