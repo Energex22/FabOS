@@ -778,7 +778,7 @@ class CadGenerationTests(unittest.TestCase):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({**base, "ribs": [{"length": 36, "width": 6, "height": 3, "x": 10, "y": 0, "angle": 45}]})
         with self.assertRaises(CadGenerationError):
-            self.service.normalize_spec({**base, "tabs": [{"length": 36, "width": 6, "height": 3, "angle": 45}]})
+            self.service.normalize_spec({**base, "tabs": [{"length": 36, "width": 6, "height": 3, "x": 10, "y": 0, "angle": 45}]})
 
     def test_rejects_rotated_slot_outside_part(self):
         with self.assertRaises(CadGenerationError):
