@@ -183,7 +183,9 @@ class CadGenerationService:
         holes = spec.get("holes") or []
         if not isinstance(holes, list):
             raise CadGenerationError("holes must be an array")
-        for hole in holes[:32]:
+        if len(holes) > self.MAX_FEATURES:
+            raise CadGenerationError("Too many holes; maximum is %s" % self.MAX_FEATURES)
+        for hole in holes:
             if not isinstance(hole, dict):
                 raise CadGenerationError("Each hole must be an object")
             diameter = self._number(hole.get("diameter"), "hole diameter")
@@ -212,7 +214,9 @@ class CadGenerationService:
             raise CadGenerationError("bosses must be an array")
         if bosses and shape not in {"box", "plate", "mounting_plate", "enclosure"}:
             raise CadGenerationError("bosses are currently supported only on box-like parts")
-        for boss in bosses[:self.MAX_FEATURES]:
+        if len(bosses) > self.MAX_FEATURES:
+            raise CadGenerationError("Too many bosses; maximum is %s" % self.MAX_FEATURES)
+        for boss in bosses:
             if not isinstance(boss, dict):
                 raise CadGenerationError("Each boss must be an object")
             diameter = self._number(boss.get("diameter"), "boss diameter")
@@ -229,7 +233,9 @@ class CadGenerationService:
             raise CadGenerationError("ribs must be an array")
         if ribs and shape not in {"box", "plate", "mounting_plate", "bracket", "enclosure"}:
             raise CadGenerationError("ribs are currently supported only on box-like parts and brackets")
-        for rib in ribs[:self.MAX_FEATURES]:
+        if len(ribs) > self.MAX_FEATURES:
+            raise CadGenerationError("Too many ribs; maximum is %s" % self.MAX_FEATURES)
+        for rib in ribs:
             if not isinstance(rib, dict):
                 raise CadGenerationError("Each rib must be an object")
             length = self._number(rib.get("length"), "rib length")
@@ -248,7 +254,9 @@ class CadGenerationService:
             raise CadGenerationError("tabs must be an array")
         if tabs and shape not in {"box", "plate", "mounting_plate", "bracket", "enclosure"}:
             raise CadGenerationError("tabs are currently supported only on box-like parts and brackets")
-        for tab in tabs[:self.MAX_FEATURES]:
+        if len(tabs) > self.MAX_FEATURES:
+            raise CadGenerationError("Too many tabs; maximum is %s" % self.MAX_FEATURES)
+        for tab in tabs:
             if not isinstance(tab, dict):
                 raise CadGenerationError("Each tab must be an object")
             length = self._number(tab.get("length"), "tab length")
@@ -265,7 +273,9 @@ class CadGenerationService:
             raise CadGenerationError("internal_posts must be an array")
         if internal_posts and shape != "enclosure":
             raise CadGenerationError("internal_posts are currently supported only on enclosures")
-        for post in internal_posts[:self.MAX_FEATURES]:
+        if len(internal_posts) > self.MAX_FEATURES:
+            raise CadGenerationError("Too many internal posts; maximum is %s" % self.MAX_FEATURES)
+        for post in internal_posts:
             if not isinstance(post, dict):
                 raise CadGenerationError("Each internal post must be an object")
             diameter = self._number(post.get("diameter"), "internal post diameter")
@@ -289,7 +299,9 @@ class CadGenerationService:
             raise CadGenerationError("dividers must be an array")
         if dividers and shape != "enclosure":
             raise CadGenerationError("dividers are currently supported only on enclosures")
-        for divider in dividers[:self.MAX_FEATURES]:
+        if len(dividers) > self.MAX_FEATURES:
+            raise CadGenerationError("Too many dividers; maximum is %s" % self.MAX_FEATURES)
+        for divider in dividers:
             if not isinstance(divider, dict):
                 raise CadGenerationError("Each divider must be an object")
             length = self._number(divider.get("length"), "divider length")
@@ -314,7 +326,9 @@ class CadGenerationService:
             raise CadGenerationError("cable_openings must be an array")
         if cable_openings and shape != "enclosure":
             raise CadGenerationError("cable_openings are currently supported only on enclosures")
-        for opening in cable_openings[:self.MAX_FEATURES]:
+        if len(cable_openings) > self.MAX_FEATURES:
+            raise CadGenerationError("Too many cable openings; maximum is %s" % self.MAX_FEATURES)
+        for opening in cable_openings:
             if not isinstance(opening, dict):
                 raise CadGenerationError("Each cable opening must be an object")
             side = str(opening.get("side", "front")).strip().lower()
@@ -387,7 +401,9 @@ class CadGenerationService:
             raise CadGenerationError("slots must be an array")
         if slots and shape in {"cylinder", "ring", "flange"}:
             raise CadGenerationError("slots are currently supported only on box-like parts")
-        for slot in slots[:self.MAX_FEATURES]:
+        if len(slots) > self.MAX_FEATURES:
+            raise CadGenerationError("Too many slots; maximum is %s" % self.MAX_FEATURES)
+        for slot in slots:
             if not isinstance(slot, dict):
                 raise CadGenerationError("Each slot must be an object")
             length = self._number(slot.get("length"), "slot length")
