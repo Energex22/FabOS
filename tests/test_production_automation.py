@@ -290,7 +290,14 @@ class ProductionAutomationTests(unittest.TestCase):
                     "SELECT status,printer_id,spool_id FROM print_jobs WHERE id=?",
                     (new_job_id,),
                 ).fetchone()
+                source = conn.execute(
+                    "SELECT status,failure_reason FROM print_jobs WHERE id=?",
+                    (job_id,),
+                ).fetchone()
             self.assertEqual(row["status"], "queued")
+            self.assertEqual(source["status"], "cancelled")
+            self.assertIsNone(row["printer_id"])
+            self.assertIsNone(row["spool_id"])
             self.assertIsNone(row["printer_id"])
             self.assertIsNone(row["spool_id"])
         finally:
@@ -299,6 +306,23 @@ class ProductionAutomationTests(unittest.TestCase):
                     self._cleanup_print_job_fixture(conn, new_job_id, None)
                 self._cleanup_print_job_fixture(conn, job_id, spool_id)
                 conn.execute("DELETE FROM printers WHERE id=?", (printer_id,))
+                conn.commit()
+
+    def test_reprint_rejects_active_production_job(self):
+        app = FabOSApplication()
+        job_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO print_jobs(id,status) VALUES(?,?)",
+                    (job_id, "printing"),
+                )
+                conn.commit()
+            with self.assertRaisesRegex(ValueError, "Stop the active production job"):
+                app.manufacturing.reprint(job_id)
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM print_jobs WHERE id=?", (job_id,))
                 conn.commit()
 
     def test_reprint_reopens_ready_order_for_replacement(self):
