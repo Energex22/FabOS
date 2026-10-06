@@ -808,6 +808,18 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(len(result["verification"]["holes"]), 4)
 
 
+    def test_rejects_non_finite_feature_angles(self):
+        base = {"shape": "plate", "dimensions": {"width": 100, "depth": 80, "height": 5}}
+        for feature_name, feature in (
+            ("ribs", {"length": 20, "width": 3, "height": 3, "angle": float("nan")}),
+            ("tabs", {"length": 20, "width": 3, "height": 3, "angle": float("inf")}),
+            ("slots", {"length": 20, "width": 5, "angle": float("nan")}),
+        ):
+            spec = dict(base)
+            spec[feature_name] = [feature]
+            with self.assertRaises(CadGenerationError):
+                self.service.normalize_spec(spec)
+
     def test_rejects_enclosure_features_above_interior_height(self):
         spec = {
             "shape": "enclosure",
