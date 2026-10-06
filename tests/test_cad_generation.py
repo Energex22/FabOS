@@ -159,6 +159,15 @@ class CadGenerationTests(unittest.TestCase):
                     "metadata": metadata,
                 })
 
+    def test_rejects_non_object_metadata(self):
+        for metadata in ("invalid", ["invalid"], 123):
+            with self.assertRaises(CadGenerationError):
+                self.service.normalize_spec({
+                    "shape": "plate",
+                    "dimensions": {"width": 40, "depth": 30, "height": 5},
+                    "metadata": metadata,
+                })
+
     def test_reference_cad_requires_confirmed_scale(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
