@@ -22,33 +22,47 @@ def request_client_key(request):
 
 
 class RateLimiter:
+    # Cap on distinct client keys so a stream of unique throwaway keys cannot
+    # grow the table without bound. Oldest-inserted keys are evicted first.
+    MAX_KEYS = 10000
+
     def __init__(self, limit, window_seconds):
         self.limit = max(1, int(limit))
         self.window_seconds = max(1.0, float(window_seconds))
         self._hits = defaultdict(deque)
         self._lock = Lock()
 
-    def allow(self, key):
-        key = str(key or "unknown")
+    def _prune(self, key):
+        """Drop stale hits for key; remove idle keys entirely."""
         now = time.monotonic()
         cutoff = now - self.window_seconds
+        hits = self._hits.get(key)
+        if hits is None:
+            return now, None
+        while hits and hits[0] <= cutoff:
+            hits.popleft()
+        if not hits:
+            del self._hits[key]
+            return now, None
+        return now, hits
+
+    def allow(self, key):
+        key = str(key or "unknown")
         with self._lock:
-            hits = self._hits[key]
-            while hits and hits[0] <= cutoff:
-                hits.popleft()
-            if len(hits) >= self.limit:
+            now, hits = self._prune(key)
+            if hits is not None and len(hits) >= self.limit:
                 return False
+            if hits is None:
+                if len(self._hits) >= self.MAX_KEYS:
+                    self._hits.pop(next(iter(self._hits)))
+                hits = self._hits[key]
             hits.append(now)
             return True
 
     def retry_after(self, key):
         key = str(key or "unknown")
-        now = time.monotonic()
-        cutoff = now - self.window_seconds
         with self._lock:
-            hits = self._hits.get(key)
+            now, hits = self._prune(key)
             if not hits:
                 return 0
-            while hits and hits[0] <= cutoff:
-                hits.popleft()
-            return max(0, int(self.window_seconds - (now - hits[0]) + 0.999)) if hits else 0
+            return max(0, int(self.window_seconds - (now - hits[0]) + 0.999))

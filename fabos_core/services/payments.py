@@ -203,7 +203,12 @@ class PaymentService:
             invoice=conn.execute("SELECT total_cents,status FROM invoices WHERE id=?", (invoice_id,)).fetchone()
         if not invoice or int(invoice["total_cents"] or 0) != int(order["total_cents"] or 0):
             raise ValueError("Order total no longer matches its invoice; payment cannot be started")
-        provider=self._build_provider("stripe")
+        try:
+            provider = self._build_provider("stripe")
+        except PaymentProviderNotConfigured:
+            # Fall through to the graceful unconfigured path below instead of
+            # surfacing a 503 before the payment transaction is even created.
+            provider = UnconfiguredPaymentProvider()
         if int(order["total_cents"] or 0) <= 0:
             raise ValueError("A zero-value order does not require a payment checkout")
         payment_id,amount_cents,metadata,attempt_ready=self._prepare_transaction(order,customer["id"],invoice_id,provider.name,"website")
@@ -211,7 +216,9 @@ class PaymentService:
         try: result=provider.create_checkout(payment_id=payment_id,amount_cents=amount_cents,currency="USD",metadata=metadata)
         except PaymentProviderNotConfigured:
             with self.database.connect() as conn: conn.execute("UPDATE payment_transactions SET provider='unconfigured',status='created',updated_at=CURRENT_TIMESTAMP WHERE id=?",(payment_id,));conn.commit()
-            return {"id":payment_id,"order_id":order_id,"invoice_id":invoice_id,"amount_cents":amount_cents,"currency":"USD","provider":provider.name,"status":"not_configured","payment_required":amount_cents>0,"checkout_url":None}
+            # Returned status mirrors the stored 'created' status; callers can
+            # detect the unconfigured case via provider == 'unconfigured'.
+            return {"id":payment_id,"order_id":order_id,"invoice_id":invoice_id,"amount_cents":amount_cents,"currency":"USD","provider":provider.name,"status":"created","payment_required":amount_cents>0,"checkout_url":None}
         except PaymentProviderError: self._set_status(payment_id,"failed");raise
         self._update_gateway_fields(payment_id,result,str(result.get("status") or "pending"));return self.get(payment_id)
     def record_physical_payment(self,order_id,source_id,provider_name="square"):

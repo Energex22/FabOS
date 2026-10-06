@@ -1,11 +1,31 @@
 import base64
 import binascii
 import json
+import mimetypes
+import os
 import threading
 import time
+from datetime import datetime
+from pathlib import Path
 
 from fabos_core.services.rate_limit import RateLimiter
 from urllib.parse import parse_qs, urlsplit
+
+
+def _mapping(value):
+    """Best-effort conversion of sqlite rows / mappings to plain dicts."""
+    if isinstance(value, dict):
+        return value
+    try:
+        keys = value.keys()
+    except AttributeError:
+        keys = None
+    if keys is not None:
+        return {key: value[key] for key in keys}
+    try:
+        return dict(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class FabOSAPI:
@@ -33,6 +53,17 @@ class FabOSAPI:
                 return False
             attempts.append(now)
             self._auth_attempts[key] = attempts
+            # Evict keys whose attempts all expired (or oldest first) so a long-lived
+            # server cannot accumulate entries for clients that never return.
+            if len(self._auth_attempts) > 10000:
+                expired = [
+                    key for key, stamps in self._auth_attempts.items()
+                    if not any(stamp > now - 900 for stamp in stamps)
+                ]
+                for key in expired:
+                    self._auth_attempts.pop(key, None)
+                while len(self._auth_attempts) > 10000:
+                    self._auth_attempts.pop(next(iter(self._auth_attempts)), None)
             return True
 
     def _allow_public_attempt(self, kind, client_ip):
@@ -74,7 +105,27 @@ class FabOSAPI:
         token = self._auth_token(headers)
         if not token:
             raise PermissionError("Authentication required")
-        return self.core.security.context(token, permission=permission)
+        context = self.core.security.context(token, permission=permission)
+        # Flatten actor fields onto the context itself so routes can rely on
+        # context["id"] / context["account_type"] regardless of whether the
+        # security layer returns a structured or legacy id-only context.
+        if not isinstance(context, dict):
+            return context
+        normalized = dict(context)
+        user = _mapping(context.get("user"))
+        if user:
+            normalized.setdefault("id", user.get("id"))
+            normalized.setdefault("account_type", user.get("account_type"))
+        if normalized.get("id") and not normalized.get("account_type"):
+            try:
+                summary = _mapping(self.core.accounts.account_summary(normalized["id"])) or {}
+                summary_user = _mapping(summary.get("user"))
+                if summary_user:
+                    normalized.setdefault("account_type", summary_user.get("account_type"))
+                normalized.setdefault("account_type", summary.get("account_type"))
+            except Exception:
+                pass
+        return normalized
 
     def _response(self, status, data):
         return {"status": int(status), "data": self._jsonable(data)}
@@ -91,6 +142,30 @@ class FabOSAPI:
         except Exception:
             pass
         return self._response(500, {"error": "Internal server error"})
+
+    # Fields a customer is allowed to see about themselves. Staff/internal fields
+    # (e.g. customer notes, employee profiles) are never projected here.
+    _CUSTOMER_SAFE_USER_FIELDS = ("id", "username", "email", "role", "account_type", "active", "created_at")
+    _CUSTOMER_SAFE_CUSTOMER_FIELDS = ("id", "name", "email", "phone", "created_at")
+
+    @classmethod
+    def _customer_safe_profile(cls, summary):
+        """Project an account summary into customer-safe fields.
+
+        Mirrors the FastAPI-side _user_payload/_customer_payload projection so the
+        WSGI routes never leak staff notes or internal profile rows.
+        """
+        data = cls._row(summary) if not isinstance(summary, dict) else summary
+        profile = {}
+        user = (data or {}).get("user")
+        customer = (data or {}).get("customer")
+        if user is not None:
+            row = dict(user) if not isinstance(user, dict) else user
+            profile["user"] = {key: row.get(key) for key in cls._CUSTOMER_SAFE_USER_FIELDS if key in row}
+        if customer is not None:
+            row = dict(customer) if not isinstance(customer, dict) else customer
+            profile["customer"] = {key: row.get(key) for key in cls._CUSTOMER_SAFE_CUSTOMER_FIELDS if key in row}
+        return profile
 
     @staticmethod
     def _public_product(row):
@@ -118,12 +193,18 @@ class FabOSAPI:
         for row in rows:
             item = dict(row)
             raw = str(item.get("path") or "").strip()
-            source = str(item.get("source_url") or "").strip()
             if raw.startswith(("http://", "https://", "/")):
-                item["url"] = raw
+                url = raw
             else:
                 continue
-            public.append(item)
+            # Project only customer-safe fields; never expose the server-local
+            # filesystem path stored on the image row.
+            public.append({
+                "id": item.get("id"),
+                "url": url,
+                "is_primary": bool(item.get("is_primary")),
+                "alt_text": item.get("alt_text"),
+            })
         return public
 
     def _operations_dashboard(self, user):
@@ -228,22 +309,22 @@ class FabOSAPI:
 
             if route == ["api", self.VERSION, "me"] and method == "GET":
                 context = self._context(headers)
-                return self._response(200, {"user": self.core.accounts.account_summary(context["id"])})
+                return self._response(200, {"user": self._customer_safe_profile(self.core.accounts.account_summary(context["id"]))})
 
             if route == ["api", self.VERSION, "customer", "me"] and method == "GET":
                 context = self._context(headers)
-                return self._response(200, self.core.accounts.account_summary(context["id"]))
+                return self._response(200, self._customer_safe_profile(self.core.accounts.account_summary(context["id"])))
 
             if route == ["api", self.VERSION, "customer", "me"] and method == "PATCH":
                 context = self._context(headers)
                 customer = self.core.accounts.customer_for_user(context["id"])
                 if not customer:
                     raise PermissionError("Customer account is not linked")
-                allowed = {"name", "email", "phone", "notes"}
+                allowed = {"name", "email", "phone"}
                 payload = {key: body.get(key) for key in allowed if key in body}
                 if payload:
                     self.core.customers.save(payload, customer["id"])
-                return self._response(200, self.core.accounts.account_summary(context["id"]))
+                return self._response(200, self._customer_safe_profile(self.core.accounts.account_summary(context["id"])))
 
             if route == ["api", self.VERSION, "customer", "quotes"] and method == "POST":
                 context = self._context(headers)
@@ -292,6 +373,124 @@ class FabOSAPI:
                 context = self._context(headers)
                 payment = self.core.payments.create_checkout(context["id"], route[4])
                 return self._response(200, {"payment": payment})
+
+            # Customer quote/proof workflow (mirrors the FastAPI routes in
+            # fabos_core/api.py + fabos_core/services/design_proofs_api.py so
+            # WSGI deployments serve the same customer surface).
+            if len(route) == 6 and route[:4] == ["api", self.VERSION, "customer", "quotes"] and route[5] == "accept" and method == "POST":
+                context = self._context(headers)
+                if context.get("account_type") != "customer":
+                    raise PermissionError("Customer account required")
+                quote_id = route[4]
+                try:
+                    row, _items = self.core.quotes.get_for_user(context["id"], quote_id)
+                    status = str(row["status"] or "").lower()
+                    if status == "approved":
+                        existing = self.core.quotes.convert_to_order(quote_id)
+                        return self._response(200, {"accepted": True, "order_id": existing})
+                    if status != "sent":
+                        return self._response(409, {"error": "This quote is not ready for customer acceptance."})
+                    expires = str(row["expires_at"] or "").strip()
+                    if expires and expires[:10] < datetime.utcnow().date().isoformat():
+                        self.core.quotes.set_status(quote_id, "expired")
+                        return self._response(409, {"error": "This quote has expired. Please contact FABVEX for an updated quote."})
+                    self.core.quotes.set_status(quote_id, "accepted")
+                    order_id = self.core.quotes.convert_to_order(quote_id)
+                    return self._response(200, {"accepted": True, "order_id": order_id})
+                except PermissionError:
+                    return self._response(403, {"error": "Quote access denied"})
+                except KeyError:
+                    return self._response(404, {"error": "Quote not found"})
+                except ValueError as exc:
+                    return self._response(409, {"error": str(exc)})
+
+            if len(route) == 6 and route[:4] == ["api", self.VERSION, "customer", "quotes"] and route[5] == "decline" and method == "POST":
+                context = self._context(headers)
+                if context.get("account_type") != "customer":
+                    raise PermissionError("Customer account required")
+                quote_id = route[4]
+                try:
+                    row, _items = self.core.quotes.get_for_user(context["id"], quote_id)
+                    if str(row["status"] or "").lower() != "sent":
+                        return self._response(409, {"error": "This quote cannot be declined in its current state."})
+                    self.core.quotes.set_status(quote_id, "declined")
+                    return self._response(200, {"declined": True, "quote_id": quote_id})
+                except PermissionError:
+                    return self._response(403, {"error": "Quote access denied"})
+                except KeyError:
+                    return self._response(404, {"error": "Quote not found"})
+
+            if route == ["api", self.VERSION, "customer", "proofs"] and method == "GET":
+                context = self._context(headers)
+                if context.get("account_type") != "customer":
+                    raise PermissionError("Customer account required")
+                return self._response(200, {"proofs": self.core.design_proofs.list_for_customer(context["id"])})
+
+            if len(route) == 5 and route[:4] == ["api", self.VERSION, "customer", "proofs"] and method == "GET":
+                context = self._context(headers)
+                if context.get("account_type") != "customer":
+                    raise PermissionError("Customer account required")
+                try:
+                    proof = self.core.design_proofs.get_for_customer(context["id"], route[4])
+                except KeyError:
+                    return self._response(404, {"error": "Design proof not found."})
+                return self._response(200, {"proof": proof})
+
+            if len(route) == 6 and route[:4] == ["api", self.VERSION, "customer", "proofs"] and route[5] == "approve" and method == "POST":
+                context = self._context(headers)
+                if context.get("account_type") != "customer":
+                    raise PermissionError("Customer account required")
+                try:
+                    proof = self.core.design_proofs.approve(context["id"], route[4], str((body or {}).get("comment") or ""))
+                except KeyError:
+                    return self._response(404, {"error": "Design proof not found."})
+                except ValueError as exc:
+                    return self._response(409, {"error": str(exc)})
+                return self._response(200, {"proof": self.core.design_proofs._public(proof)})
+
+            if len(route) == 6 and route[:4] == ["api", self.VERSION, "customer", "proofs"] and route[5] == "request-changes" and method == "POST":
+                context = self._context(headers)
+                if context.get("account_type") != "customer":
+                    raise PermissionError("Customer account required")
+                try:
+                    proof = self.core.design_proofs.request_changes(context["id"], route[4], str((body or {}).get("comment") or ""))
+                except KeyError:
+                    return self._response(404, {"error": "Design proof not found."})
+                except ValueError as exc:
+                    return self._response(400, {"error": str(exc)})
+                return self._response(200, {"proof": self.core.design_proofs._public(proof)})
+
+            if len(route) == 6 and route[:4] == ["api", self.VERSION, "customer", "proofs"] and route[5] == "file" and method == "GET":
+                context = self._context(headers)
+                if context.get("account_type") != "customer":
+                    raise PermissionError("Customer account required")
+                try:
+                    self.core.design_proofs.get_for_customer(context["id"], route[4])
+                    row = self.core.design_proofs._row(route[4])
+                except KeyError:
+                    return self._response(404, {"error": "Design proof not found."})
+                if not row["stored_path"]:
+                    return self._response(404, {"error": "This proof has no review file."})
+                path = Path(str(row["stored_path"])).resolve()
+                root = Path(str(self.core.design_vault.root)).resolve()
+                try:
+                    inside = os.path.commonpath([str(path), str(root)]) == str(root)
+                except ValueError:
+                    inside = False
+                if not inside or not path.is_file():
+                    return self._response(404, {"error": "Proof file is unavailable."})
+                filename = str(row["original_name"] or path.name)
+                content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+                # Binary escape hatch: create_wsgi_app serves _wsgi_file payloads
+                # as raw bytes instead of JSON (the frontend fetches this as a blob).
+                return {
+                    "status": 200,
+                    "data": {"_wsgi_file": {
+                        "bytes": path.read_bytes(),
+                        "filename": filename,
+                        "content_type": content_type,
+                    }},
+                }
 
             if route == ["api", self.VERSION, "auth", "register"] and method == "POST":
                 allowed, retry_after = self._allow_public_attempt("register", (headers or {}).get("X-Forwarded-For", ""))
@@ -440,7 +639,20 @@ def create_wsgi_app(core):
         headers = {"Authorization": environ.get("HTTP_AUTHORIZATION", ""), "User-Agent": environ.get("HTTP_USER_AGENT", ""),
                    "X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR", "")}
         result = api.request(environ.get("REQUEST_METHOD", "GET"), environ.get("PATH_INFO", "/") + (("?" + environ["QUERY_STRING"]) if environ.get("QUERY_STRING") else ""), body, headers)
-        payload = json.dumps(result["data"], default=str).encode("utf-8")
+        data = result["data"]
+        if isinstance(data, dict) and "_wsgi_file" in data:
+            # Binary escape hatch used by the proof-file route: serve the raw
+            # bytes instead of JSON so the frontend can fetch them as a blob.
+            info = data["_wsgi_file"] or {}
+            payload = info.get("bytes") or b""
+            filename = os.path.basename(str(info.get("filename") or "file")).replace('"', "").replace("\r", "").replace("\n", "")
+            content_type = str(info.get("content_type") or "application/octet-stream")
+            start_response("200 OK", [("Content-Type", content_type),
+                                      ("Content-Disposition", 'attachment; filename="%s"' % filename),
+                                      ("Cache-Control", "no-store"),
+                                      ("Content-Length", str(len(payload)))])
+            return [payload]
+        payload = json.dumps(data, default=str).encode("utf-8")
         status_text = {200: "OK", 201: "Created", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 429: "Too Many Requests", 500: "Internal Server Error"}.get(result["status"], "OK")
         start_response("%d %s" % (result["status"], status_text), [("Content-Type", "application/json; charset=utf-8"), ("Cache-Control", "no-store"), ("Content-Length", str(len(payload)))])
         return [payload]

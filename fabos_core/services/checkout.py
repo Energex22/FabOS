@@ -24,7 +24,14 @@ class CheckoutService:
             raise PermissionError("Customer account is not linked to a customer record")
         return customer
 
+    def _require_storefront(self):
+        if str(self.shop_settings.get("storefront_enabled", "true")).lower() != "true":
+            raise PermissionError("Storefront is currently unavailable")
+        if str(self.shop_settings.get("storefront_ordering_enabled", "true")).lower() != "true":
+            raise PermissionError("Customer ordering is currently disabled")
+
     def create_order(self, user_id, items, shipping_address, notes="", shipping_mode=None):
+        self._require_storefront()
         customer = self._customer(user_id)
         if not isinstance(shipping_address, dict):
             raise ValueError("Shipping address is required")
@@ -34,6 +41,17 @@ class CheckoutService:
 
         pricing = CommercePricingService(self.products, self.shop_settings)
         estimate = pricing.estimate(items, shipping_mode)
+        # Converge with CustomerCommerceService.create_order: enforce the same
+        # configured order guards (minimum order amount, free-shipping threshold).
+        subtotal_cents = int(estimate["subtotal_cents"] or 0)
+        minimum_order_cents = int(float(self.shop_settings.get("minimum_order_cents", "0") or 0))
+        if subtotal_cents < minimum_order_cents:
+            raise ValueError("Order subtotal is below the configured minimum order amount")
+        shipping_cents = int(estimate["shipping_cents"] or 0)
+        free_threshold_cents = int(float(self.shop_settings.get("free_shipping_threshold_cents", "0") or 0))
+        if free_threshold_cents > 0 and subtotal_cents >= free_threshold_cents:
+            shipping_cents = 0
+        total_cents = subtotal_cents + int(estimate["tax_cents"] or 0) + max(0, shipping_cents)
         clean_items = []
         for item in items or []:
             product_id = str(item.get("product_id") or item.get("productId") or "").strip()
@@ -76,6 +94,10 @@ class CheckoutService:
             })
 
         with self.database.connect() as conn:
+            # BEGIN IMMEDIATE serializes the order-number sequence so concurrent
+            # checkouts cannot mint the same order number (mirrors
+            # CustomerCommerceService.create_order).
+            conn.execute("BEGIN IMMEDIATE")
             prefix = "O-" + date.today().strftime("%Y%m") + "-"
             row = conn.execute(
                 "SELECT order_number FROM orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1",
@@ -94,7 +116,7 @@ class CheckoutService:
             order_number = prefix + ("%04d" % seq)
             conn.execute(
                 "INSERT INTO quotes(id,quote_number,customer_id,status,total_cents,expires_at,notes) VALUES(?,?,?,?,?,?,?)",
-                (quote_id, quote_number, customer["id"], "approved", estimate["total_cents"],
+                (quote_id, quote_number, customer["id"], "approved", total_cents,
                  (date.today() + timedelta(days=14)).isoformat(), notes or ""),
             )
             for item in clean_items:
@@ -107,8 +129,8 @@ class CheckoutService:
             conn.execute(
                 "INSERT INTO orders(id,order_number,customer_id,quote_id,status,due_at,total_cents,tax_cents,shipping_cents,shipping_address_json,checkout_notes,checkout_channel) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (order_id, order_number, customer["id"], quote_id, "pending",
-                 (date.today() + timedelta(days=7)).isoformat(), estimate["total_cents"],
-                 estimate["tax_cents"], estimate["shipping_cents"], json.dumps(shipping_address, sort_keys=True),
+                 (date.today() + timedelta(days=7)).isoformat(), total_cents,
+                 estimate["tax_cents"], shipping_cents, json.dumps(shipping_address, sort_keys=True),
                  notes or "", "website"),
             )
             for item in clean_items:
@@ -125,7 +147,7 @@ class CheckoutService:
             "status": "pending",
             "subtotal_cents": estimate["subtotal_cents"],
             "tax_cents": estimate["tax_cents"],
-            "shipping_cents": estimate["shipping_cents"],
-            "total_cents": estimate["total_cents"],
+            "shipping_cents": shipping_cents,
+            "total_cents": total_cents,
             "currency": estimate.get("currency", "USD"),
         }
