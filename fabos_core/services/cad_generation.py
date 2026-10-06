@@ -76,6 +76,16 @@ class CadGenerationService:
         return result
 
     @staticmethod
+    def _angle(value, name):
+        try:
+            result = float(value or 0)
+        except (TypeError, ValueError):
+            raise CadGenerationError("%s must be numeric" % name)
+        if not math.isfinite(result):
+            raise CadGenerationError("%s must be finite" % name)
+        return result
+
+    @staticmethod
     def _obb_overlap(a, b):
         """Return True when two 2D oriented rectangles overlap."""
         axes = []
@@ -264,7 +274,7 @@ class CadGenerationService:
             height = self._number(rib.get("height"), "rib height")
             x = self._number(rib.get("x", 0), "rib x", -2000, 2000)
             y = self._number(rib.get("y", 0), "rib y", -2000, 2000)
-            angle = float(rib.get("angle", 0) or 0)
+            angle = self._angle(rib.get("angle", 0), "rib angle")
             angle_radians = math.radians(angle % 360.0)
             half_x = (length * abs(math.cos(angle_radians)) + width * abs(math.sin(angle_radians))) / 2.0
             half_y = (length * abs(math.sin(angle_radians)) + width * abs(math.cos(angle_radians))) / 2.0
@@ -288,7 +298,7 @@ class CadGenerationService:
             height = self._number(tab.get("height", result["dimensions"]["height"]), "tab height")
             x = self._number(tab.get("x", 0), "tab x", -2000, 2000)
             y = self._number(tab.get("y", 0), "tab y", -2000, 2000)
-            angle = float(tab.get("angle", 0) or 0)
+            angle = self._angle(tab.get("angle", 0), "tab angle")
             angle_radians = math.radians(angle % 360.0)
             half_x = (length * abs(math.cos(angle_radians)) + width * abs(math.sin(angle_radians))) / 2.0
             half_y = (length * abs(math.sin(angle_radians)) + width * abs(math.cos(angle_radians))) / 2.0
@@ -341,7 +351,7 @@ class CadGenerationService:
                 raise CadGenerationError("divider height exceeds the enclosure interior height")
             x = self._number(divider.get("x", 0), "divider x", -2000, 2000)
             y = self._number(divider.get("y", 0), "divider y", -2000, 2000)
-            angle = float(divider.get("angle", 0) or 0)
+            angle = self._angle(divider.get("angle", 0), "divider angle")
             angle_radians = math.radians(angle % 360.0)
             cos_a, sin_a = abs(math.cos(angle_radians)), abs(math.sin(angle_radians))
             half_x = (length * cos_a + thickness * sin_a) / 2.0
@@ -447,7 +457,7 @@ class CadGenerationService:
                 "width": width,
                 "x": self._number(slot.get("x", 0), "slot x", -2000, 2000),
                 "y": self._number(slot.get("y", 0), "slot y", -2000, 2000),
-                "angle": float(slot.get("angle", 0) or 0),
+                "angle": self._angle(slot.get("angle", 0), "slot angle"),
             })
         mounting_pattern = spec.get("mounting_pattern") or {}
         if mounting_pattern:
@@ -465,8 +475,8 @@ class CadGenerationService:
                 required = count_x * count_y
                 if len(result["holes"]) + required > self.MAX_FEATURES:
                     raise CadGenerationError("Mounting pattern would exceed the maximum of %s holes" % self.MAX_FEATURES)
-                origin_x = float(mounting_pattern.get("origin_x", 0) or 0)
-                origin_y = float(mounting_pattern.get("origin_y", 0) or 0)
+                origin_x = self._number(mounting_pattern.get("origin_x", 0), "mounting pattern origin_x", -2000, 2000)
+                origin_y = self._number(mounting_pattern.get("origin_y", 0), "mounting pattern origin_y", -2000, 2000)
                 for ix in range(count_x):
                     for iy in range(count_y):
                         x = origin_x + (ix - (count_x - 1) / 2.0) * spacing_x
@@ -479,9 +489,9 @@ class CadGenerationService:
                 if len(result["holes"]) + count > self.MAX_FEATURES:
                     raise CadGenerationError("Mounting pattern would exceed the maximum of %s holes" % self.MAX_FEATURES)
                 radius = self._number(mounting_pattern.get("radius", 20), "mounting pattern radius")
-                center_x = float(mounting_pattern.get("center_x", 0) or 0)
-                center_y = float(mounting_pattern.get("center_y", 0) or 0)
-                start_angle = float(mounting_pattern.get("start_angle", 0) or 0)
+                center_x = self._number(mounting_pattern.get("center_x", 0), "mounting pattern center_x", -2000, 2000)
+                center_y = self._number(mounting_pattern.get("center_y", 0), "mounting pattern center_y", -2000, 2000)
+                start_angle = self._angle(mounting_pattern.get("start_angle", 0), "mounting pattern start_angle")
                 for index in range(count):
                     angle = math.radians(start_angle + (360.0 * index / count))
                     result["holes"].append({
