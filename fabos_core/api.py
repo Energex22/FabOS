@@ -158,6 +158,9 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     # traffic cannot consume the security budget for privileged accounts.
     app.state.team_auth_rate_limiter = RateLimiter(10, 300)
     app.state.public_rate_limiter = RateLimiter(30, 3600)
+    # CAD generation and vision analysis can be CPU/API intensive. Keep a
+    # per-customer limiter separate from login/public traffic.
+    app.state.cad_rate_limiter = RateLimiter(20, 300)
 
     allowed_hosts = [x.strip() for x in os.environ.get("FABOS_ALLOWED_HOSTS", "").split(",") if x.strip()]
     if allowed_hosts:
@@ -352,8 +355,18 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     def customer_cad_printers(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         return {"printers": application.cad_generation.list_printers()}
 
+    def allow_customer_cad(user: Any, operation: str) -> None:
+        key = "cad:%s:%s" % (str(user["id"]), operation)
+        if not app.state.cad_rate_limiter.allow(key):
+            raise HTTPException(
+                status_code=429,
+                detail="CAD request limit reached. Try again later.",
+                headers={"Retry-After": str(app.state.cad_rate_limiter.retry_after(key))},
+            )
+
     @app.post("/api/v1/customer/cad/generate")
     def customer_cad_generate(payload: CadGenerationRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        allow_customer_cad(user, "generate")
         if not payload.prompt and not payload.spec:
             raise HTTPException(status_code=400, detail="Provide a design prompt or structured specification")
         try:
@@ -382,6 +395,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         user: Any = Depends(customer_user),
         application: FabOSApplication = Depends(get_application),
     ):
+        allow_customer_cad(user, "reference")
         if not files:
             raise HTTPException(status_code=400, detail="Upload at least one reference image")
         if len(files) > 4:
@@ -413,6 +427,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
 
     @app.post("/api/v1/customer/cad/preflight")
     def customer_cad_preflight(payload: CadGenerationRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        allow_customer_cad(user, "preflight")
         if not payload.prompt and not payload.spec:
             raise HTTPException(status_code=400, detail="Provide a design prompt or structured specification")
         printer_id = payload.printer_id
@@ -425,6 +440,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
 
     @app.post("/api/v1/customer/cad/jobs/{job_id}/revise")
     def customer_cad_revise(job_id: str, payload: CadRevisionRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        allow_customer_cad(user, "revise")
         if not re.fullmatch(r"[0-9a-fA-F-]{20,80}", job_id):
             raise HTTPException(status_code=404, detail="CAD job not found")
         try:
