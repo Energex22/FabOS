@@ -337,6 +337,9 @@ class CadGenerationService:
             length = self._number(divider.get("length"), "divider length")
             thickness = self._number(divider.get("thickness", result["dimensions"]["wall_thickness"]), "divider thickness")
             height = self._number(divider.get("height", result["dimensions"]["height"] - result["dimensions"]["floor_thickness"]), "divider height")
+            interior_height = result["dimensions"]["height"] - result["dimensions"]["floor_thickness"]
+            if height > interior_height:
+                raise CadGenerationError("divider height exceeds the enclosure interior height")
             x = self._number(divider.get("x", 0), "divider x", -2000, 2000)
             y = self._number(divider.get("y", 0), "divider y", -2000, 2000)
             angle = float(divider.get("angle", 0) or 0)
@@ -367,7 +370,7 @@ class CadGenerationService:
             width = self._number(opening.get("width"), "cable opening width")
             height = self._number(opening.get("height"), "cable opening height")
             offset = self._number(opening.get("offset", 0), "cable opening offset", -2000, 2000)
-            z = self._number(opening.get("z", result["dimensions"]["floor_thickness"] + height / 2), "cable opening z", 0, 2000)
+            z = self._number(opening.get("z", result["dimensions"]["floor_thickness"] + height / 2), "cable opening z", 0, result["dimensions"]["height"])
             if z - height / 2 < result["dimensions"]["floor_thickness"] or z + height / 2 > result["dimensions"]["height"]:
                 raise CadGenerationError("cable opening height is outside the enclosure wall")
             side_span = (result["dimensions"]["width"] if side in {"front", "back"} else result["dimensions"]["depth"]) - 2 * result["dimensions"]["wall_thickness"]
