@@ -979,5 +979,31 @@ class ProductionAutomationTests(unittest.TestCase):
             if callable(close):
                 close()
 
+    def test_additional_copies_reject_cancelled_order(self):
+        app = FabOSApplication()
+        order_id = str(uuid.uuid4())
+        source_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,?)",
+                    (order_id, "COPIES-CANCELLED", "cancelled", 1000),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",
+                    (source_id, order_id, "completed"),
+                )
+                conn.commit()
+            with self.assertRaisesRegex(ValueError, "cancelled order"):
+                app.production.queue_additional_copies(source_id, 1)
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM print_jobs WHERE order_id=?", (order_id,))
+                conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+                conn.commit()
+            close = getattr(app, "close", None)
+            if callable(close):
+                close()
+
 if __name__ == "__main__":
     unittest.main()
