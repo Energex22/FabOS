@@ -46,6 +46,21 @@ class CadGenerationTests(unittest.TestCase):
             self.assertTrue(verification["passed"], verification)
             self.assertAlmostEqual(verification["checks"][-1]["actual_mm"], 11.0, places=2)
 
+    def test_rejects_feature_arrays_over_maximum_instead_of_truncating(self):
+        for key, feature in (
+            ("holes", {"diameter": 5, "x": 0, "y": 0}),
+            ("bosses", {"diameter": 10, "height": 5, "x": 0, "y": 0}),
+            ("ribs", {"length": 10, "width": 4, "height": 2, "x": 0, "y": 0}),
+            ("tabs", {"length": 10, "width": 4, "height": 2, "x": 0, "y": 0}),
+        ):
+            spec = {
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 100, "height": 5},
+                key: [dict(feature) for _ in range(self.service.MAX_FEATURES + 1)],
+            }
+            with self.assertRaises(cad_generation.CadGenerationError):
+                self.service.normalize_spec(spec)
+
     def test_rejects_feature_overflow_and_out_of_bounds_features(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
