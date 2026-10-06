@@ -18,6 +18,18 @@ class CadGenerationTests(unittest.TestCase):
         self.temp.cleanup()
 
     @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_exported_artifacts_are_non_empty(self):
+        if cad_module.cq is None:
+            self.skipTest("CadQuery optional dependency is not installed")
+        result = self.service.generate(
+            spec={"shape": "plate", "dimensions": {"width": 40, "depth": 30, "height": 5}},
+            output_formats=["stl"],
+            owner_id="user-a",
+        )
+        artifact = result["artifacts"][0]
+        self.assertGreater(artifact["bytes"], 0)
+        self.assertTrue(Path(artifact["path"]).is_file())
+
     def test_rejects_feature_overflow_and_out_of_bounds_features(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
