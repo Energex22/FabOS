@@ -196,8 +196,13 @@ class ProductionService:
                    WHERE qi.quote_id=?""", (order["quote_id"],)
             ).fetchall()
             for item in items:
+                # Historical cancelled jobs do not satisfy the ordered quantity.
+                # They remain in the audit trail, but automation must be able to
+                # create replacement production work after a failed/reprint attempt.
                 existing = conn.execute(
-                    "SELECT COUNT(*) FROM print_jobs WHERE order_id=? AND product_id IS ? AND variant_id IS ?",
+                    """SELECT COUNT(*) FROM print_jobs
+                       WHERE order_id=? AND product_id IS ? AND variant_id IS ?
+                         AND status <> 'cancelled'""",
                     (order_id, item["product_id"], item["variant_id"]),
                 ).fetchone()[0]
                 needed = max(0, int(item["quantity"] or 1) - int(existing))
