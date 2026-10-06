@@ -73,15 +73,23 @@ class OrderService:
         if jobs:
             if any((row["status"] or "").lower() != "completed" for row in jobs):
                 return False
-            qc = conn.execute(
-                """SELECT q.status
-                   FROM qc_inspections q
-                   LEFT JOIN print_jobs j ON j.id=q.print_job_id
-                   WHERE q.order_id=?
-                     AND (q.print_job_id IS NULL OR COALESCE(j.status,'')<>?)""",
-                (order_id, "cancelled"),
-            ).fetchall()
-            if not qc or any((row["status"] or "").lower() != "passed" for row in qc):
+            # Production orders need a passed inspection for every active print
+            # job. An order-level QC row remains valid for legacy orders with no
+            # print jobs, but it must not let one passed inspection cover another job.
+            missing_qc = conn.execute(
+                """SELECT 1
+                   FROM print_jobs j
+                   WHERE j.order_id=? AND COALESCE(j.status,'')<>'cancelled'
+                     AND NOT EXISTS (
+                         SELECT 1 FROM qc_inspections q
+                         WHERE q.order_id=j.order_id
+                           AND q.print_job_id=j.id
+                           AND LOWER(COALESCE(q.status,''))='passed'
+                     )
+                   LIMIT 1""",
+                (order_id,),
+            ).fetchone()
+            if missing_qc:
                 return False
         fulfillment = conn.execute(
             "SELECT status FROM fulfillments WHERE order_id=? ORDER BY created_at DESC LIMIT 1",
