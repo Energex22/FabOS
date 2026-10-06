@@ -367,6 +367,7 @@ def register_customer_write_routes(app, get_application, current_user):
         material: str = File(default="", max_length=200),
         quantity: int = File(default=1, ge=1, le=1000),
         notes: str = File(default="", max_length=4000),
+        cad_job_id: Optional[str] = File(default=None, max_length=128),
         file: UploadFile = File(...),
         user=Depends(current_user),
         application=Depends(get_application),
