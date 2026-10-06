@@ -33,4 +33,18 @@ class QCEditingTests(unittest.TestCase):
    self.assertEqual(r["status"],"passed")
    self.assertEqual(o["status"],"ready")
 
+ def test_reconcile_qc_ignores_cancelled_historical_jobs(self):
+  with tempfile.TemporaryDirectory() as td:
+   db=Database(Path(td)/"x.sqlite3");db.initialize();migrate(db)
+   oid=str(uuid.uuid4());jid=str(uuid.uuid4())
+   with db.connect() as c:
+    c.execute("INSERT INTO orders(id,order_number,status,total_cents) VALUES(?,?,?,0)",(oid,"O-QC-CANCELLED","qc"))
+    c.execute("INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",(jid,oid,"cancelled"))
+    c.commit()
+   svc=ManufacturingService(db)
+   self.assertEqual(svc.reconcile_qc(),0)
+   with db.connect() as c:
+    count=c.execute("SELECT COUNT(*) FROM qc_inspections WHERE print_job_id=?",(jid,)).fetchone()[0]
+   self.assertEqual(count,0)
+
 if __name__=="__main__":unittest.main()
