@@ -98,6 +98,7 @@ class CadGenerationTests(unittest.TestCase):
             ["stl", "step"],
         )
 
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_parse_prompt_and_generate_plate(self):
         result = self.service.generate(prompt="Create a 120 x 80 x 5 mm mounting plate with 4 5 mm holes.", output_formats=["stl", "step", "3mf"])
         self.assertEqual(result["spec"]["shape"], "mounting_plate")
