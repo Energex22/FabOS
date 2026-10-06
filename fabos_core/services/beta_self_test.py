@@ -1,4 +1,5 @@
 from pathlib import Path
+from fabos_core.db.migrations import MIGRATIONS
 import tempfile,uuid
 
 class BetaSelfTestService:
@@ -28,8 +29,10 @@ class BetaSelfTestService:
     def _schema(self):
         with self.app.database.connect() as c:
             ver=int(c.execute("SELECT COALESCE(MAX(version),0) FROM app_migrations").fetchone()[0] or 0)
-        if ver<35:raise RuntimeError("Database schema is %d; expected at least 35"%ver)
-        return "Schema %d"%ver
+        expected=max((int(version) for version, _sql in MIGRATIONS), default=0)
+        if ver<expected:
+            raise RuntimeError("Database schema is %d; expected current migration %d" % (ver, expected))
+        return "Schema %d (current migration %d)" % (ver, expected)
 
     def _transaction(self):
         test_id="selftest_"+str(uuid.uuid4())
