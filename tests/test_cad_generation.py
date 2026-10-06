@@ -931,6 +931,32 @@ class CadGenerationTests(unittest.TestCase):
         })
         self.assertTrue(spec["metadata"]["printability_warnings"])
 
+    def test_printability_constraints_cover_bosses_and_slots(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 60, "depth": 50, "height": 5},
+            "bosses": [{"diameter": 0.6, "height": 0.6, "x": -15, "y": 0}],
+            "slots": [{"length": 12, "width": 0.6, "x": 15, "y": 0}],
+            "print_constraints": {"min_feature_size": 1.0},
+        })
+        self.assertEqual(len(spec["metadata"]["printability_warnings"]), 2)
+
+    def test_printability_constraints_strict_rejects_boss_and_slot(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 60, "depth": 50, "height": 5},
+                "bosses": [{"diameter": 0.6, "height": 0.6, "x": -15, "y": 0}],
+                "print_constraints": {"min_feature_size": 1.0, "strict": True},
+            })
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 60, "depth": 50, "height": 5},
+                "slots": [{"length": 12, "width": 0.6, "x": 15, "y": 0}],
+                "print_constraints": {"min_feature_size": 1.0, "strict": True},
+            })
+
     def test_printability_constraints_strict_reject(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
