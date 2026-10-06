@@ -769,7 +769,7 @@ class CadGenerationTests(unittest.TestCase):
             self.service.normalize_spec({
                 "shape": "plate",
                 "dimensions": {"width": 40, "depth": 40, "height": 5},
-                "slots": [{"length": 30, "width": 6, "x": 0, "y": 0, "angle": 45}],
+                "slots": [{"length": 30, "width": 6, "x": 8, "y": 8, "angle": 45}],
             })
 
     def test_allows_rotated_slot_when_capsule_fits(self):
