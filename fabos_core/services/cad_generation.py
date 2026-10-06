@@ -1357,6 +1357,7 @@ class CadGenerationService:
 
     def generate(self, spec=None, prompt=None, output_formats=None, owner_id=None, parent_job_id=None):
         job_id = str(uuid.uuid4())
+        formats = self._normalize_output_formats(output_formats)
         try:
             spec = self.interpret_prompt(prompt) if spec is None else self.normalize_spec(spec)
             self._save_job(job_id, owner_id, "generating", prompt, spec, parent_job_id=parent_job_id)
@@ -1375,7 +1376,6 @@ class CadGenerationService:
                     raise CadGenerationError("Generated geometry failed dimensional verification")
             folder = self.root / job_id
             folder.mkdir(parents=True, exist_ok=True)
-            formats = self._normalize_output_formats(output_formats)
             (folder / "metadata.json").write_text(json.dumps({"owner_id": str(owner_id or ""), "spec": spec, "parent_job_id": parent_job_id}, default=str), encoding="utf-8")
             artifacts = []
             for fmt in (formats or ["stl"]):
