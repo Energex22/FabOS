@@ -989,6 +989,7 @@ class CadGenerationService:
         expected = {"width_mm": round(d.get("width", d.get("outer_diameter", d.get("diameter"))), 4),
                     "depth_mm": round(d.get("depth", d.get("outer_diameter", d.get("diameter"))), 4),
                     "height_mm": round(expected_height, 4)}
+        checks = []
         source_constraints = (spec.get("metadata") or {}).get("source_constraints") or {}
         if source_constraints:
             for key, requested in source_constraints.items():
@@ -1009,7 +1010,6 @@ class CadGenerationService:
                     "pass": delta <= 0.05,
                 })
 
-        checks = []
         for key in expected:
             delta = abs(actual[key] - expected[key])
             checks.append({"measurement": key, "expected_mm": expected[key], "actual_mm": actual[key],
