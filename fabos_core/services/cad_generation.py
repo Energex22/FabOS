@@ -722,6 +722,18 @@ class CadGenerationService:
                 if strict:
                     raise CadGenerationError(message)
                 result["metadata"].setdefault("printability_warnings", []).append(message)
+        for boss in result["bosses"]:
+            if boss["diameter"] < min_feature or boss["height"] < min_feature:
+                message = "boss feature is below the requested printable minimum"
+                if strict:
+                    raise CadGenerationError(message)
+                result["metadata"].setdefault("printability_warnings", []).append(message)
+        for slot in result["slots"]:
+            if slot["width"] < min_feature:
+                message = "slot width is below the requested printable minimum"
+                if strict:
+                    raise CadGenerationError(message)
+                result["metadata"].setdefault("printability_warnings", []).append(message)
         result["mounting_pattern"] = mounting_pattern
         return result
 
