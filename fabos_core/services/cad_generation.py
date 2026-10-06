@@ -1624,6 +1624,11 @@ class CadGenerationService:
             if prompt:
                 source_constraints = self._extract_explicit_constraints(prompt)
                 if source_constraints:
+                    if spec.get("shape") in {"cylinder", "ring", "flange"}:
+                        source_constraints = {
+                            key: value for key, value in source_constraints.items()
+                            if key in {"diameter_mm", "height_mm"}
+                        }
                     metadata = dict(spec.get("metadata") or {})
                     metadata["source_constraints"] = source_constraints
                     spec["metadata"] = metadata
