@@ -40,6 +40,22 @@ class AIServiceTest(unittest.TestCase):
         self.assertEqual(result["response"], "Hello from FabOS")
         self.assertTrue(result["conversation_id"])
 
+    def test_ollama_reference_analysis_uses_native_image_payload(self):
+        self.conn.execute("UPDATE shop_settings SET value='ollama' WHERE key='ai_provider'")
+        captured = {}
+
+        def fake_request(messages, use_tools=True):
+            captured["messages"] = messages
+            return ({"content": '{"shape":"box","dimensions":{"width":10,"depth":10,"height":10},"metadata":{}}'}, {})
+        
+        image = "data:image/png;base64,aGVsbG8="
+        with patch.object(self.service, "_request", side_effect=fake_request):
+            result = self.service.design_spec_from_images([image], "10 mm reference")
+        self.assertEqual(result["shape"], "box")
+        user_message = captured["messages"][1]
+        self.assertEqual(user_message["content"].startswith("Analyze these reference images"), True)
+        self.assertEqual(user_message["images"], ["aGVsbG8="])
+
     def test_exposes_only_read_only_tools(self):
         names = [item["function"]["name"] for item in self.service.tool_definitions()]
         self.assertEqual(names, [
