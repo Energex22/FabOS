@@ -273,7 +273,7 @@ def register_customer_write_routes(app, get_application, current_user):
         quote_id = None
         design_id = None
         success = False
-        try
+        try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
                 temp_path = tmp.name
                 while True:
