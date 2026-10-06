@@ -214,7 +214,10 @@ class CadGenerationService:
         dimensions = spec.get("dimensions") or {}
         if not isinstance(dimensions, dict):
             raise CadGenerationError("dimensions must be an object")
-        metadata = dict(spec.get("metadata") or {})
+        metadata = spec.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            raise CadGenerationError("metadata must be an object")
+        metadata = dict(metadata)
         self._validate_reference_metadata(metadata)
         result = {"shape": shape, "dimensions": {}, "holes": [], "slots": [], "bosses": [], "ribs": [], "tabs": [], "internal_posts": [], "dividers": [], "cable_openings": [], "lid_interface": {}, "edge_treatment": {}, "metadata": metadata}
         if shape == "cylinder":
