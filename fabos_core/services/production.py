@@ -275,8 +275,7 @@ class ProductionService:
         return tuple(values)
 
     @classmethod
-    def _printer_supports_job(cls, printer, job):
-        dimensions = cls._job_dimensions(job)
+    def _printer_supports_dimensions(cls, printer, dimensions):
         if not dimensions:
             return True
         limits = []
@@ -291,6 +290,31 @@ class ProductionService:
         x, y, z = dimensions
         return ((x <= limits[0] and y <= limits[1] and z <= limits[2]) or
                 (y <= limits[0] and x <= limits[1] and z <= limits[2]))
+
+    def _design_dimensions(self, conn, job):
+        """Return dimensions stored on the customer Design Vault when slicer metadata is absent."""
+        if job["product_id"] or not job["order_id"]:
+            return None
+        row = conn.execute(
+            """SELECT da.width_mm, da.depth_mm, da.height_mm
+               FROM orders o
+               JOIN quote_designs qd ON qd.quote_id=o.quote_id
+               JOIN designs d ON d.id=qd.design_id
+               JOIN design_assets da ON da.design_id=d.id
+               JOIN design_versions dv ON dv.id=da.version_id
+               WHERE o.id=? AND da.width_mm IS NOT NULL
+                 AND da.depth_mm IS NOT NULL AND da.height_mm IS NOT NULL
+                 AND dv.version=d.current_version
+               ORDER BY da.created_at DESC LIMIT 1""",
+            (job["order_id"],),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            values = tuple(float(row[key]) for key in ("width_mm", "depth_mm", "height_mm"))
+        except (TypeError, ValueError):
+            return None
+        return values if all(math.isfinite(v) and v > 0 for v in values) else None
 
     def assign(self, job_id, printer_id=None, spool_id=None):
         with self.database.connect() as conn:
@@ -307,7 +331,8 @@ class ProductionService:
                     raise KeyError("Printer not found.")
                 if str(printer["status"] or "").lower() in ("offline", "error"):
                     raise ValueError("Printer is offline or in error state.")
-                if not self._printer_supports_job(printer, job):
+                dimensions = self._job_dimensions(job) or self._design_dimensions(conn, job)
+                if dimensions and not self._printer_supports_dimensions(printer, dimensions):
                     raise ValueError("Printer build volume is too small for this print.")
                 occupied = conn.execute(
                     """SELECT 1 FROM print_jobs
