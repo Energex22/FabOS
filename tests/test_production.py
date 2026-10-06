@@ -22,40 +22,36 @@ class ProductionTests(unittest.TestCase):
             db.initialize()
             svc = ProductionService(db)
             printer_id = svc.ensure_default_vyper()
-            user_id = "user-cad"
-            customer_id = "customer-cad"
-            quote_id = "quote-cad"
-            order_id = "order-cad"
-            design_id = "design-cad"
-            version_id = "version-cad"
-            asset_id = "asset-cad"
-            job_id = "job-cad"
             with db.connect() as c:
-                c.execute("INSERT INTO users(id,email,password_hash,account_type) VALUES(?,?,?,?)",
-                          (user_id, "cad@example.test", "x", "customer"))
-                c.execute("INSERT INTO customers(id,name) VALUES(?,?)", (customer_id, "CAD Customer"))
-                c.execute("INSERT INTO customer_accounts(id,user_id,customer_id) VALUES(?,?,?)",
-                          ("ca-cad", user_id, customer_id))
-                c.execute("INSERT INTO quotes(id,quote_number,customer_id,status) VALUES(?,?,?,?)",
-                          (quote_id, "Q-CAD", customer_id, "approved"))
-                c.execute("INSERT INTO orders(id,quote_id,customer_id,status) VALUES(?,?,?,?)",
-                          (order_id, quote_id, customer_id, "confirmed"))
-                c.execute("INSERT INTO designs(id,name,current_version) VALUES(?,?,?)",
-                          (design_id, "AI CAD", 1))
-                c.execute("INSERT INTO design_versions(id,design_id,version,label) VALUES(?,?,?,?)",
-                          (version_id, design_id, 1, "AI Generated"))
+                c.executescript("""
+                    CREATE TABLE orders (id TEXT PRIMARY KEY, quote_id TEXT, status TEXT);
+                    CREATE TABLE quote_designs (quote_id TEXT PRIMARY KEY, design_id TEXT);
+                    CREATE TABLE designs (id TEXT PRIMARY KEY, current_version INTEGER);
+                    CREATE TABLE design_versions (id TEXT PRIMARY KEY, design_id TEXT, version INTEGER);
+                    CREATE TABLE design_assets (
+                        id TEXT PRIMARY KEY, design_id TEXT, version_id TEXT,
+                        width_mm REAL, depth_mm REAL, height_mm REAL, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                c.execute("INSERT INTO orders(id,quote_id,status) VALUES(?,?,?)",
+                          ("order-cad", "quote-cad", "confirmed"))
+                c.execute("INSERT INTO quote_designs(quote_id,design_id) VALUES(?,?)",
+                          ("quote-cad", "design-cad"))
+                c.execute("INSERT INTO designs(id,current_version) VALUES(?,?)",
+                          ("design-cad", 1))
+                c.execute("INSERT INTO design_versions(id,design_id,version) VALUES(?,?,?)",
+                          ("version-cad", "design-cad", 1))
                 c.execute("""INSERT INTO design_assets(
-                    id,design_id,version_id,kind,original_name,stored_path,sha256,bytes,width_mm,depth_mm,height_mm)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                          (asset_id, design_id, version_id, "model", "model.stl", "/tmp/model.stl", "x", 1, 300, 200, 100))
-                c.execute("INSERT INTO quote_designs(quote_id,design_id) VALUES(?,?)", (quote_id, design_id))
+                    id,design_id,version_id,width_mm,depth_mm,height_mm)
+                    VALUES(?,?,?,?,?,?)""",
+                          ("asset-cad", "design-cad", "version-cad", 300, 200, 100))
                 c.execute("""INSERT INTO print_jobs(
                     id,order_id,product_id,variant_id,status,estimated_filament_g)
                     VALUES(?,?,?,?,?,?)""",
-                          (job_id, order_id, None, None, "queued", 10))
+                          ("job-cad", "order-cad", None, None, "queued", 10))
                 c.commit()
             with self.assertRaises(ValueError):
-                svc.assign(job_id, printer_id=printer_id)
+                svc.assign("job-cad", printer_id=printer_id)
 
     def test_completing_job_does_not_hide_another_active_job_on_same_printer(self):
         with tempfile.TemporaryDirectory() as td:
