@@ -251,6 +251,7 @@ def register_customer_write_routes(app, get_application, current_user):
         material: str = File(default="", max_length=200),
         quantity: int = File(default=1, ge=1, le=1000),
         notes: str = File(default="", max_length=4000),
+        cad_job_id: Optional[str] = File(default=None, max_length=128),
         file: UploadFile = File(...),
         application=Depends(get_application),
     ):
@@ -401,6 +402,7 @@ def register_customer_write_routes(app, get_application, current_user):
                 "material": material,
                 "quantity": quantity,
                 "notes": (notes or "").strip(),
+                "cad_job_id": cad_job_id,
             }
             project["notes"] += ("\n" if project["notes"] else "") + "File: " + filename
             quote, items = application.customer_commerce.create_quote_request(user["id"], project)
@@ -442,10 +444,6 @@ def register_customer_write_routes(app, get_application, current_user):
         except Exception as exc:
             raise HTTPException(status_code=500, detail="The model could not be stored") from exc
         finally:
-            if quote_id and design_id:
-                # Only remove the temporary design on a failed request; successful
-                # requests have already returned and this block has no error marker.
-                pass
             try:
                 if temp_path:
                     os.unlink(temp_path)
