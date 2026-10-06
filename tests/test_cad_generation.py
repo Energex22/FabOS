@@ -30,6 +30,22 @@ class CadGenerationTests(unittest.TestCase):
         self.assertGreater(artifact["bytes"], 0)
         self.assertTrue(Path(artifact["path"]).is_file())
 
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_raised_bosses_and_tabs_extend_above_base(self):
+        for feature_key, feature in (
+            ("bosses", {"diameter": 10, "height": 6, "x": 0, "y": 0}),
+            ("tabs", {"length": 20, "width": 8, "height": 6, "x": 0, "y": 0}),
+        ):
+            spec = self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 60, "depth": 40, "height": 5},
+                feature_key: [feature],
+            })
+            model = self.service._cadquery_model(spec)
+            verification = self.service._verify(model, spec)
+            self.assertTrue(verification["passed"], verification)
+            self.assertAlmostEqual(verification["checks"][-1]["actual_mm"], 11.0, places=2)
+
     def test_rejects_feature_overflow_and_out_of_bounds_features(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
