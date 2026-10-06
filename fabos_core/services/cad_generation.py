@@ -1520,6 +1520,43 @@ class CadGenerationService:
             raise
         return {"quote_id": quote_id, "design_id": design_id, "attached": True, "artifacts": imported}
 
+    @classmethod
+    def _extract_revision_constraints(cls, instruction, current_spec):
+        """Resolve absolute and additive dimension revisions into target source constraints."""
+        text = str(instruction or "")
+        current_dimensions = dict((current_spec or {}).get("dimensions") or {})
+        current_constraints = dict(((current_spec or {}).get("metadata") or {}).get("source_constraints") or {})
+        resolved = dict(current_constraints)
+
+        absolute = cls._extract_explicit_constraints(text)
+        for key, value in absolute.items():
+            resolved[key] = float(value)
+
+        dimension_keys = {
+            "width_mm": "width",
+            "depth_mm": "depth",
+            "height_mm": "height",
+            "diameter_mm": "diameter",
+        }
+        patterns = {
+            "width_mm": r"(?:increase|decrease|add|subtract|make)\\s+(?:the\\s+)?width(?:\\s+by)?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*mm|([+-]?\\d+(?:\\.\\d+)?)\\s*mm\\s+(?:wider|narrower)",
+            "depth_mm": r"(?:increase|decrease|add|subtract|make)\\s+(?:the\\s+)?depth(?:\\s+by)?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*mm|([+-]?\\d+(?:\\.\\d+)?)\\s*mm\\s+(?:deeper|shallower)",
+            "height_mm": r"(?:increase|decrease|add|subtract|make)\\s+(?:the\\s+)?(?:height|thickness)(?:\\s+by)?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*mm|([+-]?\\d+(?:\\.\\d+)?)\\s*mm\\s+(?:taller|shorter|thicker|thinner)",
+            "diameter_mm": r"(?:increase|decrease|add|subtract|make)\\s+(?:the\\s+)?diameter(?:\\s+by)?\\s*([+-]?\\d+(?:\\.\\d+)?)\\s*mm|([+-]?\\d+(?:\\.\\d+)?)\\s*mm\\s+(?:wider|narrower)\\s+(?:diameter|dia)",
+        }
+        for key, pattern in patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if not match:
+                continue
+            delta = float(next(group for group in match.groups() if group is not None))
+            dimension_key = dimension_keys[key]
+            base = current_constraints.get(key, current_dimensions.get(dimension_key))
+            if base is not None:
+                lowered = text.lower()
+                subtractive = any(word in lowered for word in ("decrease", "subtract", "narrower", "shallower", "shorter", "thinner"))
+                resolved[key] = float(base) + (-delta if subtractive else delta)
+        return resolved
+
     def revise(self, job_id, instruction, owner_id=None, output_formats=None):
         """Apply a natural-language revision to an existing parametric CAD job."""
         if not str(instruction or "").strip():
@@ -1542,6 +1579,12 @@ class CadGenerationService:
                 spec = self._apply_simple_revision(current, instruction)
         else:
             spec = self._apply_simple_revision(current, instruction)
+        revision_constraints = self._extract_revision_constraints(instruction, current)
+        if revision_constraints:
+            metadata = dict(spec.get("metadata") or {})
+            metadata["source_constraints"] = revision_constraints
+            spec["metadata"] = metadata
+            spec = self.normalize_spec(spec)
         return self.generate(
             spec=spec,
             prompt="Revision of %s: %s" % (job_id, str(instruction).strip()[:8000]),
