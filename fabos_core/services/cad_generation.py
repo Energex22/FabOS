@@ -264,10 +264,13 @@ class CadGenerationService:
             x = self._number(rib.get("x", 0), "rib x", -2000, 2000)
             y = self._number(rib.get("y", 0), "rib y", -2000, 2000)
             angle = float(rib.get("angle", 0) or 0)
-            if length > result["dimensions"]["width"] or width > result["dimensions"]["depth"]:
-                raise CadGenerationError("rib footprint is larger than the part")
-            if abs(x) + length / 2 > result["dimensions"]["width"] / 2 or abs(y) + width / 2 > result["dimensions"]["depth"] / 2:
-                raise CadGenerationError("rib position is outside the part")
+            angle_radians = math.radians(angle % 360.0)
+            half_x = (length * abs(math.cos(angle_radians)) + width * abs(math.sin(angle_radians))) / 2.0
+            half_y = (length * abs(math.sin(angle_radians)) + width * abs(math.cos(angle_radians))) / 2.0
+            if half_x > result["dimensions"]["width"] / 2 or half_y > result["dimensions"]["depth"] / 2:
+                raise CadGenerationError("rib footprint is too large for the part at this angle")
+            if abs(x) + half_x > result["dimensions"]["width"] / 2 or abs(y) + half_y > result["dimensions"]["depth"] / 2:
+                raise CadGenerationError("rib position is outside the part at this angle")
             result["ribs"].append({"length": length, "width": width, "height": height, "x": x, "y": y, "angle": angle})
         tabs = spec.get("tabs") or []
         if not isinstance(tabs, list):
@@ -285,8 +288,13 @@ class CadGenerationService:
             x = self._number(tab.get("x", 0), "tab x", -2000, 2000)
             y = self._number(tab.get("y", 0), "tab y", -2000, 2000)
             angle = float(tab.get("angle", 0) or 0)
-            if abs(x) + length / 2 > result["dimensions"]["width"] / 2 or abs(y) + width / 2 > result["dimensions"]["depth"] / 2:
-                raise CadGenerationError("tab position is outside the part")
+            angle_radians = math.radians(angle % 360.0)
+            half_x = (length * abs(math.cos(angle_radians)) + width * abs(math.sin(angle_radians))) / 2.0
+            half_y = (length * abs(math.sin(angle_radians)) + width * abs(math.cos(angle_radians))) / 2.0
+            if half_x > result["dimensions"]["width"] / 2 or half_y > result["dimensions"]["depth"] / 2:
+                raise CadGenerationError("tab footprint is too large for the part at this angle")
+            if abs(x) + half_x > result["dimensions"]["width"] / 2 or abs(y) + half_y > result["dimensions"]["depth"] / 2:
+                raise CadGenerationError("tab position is outside the part at this angle")
             result["tabs"].append({"length": length, "width": width, "height": height, "x": x, "y": y, "angle": angle})
         internal_posts = spec.get("internal_posts") or []
         if not isinstance(internal_posts, list):
