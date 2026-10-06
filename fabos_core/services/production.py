@@ -372,6 +372,11 @@ class ProductionService:
         if copies <= 0:
             return []
         source = self.get(job_id)
+        if source["order_id"]:
+            with self.database.connect() as conn:
+                order = conn.execute("SELECT status FROM orders WHERE id=?", (source["order_id"],)).fetchone()
+            if order and str(order["status"] or "").lower() == "cancelled":
+                raise ValueError("Cannot add copies to a cancelled order.")
         created = []
         with self.database.connect() as conn:
             for _ in range(copies):
