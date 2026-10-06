@@ -174,16 +174,21 @@ class FulfillmentService:
                 if jobs:
                     if any(str(row["status"] or "").lower() != "completed" for row in jobs):
                         raise ValueError("Order must be QC-approved and all active production jobs completed before fulfillment can advance.")
-                    qc = c.execute(
-                        """SELECT q.status
-                           FROM qc_inspections q
-                           LEFT JOIN print_jobs j ON j.id=q.print_job_id
-                           WHERE q.order_id=?
-                             AND (q.print_job_id IS NULL OR COALESCE(j.status,'')<>?)""",
-                        (order_id, "cancelled"),
-                    ).fetchall()
-                    if not qc or any(str(row["status"] or "").lower() != "passed" for row in qc):
-                        raise ValueError("Order must be QC-approved and all active production inspections passed before fulfillment can advance.")
+                    missing_qc = c.execute(
+                        """SELECT 1
+                           FROM print_jobs j
+                           WHERE j.order_id=? AND COALESCE(j.status,'')<>'cancelled'
+                             AND NOT EXISTS (
+                                 SELECT 1 FROM qc_inspections q
+                                 WHERE q.order_id=j.order_id
+                                   AND q.print_job_id=j.id
+                                   AND LOWER(COALESCE(q.status,''))='passed'
+                             )
+                           LIMIT 1""",
+                        (order_id,),
+                    ).fetchone()
+                    if missing_qc:
+                        raise ValueError("Order must be QC-approved and every active production job must have a passed inspection before fulfillment can advance.")
         if shipping_cost_cents is None:
             shipping_cost_cents = int(current["shipping_cost_cents"] or 0) if current else 0
         if self.STATUS_ORDER.get(status, 0) < self.STATUS_ORDER.get(current_status, 0):
