@@ -127,6 +127,62 @@ class CadGenerationService:
         return distance < circle["diameter"] / 2.0
 
     @staticmethod
+    def _segment_distance(a1, a2, b1, b2):
+        """Return the minimum 2D distance between two line segments."""
+        def dot(a, b):
+            return a[0] * b[0] + a[1] * b[1]
+
+        def sub(a, b):
+            return (a[0] - b[0], a[1] - b[1])
+
+        def clamp(value, low, high):
+            return max(low, min(high, value))
+
+        u = sub(a2, a1)
+        v = sub(b2, b1)
+        w = sub(a1, b1)
+        uu = dot(u, u)
+        vv = dot(v, v)
+        uv = dot(u, v)
+        uw = dot(u, w)
+        vw = dot(v, w)
+        denom = uu * vv - uv * uv
+        if denom <= 1e-12:
+            s = 0.0
+            t = clamp(vw / vv, 0.0, 1.0) if vv > 1e-12 else 0.0
+        else:
+            s = clamp((uv * vw - vv * uw) / denom, 0.0, 1.0)
+            t = clamp((uv * s + vw) / vv, 0.0, 1.0) if vv > 1e-12 else 0.0
+        s = clamp((uv * t - uw) / uu, 0.0, 1.0) if uu > 1e-12 else 0.0
+        t = clamp((uv * s + vw) / vv, 0.0, 1.0) if vv > 1e-12 else 0.0
+        pa = (a1[0] + u[0] * s, a1[1] + u[1] * s)
+        pb = (b1[0] + v[0] * t, b1[1] + v[1] * t)
+        return math.hypot(pa[0] - pb[0], pa[1] - pb[1])
+
+    @staticmethod
+    def _capsule_segment(slot):
+        angle = math.radians(slot.get("angle", 0.0) % 360.0)
+        half = max(0.0, (slot["length"] - slot["width"]) / 2.0)
+        direction = (math.cos(angle), math.sin(angle))
+        return (
+            (slot["x"] - half * direction[0], slot["y"] - half * direction[1]),
+            (slot["x"] + half * direction[0], slot["y"] + half * direction[1]),
+        )
+
+    @classmethod
+    def _capsule_circle_overlap(cls, slot, circle):
+        start, end = cls._capsule_segment(slot)
+        distance = cls._segment_distance(start, end, (circle["x"], circle["y"]), (circle["x"], circle["y"]))
+        return distance < slot["width"] / 2.0 + circle["diameter"] / 2.0
+
+    @classmethod
+    def _capsule_overlap(cls, first, second):
+        start_a, end_a = cls._capsule_segment(first)
+        start_b, end_b = cls._capsule_segment(second)
+        distance = cls._segment_distance(start_a, end_a, start_b, end_b)
+        return distance < (first["width"] + second["width"]) / 2.0
+
+    @staticmethod
     def _validate_reference_metadata(metadata):
         """Reject reference-derived CAD until its dimensions are sufficiently constrained."""
         if not isinstance(metadata, dict) or not metadata.get("reference_analysis"):
@@ -254,10 +310,16 @@ class CadGenerationService:
             height = self._number(boss.get("height"), "boss height")
             x = self._number(boss.get("x", 0), "boss x", -2000, 2000)
             y = self._number(boss.get("y", 0), "boss y", -2000, 2000)
-            if abs(x) + diameter / 2 > result["dimensions"]["width"] / 2:
-                raise CadGenerationError("boss x or radius is outside the part")
-            if abs(y) + diameter / 2 > result["dimensions"]["depth"] / 2:
-                raise CadGenerationError("boss y or radius is outside the part")
+            if shape == "enclosure":
+                usable_w = result["dimensions"]["width"] / 2 - result["dimensions"]["wall_thickness"]
+                usable_d = result["dimensions"]["depth"] / 2 - result["dimensions"]["wall_thickness"]
+            else:
+                usable_w = result["dimensions"]["width"] / 2
+                usable_d = result["dimensions"]["depth"] / 2
+            if abs(x) + diameter / 2 > usable_w:
+                raise CadGenerationError("boss x or radius is outside the usable part area")
+            if abs(y) + diameter / 2 > usable_d:
+                raise CadGenerationError("boss y or radius is outside the usable part area")
             result["bosses"].append({"diameter": diameter, "height": height, "x": x, "y": y})
         ribs = spec.get("ribs") or []
         if not isinstance(ribs, list):
@@ -575,6 +637,59 @@ class CadGenerationService:
             for post in result["internal_posts"]:
                 if math.hypot(hole["x"] - post["x"], hole["y"] - post["y"]) < hole_radius + post["diameter"] / 2.0:
                     raise CadGenerationError("hole overlaps an internal post in the requested XY layout")
+            for feature_name in ("ribs", "tabs"):
+                for feature in result[feature_name]:
+                    rect = {"x": feature["x"], "y": feature["y"], "length": feature["length"],
+                            "thickness": feature["width"], "angle": feature["angle"]}
+                    if self._circle_obb_overlap({"x": hole["x"], "y": hole["y"], "diameter": hole["diameter"]}, rect):
+                        raise CadGenerationError("hole overlaps a %s feature in the requested XY layout" % feature_name[:-1])
+
+        for index, first in enumerate(result["bosses"]):
+            for second in result["bosses"][index + 1:]:
+                if math.hypot(first["x"] - second["x"], first["y"] - second["y"]) < (first["diameter"] + second["diameter"]) / 2.0:
+                    raise CadGenerationError("bosses overlap in the requested XY layout")
+
+        for boss in result["bosses"]:
+            boss_circle = {"x": boss["x"], "y": boss["y"], "diameter": boss["diameter"]}
+            for feature_name in ("ribs", "tabs"):
+                for feature in result[feature_name]:
+                    rect = {"x": feature["x"], "y": feature["y"], "length": feature["length"],
+                            "thickness": feature["width"], "angle": feature["angle"]}
+                    if self._circle_obb_overlap(boss_circle, rect):
+                        raise CadGenerationError("boss overlaps a %s feature in the requested XY layout" % feature_name[:-1])
+
+        for feature_name in ("ribs", "tabs"):
+            features = result[feature_name]
+            for index, first in enumerate(features):
+                first_rect = {"x": first["x"], "y": first["y"], "length": first["length"],
+                              "thickness": first["width"], "angle": first["angle"]}
+                for second in features[index + 1:]:
+                    second_rect = {"x": second["x"], "y": second["y"], "length": second["length"],
+                                   "thickness": second["width"], "angle": second["angle"]}
+                    if self._obb_overlap(first_rect, second_rect):
+                        raise CadGenerationError("%s overlap in the requested XY layout" % feature_name)
+
+        for slot in result["slots"]:
+            for hole in holes:
+                if self._capsule_circle_overlap(slot, hole):
+                    raise CadGenerationError("slot overlaps a hole in the requested XY layout")
+            for boss in result["bosses"]:
+                if self._capsule_circle_overlap(slot, boss):
+                    raise CadGenerationError("slot overlaps a boss in the requested XY layout")
+            for feature_name in ("ribs", "tabs"):
+                for feature in result[feature_name]:
+                    rect = {"x": feature["x"], "y": feature["y"], "length": feature["length"],
+                            "thickness": feature["width"], "angle": feature["angle"]}
+                    if self._circle_obb_overlap({"x": slot["x"], "y": slot["y"], "diameter": slot["width"]}, rect):
+                        # Center-circle test is not sufficient for long capsules; use a
+                        # conservative OBB check as a second gate.
+                        slot_rect = {"x": slot["x"], "y": slot["y"], "length": slot["length"],
+                                     "thickness": slot["width"], "angle": slot["angle"]}
+                        if self._obb_overlap(slot_rect, rect):
+                            raise CadGenerationError("slot overlaps a %s feature in the requested XY layout" % feature_name[:-1])
+            for other in result["slots"]:
+                if other is not slot and self._capsule_overlap(slot, other):
+                    raise CadGenerationError("slots overlap in the requested XY layout")
         print_constraints = spec.get("print_constraints") or {}
         if not isinstance(print_constraints, dict):
             raise CadGenerationError("print_constraints must be an object")
