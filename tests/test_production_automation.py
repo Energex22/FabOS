@@ -930,5 +930,54 @@ class ProductionAutomationTests(unittest.TestCase):
                 conn.commit()
 
 
+
+    def test_cancelled_historical_job_does_not_satisfy_required_quantity(self):
+        app = FabOSApplication()
+        order_id = str(uuid.uuid4())
+        quote_id = str(uuid.uuid4())
+        item_id = str(uuid.uuid4())
+        cancelled_job_id = str(uuid.uuid4())
+        try:
+            with app.database.connect() as conn:
+                conn.execute(
+                    "INSERT INTO quotes(id,quote_number,status) VALUES(?,?,?)",
+                    (quote_id, "Q-CANCELLED-COUNT", "accepted"),
+                )
+                conn.execute(
+                    "INSERT INTO orders(id,order_number,status,total_cents,quote_id) VALUES(?,?,?,?,?)",
+                    (order_id, "CANCELLED-COUNT", "confirmed", 1000, quote_id),
+                )
+                conn.execute(
+                    """INSERT INTO quote_items
+                       (id,quote_id,product_id,variant_id,description,quantity,unit_price_cents)
+                       VALUES(?,?,?,?,?,?,?)""",
+                    (item_id, quote_id, None, None, "Replacement print", 1, 1000),
+                )
+                conn.execute(
+                    "INSERT INTO print_jobs(id,order_id,status) VALUES(?,?,?)",
+                    (cancelled_job_id, order_id, "cancelled"),
+                )
+                conn.commit()
+
+            created = app.production.create_jobs_from_order(order_id)
+
+            self.assertEqual(len(created), 1)
+            with app.database.connect() as conn:
+                rows = conn.execute(
+                    "SELECT status FROM print_jobs WHERE order_id=? ORDER BY created_at",
+                    (order_id,),
+                ).fetchall()
+            self.assertEqual([row["status"] for row in rows], ["cancelled", "queued"])
+        finally:
+            with app.database.connect() as conn:
+                conn.execute("DELETE FROM print_jobs WHERE order_id=?", (order_id,))
+                conn.execute("DELETE FROM quote_items WHERE quote_id=?", (quote_id,))
+                conn.execute("DELETE FROM orders WHERE id=?", (order_id,))
+                conn.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
+                conn.commit()
+            close = getattr(app, "close", None)
+            if callable(close):
+                close()
+
 if __name__ == "__main__":
     unittest.main()
