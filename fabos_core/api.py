@@ -379,7 +379,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         except CadGenerationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail="CAD generation failed: %s" % exc) from exc
+            raise HTTPException(status_code=500, detail="CAD generation failed") from exc
         artifacts = [
             {"format": item["format"], "bytes": item["bytes"],
              "url": "/api/v1/customer/cad/artifacts/%s/%s" % (result["job_id"], item["format"])}
@@ -423,7 +423,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
                 "needs_user_confirmation": bool(metadata.get("needs_user_confirmation")),
             }
         except Exception as exc:
-            raise HTTPException(status_code=400, detail="Reference analysis failed: %s" % exc) from exc
+            raise HTTPException(status_code=400, detail="Reference analysis failed") from exc
 
     @app.post("/api/v1/customer/cad/preflight")
     def customer_cad_preflight(payload: CadGenerationRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
@@ -436,7 +436,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         except CadGenerationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail="CAD preflight failed: %s" % exc) from exc
+            raise HTTPException(status_code=500, detail="CAD preflight failed") from exc
 
     @app.post("/api/v1/customer/cad/jobs/{job_id}/revise")
     def customer_cad_revise(job_id: str, payload: CadRevisionRequest, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
@@ -453,7 +453,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         except CadGenerationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail="CAD revision failed: %s" % exc) from exc
+            raise HTTPException(status_code=500, detail="CAD revision failed") from exc
         artifacts = [
             {"format": item["format"], "bytes": item["bytes"],
              "url": "/api/v1/customer/cad/artifacts/%s/%s" % (result["job_id"], item["format"])}
