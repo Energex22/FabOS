@@ -57,3 +57,28 @@ The assistant now exposes a bounded read-only tool layer for product search/deta
 AI still cannot publish posts, change prices, issue refunds, send customer messages, create production jobs, delete records, or spend money. Those actions require dedicated FabOS workflows and explicit owner approval; the AI approval setting remains enabled by default.
 
 Conversations receive a local ID so the desktop/API clients can maintain continuity. Customer information is excluded from AI context by default via ai_allow_customer_data=false.
+
+## Customer CAD AI
+
+FabOS also uses the configured AI provider for constrained customer CAD assistance:
+
+- Text requests are converted into a validated parametric CAD specification.
+- Reference images can be analyzed for geometry and labeled dimensions.
+- Image-derived CAD is deliberately blocked until a trustworthy scale is confirmed and required measurements/critical ambiguities are resolved.
+- CadQuery creates the actual geometry; the AI never executes generated Python or CAD code.
+- Generated geometry is dimensionally verified before STL/STEP/3MF artifacts are returned.
+- Customers can revise a generated model with a new instruction; revisions retain parent-job lineage.
+- Printer preflight checks the generated bounding box against the selected printer build volume.
+- Completed CAD can be attached directly to a customer quote and carried into Design Vault/production.
+
+### Vision-model requirement
+
+Image analysis requires a multimodal/vision-capable model.
+
+For OpenAI-compatible providers, configure a vision-capable model at `ai_model`.
+
+For Ollama, configure a vision-capable model and set `ai_endpoint` to the Ollama server. FabOS sends reference-image bytes using Ollama's native `images` message field. A normal text-only Ollama model will not be able to analyze reference photos.
+
+### Dimensional safety
+
+A photo by itself is not treated as a measurement. FabOS requires either a labeled drawing dimension, an explicitly supplied physical measurement, or another recognized physical scale reference before reference-derived geometry can be generated. This prevents perspective or pixel measurements from silently becoming manufacturing dimensions.
