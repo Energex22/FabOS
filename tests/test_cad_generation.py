@@ -741,6 +741,45 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(sorted((round(h["x"], 1), round(h["y"], 1)) for h in spec["holes"]),
                          [(-20.0, -10.0), (-20.0, 10.0), (20.0, -10.0), (20.0, 10.0)])
 
+    def test_rejects_mounting_pattern_count_clamping(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 100, "height": 5},
+                "mounting_pattern": {"type": "grid", "count_x": 9, "count_y": 2},
+            })
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 100, "height": 5},
+                "mounting_pattern": {"type": "radial", "count": 33, "radius": 30},
+            })
+
+    def test_rejects_mounting_pattern_that_would_truncate_existing_holes(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 100, "height": 5},
+                "holes": [{"diameter": 4, "x": -40, "y": 0}] * 31,
+                "mounting_pattern": {"type": "radial", "count": 4, "radius": 20},
+            })
+
+    def test_rejects_rotated_slot_outside_part(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 40, "depth": 40, "height": 5},
+                "slots": [{"length": 30, "width": 6, "x": 0, "y": 0, "angle": 45}],
+            })
+
+    def test_allows_rotated_slot_when_capsule_fits(self):
+        spec = self.service.normalize_spec({
+            "shape": "plate",
+            "dimensions": {"width": 50, "depth": 50, "height": 5},
+            "slots": [{"length": 20, "width": 6, "x": 0, "y": 0, "angle": 45}],
+        })
+        self.assertEqual(len(spec["slots"]), 1)
+
     def test_radial_mounting_pattern_expands_to_holes(self):
         spec = self.service.normalize_spec({
             "shape": "plate",
