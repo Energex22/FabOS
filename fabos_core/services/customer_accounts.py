@@ -3,10 +3,11 @@ import uuid
 
 
 class CustomerAccountService:
-    def __init__(self, database, accounts, auth):
+    def __init__(self, database, accounts, auth, shop_settings=None):
         self.database = database
         self.accounts = accounts
         self.auth = auth
+        self.shop_settings = shop_settings
 
     def register(self, name, email, password, phone=""):
         name = (name or "").strip()
@@ -15,7 +16,11 @@ class CustomerAccountService:
             raise ValueError("Name is required")
         if not email or "@" not in email:
             raise ValueError("A valid email is required")
-        self.auth.hash_password(password)
+        if self.shop_settings is not None:
+            if str(self.shop_settings.get("storefront_enabled", "true")).lower() != "true":
+                raise PermissionError("Storefront is currently unavailable")
+            if str(self.shop_settings.get("customer_registration_enabled", "true")).lower() != "true":
+                raise PermissionError("Customer registration is currently disabled")
         if self.accounts.get_by_email(email):
             raise ValueError("An account with that email already exists")
         user_id = str(uuid.uuid4())

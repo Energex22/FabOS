@@ -82,6 +82,10 @@ def _order_item_payload(item: Any) -> Dict[str, Any]:
     return _pick(item, ("id", "product_name", "description", "quantity", "unit_price_cents", "material", "color"))
 
 
+def _customer_design_payload(design: Any) -> Dict[str, Any]:
+    return _pick(design, ("id", "name", "current_version", "design_version", "design_version_label"))
+
+
 def _payment_payload(payment: Any) -> Dict[str, Any]:
     return _pick(payment, ("status", "checkout_url"))
 
@@ -623,7 +627,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         return {
             "order": order,
             "items": [_order_item_payload(item) for item in items],
-            "designs": [_json(design) for design in dossier.get("designs", [])],
+            "designs": [_customer_design_payload(design) for design in dossier.get("designs", [])],
         }
 
     @app.get("/api/v1/admin/quotes")
