@@ -808,6 +808,18 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(len(result["verification"]["holes"]), 4)
 
 
+    def test_rejects_non_finite_dimensions(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": float("nan"), "depth": 80, "height": 5},
+            })
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": float("inf"), "depth": 80, "height": 5},
+            })
+
     def test_rejects_fractional_feature_counts(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
