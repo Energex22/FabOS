@@ -86,9 +86,9 @@ class Pass19FulfillmentBoundaryTests(unittest.TestCase):
         self.assertEqual(fulfillment["tracking_number"], "TRACK-1")
 
     def test_invalid_fulfillment_method_and_status_are_rejected(self):
-        with self.assertRaisesRegex(ValueError, "shipping-only status|pickup-only status"):
+        with self.assertRaisesRegex(ValueError, "Unsupported fulfillment method"):
             self.fulfillment.ensure("order1", "teleport")
-        with self.assertRaisesRegex(ValueError, "status"):
+        with self.assertRaisesRegex(ValueError, "Unsupported fulfillment status"):
             self.fulfillment.save("order1", "shipping", "lost")
 
     def test_completed_fulfillment_cannot_regress(self):
@@ -103,8 +103,8 @@ class Pass19FulfillmentBoundaryTests(unittest.TestCase):
 
     def test_fulfillment_method_cannot_change_after_start(self):
         self.fulfillment.save_for_user("employee", "order1", "shipping", "shipped", tracking="TRACK-4")
-        with self.assertRaisesRegex(ValueError, "method"):
-            self.fulfillment.save_for_user("employee", "order1", "pickup", "shipped")
+        with self.assertRaisesRegex(ValueError, "Cannot change fulfillment method"):
+            self.fulfillment.save_for_user("employee", "order1", "pickup", "picked_up")
 
     def test_fulfillment_method_can_be_set_before_start(self):
         fid = self.fulfillment.save_for_user("employee", "order1", "shipping", "pending")

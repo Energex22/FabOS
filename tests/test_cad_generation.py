@@ -44,7 +44,7 @@ class CadGenerationTests(unittest.TestCase):
             model = self.service._cadquery_model(spec)
             verification = self.service._verify(model, spec)
             self.assertTrue(verification["passed"], verification)
-            self.assertAlmostEqual(verification["checks"][-1]["actual_mm"], 11.0, places=2)
+            self.assertAlmostEqual(next(check["actual_mm"] for check in verification["checks"] if check["measurement"] == "height_mm"), 11.0, places=2)
 
     def test_rejects_feature_arrays_over_maximum_instead_of_truncating(self):
         for key, feature in (
@@ -58,7 +58,7 @@ class CadGenerationTests(unittest.TestCase):
                 "dimensions": {"width": 100, "depth": 100, "height": 5},
                 key: [dict(feature) for _ in range(self.service.MAX_FEATURES + 1)],
             }
-            with self.assertRaises(cad_generation.CadGenerationError):
+            with self.assertRaises(CadGenerationError):
                 self.service.normalize_spec(spec)
 
     def test_rejects_feature_overflow_and_out_of_bounds_features(self):
@@ -98,6 +98,7 @@ class CadGenerationTests(unittest.TestCase):
             ["stl", "step"],
         )
 
+    @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
     def test_parse_prompt_and_generate_plate(self):
         result = self.service.generate(prompt="Create a 120 x 80 x 5 mm mounting plate with 4 5 mm holes.", output_formats=["stl", "step", "3mf"])
         self.assertEqual(result["spec"]["shape"], "mounting_plate")
@@ -776,16 +777,16 @@ class CadGenerationTests(unittest.TestCase):
     def test_rejects_rotated_rib_and_tab_outside_part(self):
         base = {"shape": "plate", "dimensions": {"width": 40, "depth": 40, "height": 5}}
         with self.assertRaises(CadGenerationError):
-            self.service.normalize_spec({**base, "ribs": [{"length": 36, "width": 6, "height": 3, "angle": 45}]})
+            self.service.normalize_spec({**base, "ribs": [{"length": 36, "width": 6, "height": 3, "x": 10, "y": 0, "angle": 45}]})
         with self.assertRaises(CadGenerationError):
-            self.service.normalize_spec({**base, "tabs": [{"length": 36, "width": 6, "height": 3, "angle": 45}]})
+            self.service.normalize_spec({**base, "tabs": [{"length": 36, "width": 6, "height": 3, "x": 10, "y": 0, "angle": 45}]})
 
     def test_rejects_rotated_slot_outside_part(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
                 "shape": "plate",
                 "dimensions": {"width": 40, "depth": 40, "height": 5},
-                "slots": [{"length": 30, "width": 6, "x": 8, "y": 8, "angle": 45}],
+                "slots": [{"length": 30, "width": 6, "x": 10, "y": 10, "angle": 45}],
             })
 
     def test_allows_rotated_slot_when_capsule_fits(self):

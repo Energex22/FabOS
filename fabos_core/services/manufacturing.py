@@ -112,19 +112,19 @@ class ManufacturingService:
     VALUES(?,?,?,?,NULL,NULL,'queued',?,?,?,?,?)""",
     (nid,j['order_id'],j['product_id'],j['variant_id'],j['gcode_path'],
      j['octoprint_file'],j['estimated_minutes'],j['estimated_filament_g'],j['slicer_metadata_json']))
+   if source_status == 'failed':
+    # A failed attempt is superseded by this replacement. Preserve its
+    # failure_reason for history, but classify it as cancelled historical work
+    # so the replacement is the production job that must finish the order.
+    c.execute(
+     "UPDATE print_jobs SET status='cancelled',completed_at=CURRENT_TIMESTAMP,success=0 WHERE id=?",
+     (jid,),
+    )
    if j['order_id']:
     # A reprint is new production work. Reopen any terminal fulfillment so the
     # replacement must pass through packing/shipping or pickup again.
     from fabos_core.services.orders import OrderService
     OrderService._reset_fulfillment_for_rework(c, j['order_id'], "Reprint requested")
-    if source_status == 'failed':
-     # A failed attempt is superseded by this replacement. Preserve its
-     # failure_reason for history, but classify it as cancelled historical work
-     # so the replacement is the production job that must finish the order.
-     c.execute(
-      "UPDATE print_jobs SET status='cancelled',completed_at=CURRENT_TIMESTAMP,success=0 WHERE id=?",
-      (jid,),
-     )
     c.execute("""UPDATE orders SET status='in_production'
        WHERE id=? AND status IN ('qc','ready','completed')""",(j['order_id'],))
    c.commit();return nid
