@@ -69,3 +69,10 @@ def test_public_product_does_not_expose_model_paths_or_license_fields():
     assert "license_status" not in value
     assert "filesystem_path" not in value["images"][0]
     assert "gcode_path" not in value["variants"][0]
+
+
+def test_customer_cad_errors_do_not_echo_internal_exception_details():
+    assert 'detail="CAD generation failed: %s" % exc' not in API_SOURCE
+    assert 'detail="Reference analysis failed: %s" % exc' not in API_SOURCE
+    assert 'detail="CAD preflight failed: %s" % exc' not in API_SOURCE
+    assert 'detail="CAD revision failed: %s" % exc' not in API_SOURCE
