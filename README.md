@@ -8,7 +8,7 @@ It brings the core operations of a 3D-printing business into one authoritative s
 
 > **Current application version:** `0.16.0-beta.7`  
 > **Python:** >=3.8  
-> **Package metadata:** `pyproject.toml` currently reports `0.1.0`; this should be reconciled before a versioned package release.
+> **Package metadata:** `pyproject.toml` reports `0.16.0b7`, matching the current application version.
 
 ## Visual overview
 
