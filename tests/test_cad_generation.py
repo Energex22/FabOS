@@ -1008,21 +1008,20 @@ class CadGenerationTests(unittest.TestCase):
                 "holes": [{"diameter": 6, "x": 10, "y": 0}],
             })
 
-    def test_rejects_enclosure_boss_inside_wall_area(self):
+    def test_enclosure_boss_uses_exterior_top_surface_bounds(self):
+        spec = self.service.normalize_spec({
+            "shape": "enclosure",
+            "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+            "bosses": [{"diameter": 8, "height": 8, "x": 44, "y": 0}],
+        })
+        self.assertEqual(len(spec["bosses"]), 1)
+
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
                 "shape": "enclosure",
                 "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
-                "bosses": [{"diameter": 8, "height": 8, "x": 44, "y": 0}],
+                "bosses": [{"diameter": 8, "height": 8, "x": 50, "y": 0}],
             })
-
-    def test_allows_enclosure_boss_inside_usable_interior(self):
-        spec = self.service.normalize_spec({
-            "shape": "enclosure",
-            "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
-            "bosses": [{"diameter": 8, "height": 8, "x": 35, "y": 0}],
-        })
-        self.assertEqual(len(spec["bosses"]), 1)
 
     def test_rejects_enclosure_features_on_non_enclosure(self):
         with self.assertRaises(CadGenerationError):
