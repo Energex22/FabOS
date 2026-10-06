@@ -18,6 +18,23 @@ class CadGenerationTests(unittest.TestCase):
         self.temp.cleanup()
 
     @unittest.skipUnless(cad_module.cq is not None, "CadQuery optional dependency is not installed")
+    def test_rejects_feature_overflow_and_out_of_bounds_features(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 80, "height": 5},
+                "holes": [
+                    {"diameter": 10, "x": -2, "y": 0},
+                    {"diameter": 10, "x": 2, "y": 0},
+                ],
+            })
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 80, "height": 5},
+                "bosses": [{"diameter": 20, "height": 5, "x": 50, "y": 0}],
+            })
+
     def test_rejects_unsupported_output_format(self):
         with self.assertRaises(CadGenerationError):
             self.service.generate(
