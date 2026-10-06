@@ -87,6 +87,19 @@ class CustomerCommerceService:
             description_parts.append("Material: " + material)
         if notes:
             description_parts.append("Notes: " + notes)
+        # Validate the reference file before creating any records so a rejected
+        # file cannot leave an orphaned customer + draft quote behind.
+        validated_file = None
+        if file_bytes:
+            allowed = {".stl", ".3mf", ".obj", ".step", ".stp"}
+            original = Path(str(file_name or "reference_model")).name
+            suffix = Path(original).suffix.lower()
+            if suffix not in allowed:
+                raise ValueError("Unsupported reference file type")
+            if len(file_bytes) > 25 * 1024 * 1024:
+                raise ValueError("Reference file exceeds the 25 MB limit")
+            safe = re.sub(r"[^A-Za-z0-9._-]+", "_", original).strip("._") or "reference_model"
+            validated_file = (original, safe)
         with self.database.connect() as conn:
             customer = conn.execute("SELECT * FROM customers WHERE lower(email)=?", (email,)).fetchone()
         if customer is None:
@@ -113,15 +126,8 @@ class CustomerCommerceService:
             }],
         )
         self._ensure_public_quote_files_schema()
-        if file_bytes:
-            allowed = {".stl", ".3mf", ".obj", ".step", ".stp"}
-            original = Path(str(file_name or "reference_model")).name
-            suffix = Path(original).suffix.lower()
-            if suffix not in allowed:
-                raise ValueError("Unsupported reference file type")
-            if len(file_bytes) > 25 * 1024 * 1024:
-                raise ValueError("Reference file exceeds the 25 MB limit")
-            safe = re.sub(r"[^A-Za-z0-9._-]+", "_", original).strip("._") or "reference_model"
+        if validated_file:
+            original, safe = validated_file
             root = Path(self.database.path).resolve().parent / "Quote Uploads"
             root.mkdir(parents=True, exist_ok=True)
             target = root / (quote_id + "_" + safe)

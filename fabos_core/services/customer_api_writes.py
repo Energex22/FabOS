@@ -58,12 +58,21 @@ def _validate_model_file(path, extension):
         raise ValueError("Binary STL size does not match its triangle count")
 
     if extension == ".obj":
-        text = head.decode("utf-8", errors="ignore")
-        if "\x00" in text:
-            raise ValueError("Invalid OBJ model")
-        if not any(line.lstrip().startswith("v ") for line in text.splitlines()):
-            raise ValueError("OBJ model contains no vertices")
-        return
+        with open(path, "rb") as handle:
+            head = handle.read(MAX_STEP_HEADER_BYTES)
+            if b"\x00" in head:
+                raise ValueError("Invalid OBJ model")
+            if any(line.lstrip().startswith(b"v ") for line in head.splitlines()):
+                return
+            # Long comment/material headers can push vertex data past the
+            # initial header window; keep scanning the rest of the file so
+            # valid OBJs are not false-rejected.
+            for raw_line in handle:
+                if b"\x00" in raw_line:
+                    raise ValueError("Invalid OBJ model")
+                if raw_line.lstrip().startswith(b"v "):
+                    return
+        raise ValueError("OBJ model contains no vertices")
 
     if extension in {".step", ".stp"}:
         text = head.decode("ascii", errors="ignore").upper()
@@ -87,7 +96,7 @@ def _validate_3mf(path):
                 raise ValueError("3MF archive contains too many files")
             total = 0
             for member in members:
-                name = str(member.filename or "").replace("\\\\", "/")
+                name = str(member.filename or "").replace("\\", "/")
                 if not name or name.startswith("/") or any(part == ".." for part in name.split("/")):
                     raise ValueError("3MF archive contains an unsafe path")
                 if member.is_dir():
@@ -382,6 +391,7 @@ def register_customer_write_routes(app, get_application, current_user):
         size = 0
         quote_id = None
         design_id = None
+        success = False
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
                 temp_path = tmp.name

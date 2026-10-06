@@ -36,9 +36,6 @@ class InvoiceService:
    if due_days is None:due_days=int(float(self._setting(c,"invoice_due_days","14") or 14))
    due=(datetime.now()+timedelta(days=int(due_days))).date().isoformat()
    c.execute("""INSERT INTO invoices(id,invoice_number,order_id,status,total_cents,paid_cents,due_at,subtotal_cents,tax_cents,shipping_cents,discount_cents) VALUES(?,?,?,'open',?,0,?,?,?,?,0)""",(iid,self._next_number(c),order_id,order_total,due,subtotal,order_tax,order_shipping));c.commit();return iid,True
-   if due_days is None:due_days=int(float(self._setting(c,"invoice_due_days","14") or 14))
-   tax_pct=float(self._setting(c,"default_tax_percent","0") or 0);tax=round(subtotal*tax_pct/100.0);total=subtotal+tax;due=(datetime.now()+timedelta(days=int(due_days))).date().isoformat()
-   c.execute("""INSERT INTO invoices(id,invoice_number,order_id,status,total_cents,paid_cents,due_at,subtotal_cents,tax_cents,shipping_cents,discount_cents) VALUES(?,?,?,'open',?,0,?,?,?,?,0)""",(iid,self._next_number(c),order_id,total,due,subtotal,tax,0));c.commit();return iid,True
  def reconcile(self,iid=None):
   with self.db.connect() as c:
    c.execute("BEGIN IMMEDIATE")
