@@ -171,6 +171,7 @@ class ManufacturingService:
    rows=c.execute("""SELECT j.id job_id,j.order_id
     FROM print_jobs j JOIN orders o ON o.id=j.order_id
     WHERE j.order_id IS NOT NULL
+      AND j.status <> 'cancelled'
       AND (j.status='completed' OR o.status='qc')
       AND NOT EXISTS(SELECT 1 FROM qc_inspections q WHERE q.print_job_id=j.id)
     ORDER BY j.created_at""").fetchall()
