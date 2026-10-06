@@ -102,6 +102,9 @@ class ManufacturingService:
   with self.db.connect() as c:
    j=c.execute('SELECT * FROM print_jobs WHERE id=?',(jid,)).fetchone()
    if not j:raise KeyError('Print job not found')
+   source_status=str(j['status'] or '').lower()
+   if source_status in ('printing','paused','queued','scheduled'):
+    raise ValueError('Stop the active production job before requesting a reprint.')
    nid=str(uuid.uuid4())
    c.execute("""INSERT INTO print_jobs
     (id,order_id,product_id,variant_id,printer_id,spool_id,status,gcode_path,octoprint_file,
@@ -114,6 +117,14 @@ class ManufacturingService:
     # replacement must pass through packing/shipping or pickup again.
     from fabos_core.services.orders import OrderService
     OrderService._reset_fulfillment_for_rework(c, j['order_id'], "Reprint requested")
+    if source_status == 'failed':
+     # A failed attempt is superseded by this replacement. Preserve its
+     # failure_reason for history, but classify it as cancelled historical work
+     # so the replacement is the production job that must finish the order.
+     c.execute(
+      "UPDATE print_jobs SET status='cancelled',completed_at=CURRENT_TIMESTAMP,success=0 WHERE id=?",
+      (jid,),
+     )
     c.execute("""UPDATE orders SET status='in_production'
        WHERE id=? AND status IN ('qc','ready','completed')""",(j['order_id'],))
    c.commit();return nid
