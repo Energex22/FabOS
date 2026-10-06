@@ -22,6 +22,23 @@ class DesignVaultService:
  def new_version(self,did):
   with self.db.connect() as c:
    d=c.execute('SELECT current_version FROM designs WHERE id=?',(did,)).fetchone();v=int(d[0])+1;vid=str(uuid.uuid4());c.execute('INSERT INTO design_versions(id,design_id,version,label) VALUES(?,?,?,?)',(vid,did,v,'Version %d'%v));c.execute('UPDATE designs SET current_version=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(v,did));c.commit()
+ def remove_design(self,did):
+  """Remove a design and its stored assets; intended for transactional rollback."""
+  with self.db.connect() as c:
+   rows=c.execute("SELECT stored_path FROM design_assets WHERE design_id=?",(did,)).fetchall()
+   c.execute("DELETE FROM quote_designs WHERE design_id=?",(did,))
+   c.execute("DELETE FROM design_assets WHERE design_id=?",(did,))
+   c.execute("DELETE FROM design_model_parts WHERE design_id=?",(did,))
+   c.execute("DELETE FROM design_versions WHERE design_id=?",(did,))
+   c.execute("DELETE FROM designs WHERE id=?",(did,))
+   c.commit()
+  for row in rows:
+   try:
+    path=Path(row['stored_path'] or '')
+    if path.exists():path.unlink()
+   except OSError:pass
+  return bool(rows)
+
  def import_file(self,did,path,make_primary=False):
   src=Path(path)
   if not src.exists():raise FileNotFoundError(src)
