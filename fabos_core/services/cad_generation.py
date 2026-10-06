@@ -1338,6 +1338,23 @@ class CadGenerationService:
         # equal spec keeps the retry hook explicit while preventing silent dimension changes.
         return corrected if changed else spec
 
+    @staticmethod
+    def _normalize_output_formats(output_formats, default=("stl", "step", "3mf")):
+        """Validate the requested CAD export formats instead of silently changing them."""
+        if output_formats is None:
+            values = list(default)
+        elif isinstance(output_formats, (str, bytes)) or not isinstance(output_formats, (list, tuple)):
+            raise CadGenerationError("output_formats must be an array")
+        else:
+            values = [str(item).strip().lower() for item in output_formats]
+        if not values:
+            raise CadGenerationError("At least one CAD output format is required")
+        unsupported = sorted(set(values) - {"stl", "step", "3mf"})
+        if unsupported:
+            raise CadGenerationError("Unsupported CAD output format(s): %s" % ", ".join(unsupported))
+        normalized = list(dict.fromkeys(values))
+        return normalized
+
     def generate(self, spec=None, prompt=None, output_formats=None, owner_id=None, parent_job_id=None):
         job_id = str(uuid.uuid4())
         try:
@@ -1358,7 +1375,7 @@ class CadGenerationService:
                     raise CadGenerationError("Generated geometry failed dimensional verification")
             folder = self.root / job_id
             folder.mkdir(parents=True, exist_ok=True)
-            formats = [str(x).lower() for x in (output_formats or ["stl", "step", "3mf"]) if str(x).lower() in {"stl", "step", "3mf"}]
+            formats = self._normalize_output_formats(output_formats)
             (folder / "metadata.json").write_text(json.dumps({"owner_id": str(owner_id or ""), "spec": spec, "parent_job_id": parent_job_id}, default=str), encoding="utf-8")
             artifacts = []
             for fmt in (formats or ["stl"]):
