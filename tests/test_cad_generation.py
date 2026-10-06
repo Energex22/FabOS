@@ -801,6 +801,22 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(len(result["verification"]["holes"]), 4)
 
 
+    def test_rejects_fractional_feature_counts(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "flange",
+                "dimensions": {
+                    "outer_diameter": 80, "bore_diameter": 20, "height": 8,
+                    "bolt_circle_diameter": 50, "bolt_hole_diameter": 5, "bolt_hole_count": 4.5,
+                },
+            })
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 100, "height": 5},
+                "mounting_pattern": {"type": "radial", "count": 4.5, "radius": 20},
+            })
+
     def test_rejects_flange_bolt_count_clamping(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
