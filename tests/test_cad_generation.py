@@ -956,6 +956,74 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(spec["cable_openings"][0]["side"], "front")
         self.assertEqual(spec["lid_interface"]["clearance"], 0.25)
 
+    def test_rejects_overlapping_bosses(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 80, "height": 5},
+                "bosses": [
+                    {"diameter": 20, "height": 5, "x": -5, "y": 0},
+                    {"diameter": 20, "height": 5, "x": 5, "y": 0},
+                ],
+            })
+
+    def test_rejects_hole_through_rib_and_boss_through_rib(self):
+        base = {"shape": "plate", "dimensions": {"width": 100, "depth": 80, "height": 5}}
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                **base,
+                "holes": [{"diameter": 8, "x": 0, "y": 0}],
+                "ribs": [{"length": 30, "width": 6, "height": 4, "x": 0, "y": 0}],
+            })
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                **base,
+                "bosses": [{"diameter": 10, "height": 5, "x": 0, "y": 0}],
+                "ribs": [{"length": 30, "width": 6, "height": 4, "x": 0, "y": 0}],
+            })
+
+    def test_rejects_overlapping_rib_and_tab(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "plate",
+                "dimensions": {"width": 100, "depth": 80, "height": 5},
+                "ribs": [{"length": 30, "width": 6, "height": 4, "x": 0, "y": 0}],
+                "tabs": [{"length": 20, "width": 8, "height": 4, "x": 5, "y": 0}],
+            })
+
+    def test_rejects_overlapping_slots_and_slot_hole(self):
+        base = {"shape": "plate", "dimensions": {"width": 100, "depth": 80, "height": 5}}
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                **base,
+                "slots": [
+                    {"length": 30, "width": 6, "x": 0, "y": 0},
+                    {"length": 30, "width": 6, "x": 10, "y": 0},
+                ],
+            })
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                **base,
+                "slots": [{"length": 30, "width": 6, "x": 0, "y": 0}],
+                "holes": [{"diameter": 6, "x": 10, "y": 0}],
+            })
+
+    def test_rejects_enclosure_boss_inside_wall_area(self):
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec({
+                "shape": "enclosure",
+                "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+                "bosses": [{"diameter": 8, "height": 8, "x": 44, "y": 0}],
+            })
+
+    def test_allows_enclosure_boss_inside_usable_interior(self):
+        spec = self.service.normalize_spec({
+            "shape": "enclosure",
+            "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 4},
+            "bosses": [{"diameter": 8, "height": 8, "x": 35, "y": 0}],
+        })
+        self.assertEqual(len(spec["bosses"]), 1)
+
     def test_rejects_enclosure_features_on_non_enclosure(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
