@@ -814,11 +814,22 @@ class CadGenerationTests(unittest.TestCase):
             ("ribs", {"length": 20, "width": 3, "height": 3, "angle": float("nan")}),
             ("tabs", {"length": 20, "width": 3, "height": 3, "angle": float("inf")}),
             ("slots", {"length": 20, "width": 5, "angle": float("nan")}),
+            ("dividers", {"length": 20, "thickness": 3, "height": 3, "angle": float("nan")}),
         ):
             spec = dict(base)
+            if feature_name == "dividers":
+                spec["shape"] = "enclosure"
+                spec["dimensions"] = {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 3}
             spec[feature_name] = [feature]
             with self.assertRaises(CadGenerationError):
                 self.service.normalize_spec(spec)
+
+        for pattern in (
+            {"type": "radial", "count": 4, "radius": 20, "start_angle": float("nan")},
+            {"type": "rectangular", "count_x": 2, "count_y": 2, "origin_x": float("inf")},
+        ):
+            with self.assertRaises(CadGenerationError):
+                self.service.normalize_spec({**base, "mounting_pattern": pattern})
 
     def test_rejects_enclosure_features_above_interior_height(self):
         spec = {
