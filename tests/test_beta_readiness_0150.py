@@ -50,6 +50,24 @@ class BetaReadiness0150Tests(unittest.TestCase):
                 self.assertGreaterEqual(c.execute("SELECT MAX(version) FROM app_migrations").fetchone()[0],35)
                 self.assertIsNotNone(c.execute("SELECT name FROM sqlite_master WHERE name='supply_items'").fetchone())
 
+    def test_self_test_requires_current_schema(self):
+        from types import SimpleNamespace
+        from fabos_core.services.beta_self_test import BetaSelfTestService
+        with tempfile.TemporaryDirectory() as td:
+            db=self.migrated_db(td)
+            service=BetaSelfTestService(SimpleNamespace(database=db))
+            self.assertEqual(service._schema().split(" ")[0], "Schema")
+            original=migration_module.MIGRATIONS
+            try:
+                migration_module.MIGRATIONS=[x for x in original if x[0] <= 35]
+                with db.connect() as c:
+                    c.execute("DELETE FROM app_migrations WHERE version > 35")
+                    c.commit()
+                with self.assertRaises(RuntimeError):
+                    service._schema()
+            finally:
+                migration_module.MIGRATIONS=original
+
     def test_backup_is_created_and_restorable(self):
         with tempfile.TemporaryDirectory() as td:
             db=self.migrated_db(td);backup=BackupService(db.path,Path(td)/"Backups")
