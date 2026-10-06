@@ -428,19 +428,32 @@ class CadGenerationService:
             if pattern_type in {"rectangular", "grid"}:
                 spacing_x = self._number(mounting_pattern.get("spacing_x", 20), "mounting pattern spacing_x")
                 spacing_y = self._number(mounting_pattern.get("spacing_y", spacing_x), "mounting pattern spacing_y")
-                count_x = max(1, min(8, int(mounting_pattern.get("count_x", 2))))
-                count_y = max(1, min(8, int(mounting_pattern.get("count_y", 2))))
+                try:
+                    count_x = int(mounting_pattern.get("count_x", 2))
+                    count_y = int(mounting_pattern.get("count_y", 2))
+                except (TypeError, ValueError):
+                    raise CadGenerationError("mounting pattern counts must be integers")
+                if count_x < 1 or count_x > 8 or count_y < 1 or count_y > 8:
+                    raise CadGenerationError("mounting pattern count_x/count_y must be between 1 and 8")
+                required = count_x * count_y
+                if len(result["holes"]) + required > self.MAX_FEATURES:
+                    raise CadGenerationError("Mounting pattern would exceed the maximum of %s holes" % self.MAX_FEATURES)
                 origin_x = float(mounting_pattern.get("origin_x", 0) or 0)
                 origin_y = float(mounting_pattern.get("origin_y", 0) or 0)
                 for ix in range(count_x):
                     for iy in range(count_y):
-                        if len(result["holes"]) >= self.MAX_FEATURES:
-                            break
                         x = origin_x + (ix - (count_x - 1) / 2.0) * spacing_x
                         y = origin_y + (iy - (count_y - 1) / 2.0) * spacing_y
                         result["holes"].append({"diameter": diameter, "x": x, "y": y, "head_type": "", "head_diameter": None, "head_depth": None})
             else:
-                count = max(2, min(self.MAX_FEATURES, int(mounting_pattern.get("count", 4))))
+                try:
+                    count = int(mounting_pattern.get("count", 4))
+                except (TypeError, ValueError):
+                    raise CadGenerationError("mounting pattern count must be an integer")
+                if count < 2 or count > self.MAX_FEATURES:
+                    raise CadGenerationError("mounting pattern count must be between 2 and %s" % self.MAX_FEATURES)
+                if len(result["holes"]) + count > self.MAX_FEATURES:
+                    raise CadGenerationError("Mounting pattern would exceed the maximum of %s holes" % self.MAX_FEATURES)
                 radius = self._number(mounting_pattern.get("radius", 20), "mounting pattern radius")
                 center_x = float(mounting_pattern.get("center_x", 0) or 0)
                 center_y = float(mounting_pattern.get("center_y", 0) or 0)
@@ -500,12 +513,16 @@ class CadGenerationService:
         for slot in result["slots"]:
             radius = slot["width"] / 2.0
             half_straight = max(0.0, (slot["length"] - slot["width"]) / 2.0)
-            extent = half_straight + radius
+            angle = math.radians(slot.get("angle", 0.0) % 360.0)
+            # A slot is a capsule: rotate its straight centerline, then add the
+            # circular end radius to both axes for a conservative exact bounding box.
+            half_x = half_straight * abs(math.cos(angle)) + radius
+            half_y = half_straight * abs(math.sin(angle)) + radius
             if shape not in {"cylinder", "ring", "flange"}:
-                if abs(slot["x"]) + extent > result["dimensions"]["width"] / 2:
-                    raise CadGenerationError("slot x or length is outside the part")
-                if abs(slot["y"]) + radius > result["dimensions"]["depth"] / 2:
-                    raise CadGenerationError("slot y or width is outside the part")
+                if abs(slot["x"]) + half_x > result["dimensions"]["width"] / 2:
+                    raise CadGenerationError("slot x or rotated length is outside the part")
+                if abs(slot["y"]) + half_y > result["dimensions"]["depth"] / 2:
+                    raise CadGenerationError("slot y or rotated width is outside the part")
         # Reject feature interference before CAD generation. These checks are intentionally
         # conservative: a requested through-hole must not overlap another cut or a raised
         # cylindrical feature, because the resulting boolean would no longer represent the
