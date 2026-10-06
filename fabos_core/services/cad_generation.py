@@ -1396,11 +1396,25 @@ class CadGenerationService:
                     cq.exporters.export(model, str(target), exportType="3MF", tolerance=0.01, angularTolerance=0.1)
                 else:
                     cq.exporters.export(model, str(target), exportType="STEP")
-                artifacts.append({"format": fmt, "path": str(target), "bytes": target.stat().st_size})
+                if not target.is_file():
+                    raise CadGenerationError("CAD export did not create the requested %s artifact" % fmt)
+                size = target.stat().st_size
+                if size <= 0:
+                    raise CadGenerationError("CAD export produced an empty %s artifact" % fmt)
+                artifacts.append({"format": fmt, "path": str(target), "bytes": size})
             self._save_job(job_id, owner_id, "completed", prompt, spec, verification, artifacts, parent_job_id=parent_job_id)
             return {"job_id": job_id, "spec": spec, "verification": verification, "artifacts": artifacts,
                     "capabilities": self.capabilities()}
         except Exception as exc:
+            folder = locals().get("folder")
+            if folder:
+                try:
+                    for child in Path(folder).iterdir():
+                        if child.is_file():
+                            child.unlink()
+                    Path(folder).rmdir()
+                except OSError:
+                    pass
             self._save_job(job_id, owner_id, "failed", prompt, locals().get("spec"), locals().get("verification"),
                            locals().get("artifacts"), str(exc)[:2000], parent_job_id=parent_job_id)
             raise
