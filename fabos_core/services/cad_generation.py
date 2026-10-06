@@ -169,10 +169,9 @@ class CadGenerationService:
             })
             if result["dimensions"]["bolt_circle_diameter"] >= outer:
                 raise CadGenerationError("bolt_circle_diameter must be smaller than outer_diameter")
-            try:
-                bolt_hole_count = self._integer(
-                    result["dimensions"]["bolt_hole_count"], "bolt_hole_count", 2, self.MAX_FEATURES - 1
-                )
+            bolt_hole_count = self._integer(
+                result["dimensions"]["bolt_hole_count"], "bolt_hole_count", 2, self.MAX_FEATURES - 1
+            )
             result["dimensions"]["bolt_hole_count"] = bolt_hole_count
         elif shape == "ring":
             outer = self._number(dimensions.get("outer_diameter", dimensions.get("diameter", 50)), "outer_diameter")
