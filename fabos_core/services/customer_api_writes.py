@@ -272,7 +272,8 @@ def register_customer_write_routes(app, get_application, current_user):
         size = 0
         quote_id = None
         design_id = None
-        try:
+        success = False
+        try
             with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
                 temp_path = tmp.name
                 while True:
@@ -426,6 +427,7 @@ def register_customer_write_routes(app, get_application, current_user):
 
             if project.get("cad_job_id"):
                 application.cad_generation.attach_to_quote(project["cad_job_id"], quote_id, user["id"])
+            success = True
             return {
                 "quote": _public_quote(quote),
                 "items": [_public_quote_item(item) for item in items],
@@ -444,6 +446,16 @@ def register_customer_write_routes(app, get_application, current_user):
         except Exception as exc:
             raise HTTPException(status_code=500, detail="The model could not be stored") from exc
         finally:
+            if not success and quote_id:
+                try:
+                    with application.database.connect() as conn:
+                        conn.execute("DELETE FROM quote_designs WHERE quote_id=?", (quote_id,))
+                        if design_id:
+                            conn.execute("DELETE FROM designs WHERE id=?", (design_id,))
+                        conn.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
+                        conn.commit()
+                except Exception:
+                    pass
             try:
                 if temp_path:
                     os.unlink(temp_path)
