@@ -808,6 +808,15 @@ class CadGenerationTests(unittest.TestCase):
         self.assertEqual(len(result["verification"]["holes"]), 4)
 
 
+    def test_rejects_enclosure_features_above_interior_height(self):
+        spec = {
+            "shape": "enclosure",
+            "dimensions": {"width": 100, "depth": 80, "height": 40, "wall_thickness": 3, "floor_thickness": 3},
+            "dividers": [{"length": 40, "thickness": 3, "height": 38, "x": 0, "y": 0}],
+        }
+        with self.assertRaises(CadGenerationError):
+            self.service.normalize_spec(spec)
+
     def test_rejects_non_finite_dimensions(self):
         with self.assertRaises(CadGenerationError):
             self.service.normalize_spec({
