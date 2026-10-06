@@ -310,16 +310,13 @@ class CadGenerationService:
             height = self._number(boss.get("height"), "boss height")
             x = self._number(boss.get("x", 0), "boss x", -2000, 2000)
             y = self._number(boss.get("y", 0), "boss y", -2000, 2000)
-            if shape == "enclosure":
-                usable_w = result["dimensions"]["width"] / 2 - result["dimensions"]["wall_thickness"]
-                usable_d = result["dimensions"]["depth"] / 2 - result["dimensions"]["wall_thickness"]
-            else:
-                usable_w = result["dimensions"]["width"] / 2
-                usable_d = result["dimensions"]["depth"] / 2
-            if abs(x) + diameter / 2 > usable_w:
-                raise CadGenerationError("boss x or radius is outside the usable part area")
-            if abs(y) + diameter / 2 > usable_d:
-                raise CadGenerationError("boss y or radius is outside the usable part area")
+            # Bosses are raised exterior/top features. Enclosures use the same
+            # top-surface coordinate system as plates; internal features use the
+            # dedicated internal_posts primitive.
+            if abs(x) + diameter / 2 > result["dimensions"]["width"] / 2:
+                raise CadGenerationError("boss x or radius is outside the part")
+            if abs(y) + diameter / 2 > result["dimensions"]["depth"] / 2:
+                raise CadGenerationError("boss y or radius is outside the part")
             result["bosses"].append({"diameter": diameter, "height": height, "x": x, "y": y})
         ribs = spec.get("ribs") or []
         if not isinstance(ribs, list):
