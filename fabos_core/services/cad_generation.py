@@ -1217,11 +1217,13 @@ class CadGenerationService:
             if not owner or not quote or str(owner["customer_id"]) != str(quote["customer_id"]):
                 raise CadGenerationError("Quote access denied")
             existing = conn.execute(
-                "SELECT design_id FROM quote_designs WHERE quote_id=?",
-                (quote_id,),
+                """SELECT d.id FROM quote_designs qd
+                   JOIN designs d ON d.id=qd.design_id
+                   WHERE qd.quote_id=? AND d.notes=? LIMIT 1""",
+                (quote_id, "AI-generated CAD job %s" % job_id),
             ).fetchone()
             if existing:
-                return {"quote_id": quote_id, "design_id": existing["design_id"], "attached": False}
+                return {"quote_id": quote_id, "design_id": existing["id"], "attached": False}
             design_id = str(uuid.uuid4())
             version_id = str(uuid.uuid4())
             name = "AI CAD " + str(quote["quote_number"])
@@ -1252,10 +1254,16 @@ class CadGenerationService:
             if not imported:
                 raise CadGenerationError("Completed CAD job has no usable artifacts")
         except Exception:
-            with self.database.connect() as conn:
-                conn.execute("DELETE FROM quote_designs WHERE quote_id=?", (quote_id,))
-                conn.execute("DELETE FROM designs WHERE id=?", (design_id,))
-                conn.commit()
+            try:
+                if self.design_vault:
+                    self.design_vault.remove_design(design_id)
+                else:
+                    with self.database.connect() as conn:
+                        conn.execute("DELETE FROM quote_designs WHERE quote_id=? AND design_id=?", (quote_id, design_id))
+                        conn.execute("DELETE FROM designs WHERE id=?", (design_id,))
+                        conn.commit()
+            except Exception:
+                pass
             raise
         return {"quote_id": quote_id, "design_id": design_id, "attached": True, "artifacts": imported}
 
