@@ -9,6 +9,12 @@ class PrinterAutomationService:
     (SELECT COUNT(*) FROM print_jobs j WHERE j.printer_id=pr.id AND j.status IN ('scheduled','printing','paused')) active_jobs
     FROM printers pr ORDER BY pr.name""").fetchall()
  def configure(self,pid,mode,url='',key=''):
+  # SECURITY NOTE: the OctoPrint API key is stored in plaintext in the
+  # printers.api_key_ref column (the "_ref" suffix is a misnomer — there is
+  # no indirection). It is redacted from diagnostics and never returned by
+  # the API, but it IS included verbatim in database backups. The proper fix
+  # is vault-backed encrypted storage with a data migration; until then,
+  # treat DB backups as secret-bearing.
   with self.db.connect() as c:
    c.execute('UPDATE printers SET connection_mode=?,octoprint_url=?,api_key_ref=? WHERE id=?',(mode,url,key,pid));c.commit()
  def active_job(self,pid):

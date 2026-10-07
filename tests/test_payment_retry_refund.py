@@ -36,9 +36,10 @@ class _Database:
                 notes TEXT
             );
             CREATE TABLE payment_webhook_events(
-                event_id TEXT PRIMARY KEY,
+                id TEXT PRIMARY KEY,
                 provider TEXT,
                 event_type TEXT,
+                payment_id TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             """
@@ -210,6 +211,76 @@ class PaymentRetryRefundTests(unittest.TestCase):
         result = _record_refund(application, "stripe", payload)
         self.assertTrue(result["recorded"])
         self.assertEqual(result["status"], "refunded")
+
+    def _seed_paid_invoice(self, application):
+        with application.database.connect() as conn:
+            conn.execute("INSERT INTO payment_transactions(id,invoice_id,provider_payment_id,order_id) VALUES(?,?,?,?)", ("payment-1", "invoice-1", "pi_test", "order-1"))
+            conn.execute("INSERT INTO payments VALUES(?,?,?,?,?,?)", ("ledger-1", "invoice-1", 5000, "stripe", "pi_test", "Gateway payment reconciled by FabOS"))
+            conn.commit()
+
+    def test_duplicate_refund_event_is_idempotent(self):
+        application = _Application()
+        self._seed_paid_invoice(application)
+        payload = '{"id":"evt_refund_dup","type":"refund.created","data":{"object":{"id":"re_dup","amount":1800,"payment_intent":"pi_test","status":"succeeded"}}}'
+        first = _record_refund(application, "stripe", payload)
+        self.assertTrue(first["recorded"])
+        second = _record_refund(application, "stripe", payload)
+        self.assertFalse(second["recorded"])
+        self.assertTrue(second["duplicate"])
+        with application.database.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM payments WHERE amount_cents<0").fetchone()[0], 1)
+
+    def test_cross_event_same_refund_is_idempotent(self):
+        # refund.created and refund.updated carry different event_ids but the
+        # same refund id; the second must not double-count the ledger.
+        application = _Application()
+        self._seed_paid_invoice(application)
+        created = '{"id":"evt_re_x_created","type":"refund.created","data":{"object":{"id":"re_x","amount":1800,"payment_intent":"pi_test","status":"succeeded"}}}'
+        updated = '{"id":"evt_re_x_updated","type":"refund.updated","data":{"object":{"id":"re_x","amount":1800,"payment_intent":"pi_test","status":"succeeded"}}}'
+        first = _record_refund(application, "stripe", created)
+        self.assertTrue(first["recorded"])
+        second = _record_refund(application, "stripe", updated)
+        self.assertFalse(second["recorded"])
+        self.assertTrue(second["duplicate"])
+        with application.database.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM payments WHERE amount_cents<0").fetchone()[0], 1)
+
+    def test_concurrent_claim_loser_is_duplicate(self):
+        # Simulate the race loser: the winner's claim is already present when
+        # this delivery runs, so it must be treated as a duplicate without
+        # touching the ledger.
+        application = _Application()
+        self._seed_paid_invoice(application)
+        with application.database.connect() as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS payment_webhook_events(id TEXT PRIMARY KEY,provider TEXT NOT NULL,event_type TEXT,payment_id TEXT,received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+            )
+            conn.execute(
+                "INSERT INTO payment_webhook_events(id,provider,event_type,payment_id) VALUES(?,?,?,?)",
+                ("refund-claim:stripe-refund:re_race", "stripe", "refund.created", "payment-1"),
+            )
+            conn.commit()
+        payload = '{"id":"evt_re_race","type":"refund.created","data":{"object":{"id":"re_race","amount":1800,"payment_intent":"pi_test","status":"succeeded"}}}'
+        result = _record_refund(application, "stripe", payload)
+        self.assertFalse(result["recorded"])
+        self.assertTrue(result["duplicate"])
+        with application.database.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM payments WHERE amount_cents<0").fetchone()[0], 0)
+
+    def test_successful_refund_writes_claim_row(self):
+        application = _Application()
+        self._seed_paid_invoice(application)
+        payload = '{"id":"evt_re_claim","type":"refund.created","data":{"object":{"id":"re_claim","amount":1800,"payment_intent":"pi_test","status":"succeeded"}}}'
+        result = _record_refund(application, "stripe", payload)
+        self.assertTrue(result["recorded"])
+        with application.database.connect() as conn:
+            row = conn.execute(
+                "SELECT provider,event_type,payment_id FROM payment_webhook_events WHERE id=?",
+                ("refund-claim:stripe-refund:re_claim",),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["provider"], "stripe")
+            self.assertEqual(row["payment_id"], "payment-1")
 
 
 if __name__ == "__main__":
