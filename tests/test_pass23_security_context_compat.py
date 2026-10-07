@@ -38,6 +38,9 @@ class _Products:
     def images(self, _product_id):
         return []
 
+    def variants(self, _product_id):
+        return []
+
     def categories(self):
         return ["Home", "Desk"]
 
