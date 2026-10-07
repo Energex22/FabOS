@@ -129,8 +129,18 @@ def _pick(value, fields):
     return {field: data[field] for field in fields if field in data}
 
 
-def _public_user(value):
-    return _pick(value, ("name", "email"))
+def _public_user(value, customer=None):
+    """Project the login identity.
+
+    The users table has no name column, so the display name is sourced from
+    the linked customer profile when one is available.
+    """
+    payload = _pick(value, ("name", "email"))
+    if "name" not in payload and customer:
+        name = str((_json(customer) or {}).get("name") or "").strip()
+        if name:
+            payload = {"name": name, **payload}
+    return payload
 
 
 def _public_customer(value):
@@ -339,7 +349,7 @@ def register_customer_write_routes(app, get_application, current_user):
         try:
             result = application.customer_commerce.register_customer(payload.name, payload.email, payload.password, payload.phone)
             summary = result["user"]
-            return {"token": result["token"], "expires_at": result["expires_at"], "user": _public_user(summary["user"]), "customer": _public_customer(summary.get("customer"))}
+            return {"token": result["token"], "expires_at": result["expires_at"], "user": _public_user(summary["user"], summary.get("customer")), "customer": _public_customer(summary.get("customer"))}
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:

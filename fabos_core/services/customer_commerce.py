@@ -1,11 +1,16 @@
 """Customer-facing commerce operations for the public FabOS API."""
 
 import json
+import os
+import sqlite3
+import tempfile
 import uuid
 import hashlib
 import re
 from pathlib import Path
 from datetime import date, timedelta
+
+from fabos_core.services.commerce_pricing import calculated_shipping_cents
 
 
 class CustomerCommerceService:
@@ -37,11 +42,19 @@ class CustomerCommerceService:
         user_id = str(uuid.uuid4())
         username = "customer-" + user_id
         password_hash = self.auth.hash_password(password)
-        with self.database.connect() as conn:
-            conn.execute("INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)", (customer_id, name, email, phone, ""))
-            conn.execute("INSERT INTO users(id,username,password_hash,email,account_type,active) VALUES(?,?,?,?,?,1)", (user_id, username, password_hash, email, "customer"))
-            conn.execute("INSERT INTO customer_accounts(user_id,customer_id) VALUES(?,?)", (user_id, customer_id))
-            conn.commit()
+        try:
+            with self.database.connect() as conn:
+                conn.execute("INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)", (customer_id, name, email, phone, ""))
+                conn.execute("INSERT INTO users(id,username,password_hash,email,account_type,active) VALUES(?,?,?,?,?,1)", (user_id, username, password_hash, email, "customer"))
+                conn.execute("INSERT INTO customer_accounts(user_id,customer_id) VALUES(?,?)", (user_id, customer_id))
+                conn.commit()
+        except sqlite3.IntegrityError as exc:
+            # The get_by_email pre-check races with concurrent registrations.
+            # Re-check before reporting: only a genuine duplicate becomes a
+            # graceful 409, anything else still surfaces as an error.
+            if self.accounts.get_by_email(email):
+                raise ValueError("An account with that email already exists") from exc
+            raise
         result = self.auth.login(email, password)
         if not result:
             raise RuntimeError("Customer account could not be authenticated after creation")
@@ -98,6 +111,21 @@ class CustomerCommerceService:
                 raise ValueError("Unsupported reference file type")
             if len(file_bytes) > 25 * 1024 * 1024:
                 raise ValueError("Reference file exceeds the 25 MB limit")
+            # Structural validation mirrors the FastAPI multipart upload path
+            # (customer_api_writes._validate_model_file): stage the decoded
+            # bytes in a temp file and reject empty/malformed/zip-bomb files
+            # before any customer or quote rows are written.
+            from fabos_core.services.customer_api_writes import _validate_model_file
+            fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+            try:
+                with os.fdopen(fd, "wb") as tmp:
+                    tmp.write(file_bytes)
+                _validate_model_file(tmp_path, suffix)
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             safe = re.sub(r"[^A-Za-z0-9._-]+", "_", original).strip("._") or "reference_model"
             validated_file = (original, safe)
         with self.database.connect() as conn:
@@ -256,10 +284,14 @@ class CustomerCommerceService:
         elif shipping_mode == "flat":
             shipping_cents = int(float(self.shop_settings.get("shipping_flat_cents", "0") or 0))
         else:
-            base = int(float(self.shop_settings.get("shipping_calculated_base_cents", "0") or 0))
-            per_kg = float(self.shop_settings.get("shipping_calculated_per_kg_cents", "0") or 0)
             weight_kg = sum(float(item["estimated_filament_g"] or 0) * int(item["quantity"]) for item in resolved_items) / 1000.0
-            shipping_cents = int(round(base + per_kg * weight_kg))
+            # Shared helper with CommercePricingService so the estimate and the
+            # charged shipping always agree to the cent (L5).
+            shipping_cents = calculated_shipping_cents(
+                self.shop_settings.get("shipping_calculated_base_cents", "0"),
+                self.shop_settings.get("shipping_calculated_per_kg_cents", "0"),
+                weight_kg,
+            )
             free_threshold = int(float(self.shop_settings.get("free_shipping_threshold_cents", "0") or 0))
             if free_threshold > 0 and subtotal_cents >= free_threshold:
                 shipping_cents = 0
