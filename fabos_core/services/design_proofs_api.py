@@ -80,7 +80,7 @@ def register_design_proof_routes(app, get_application, customer_user, administra
     def create_admin_proof(quote_id: str, payload: ProofCreateRequest, user=Depends(administrator_user), application=Depends(get_application)):
         try:
             proof = application.design_proofs.create(quote_id, notes=payload.notes, status="sent" if payload.send else "draft")
-            return {"proof": application.design_proofs._public(proof)}
+            return {"proof": application.design_proofs._admin(proof)}
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -122,7 +122,7 @@ def register_design_proof_routes(app, get_application, customer_user, administra
             application.design_vault.new_version(link["design_id"])
             application.design_vault.import_file(link["design_id"], temp_path, make_primary=extension in {".stl", ".3mf", ".step", ".stp"})
             proof = application.design_proofs.create(quote_id, notes=notes, status="sent")
-            return {"proof": application.design_proofs._public(proof), "file": {"name": filename, "bytes": size}}
+            return {"proof": application.design_proofs._admin(proof), "file": {"name": filename, "bytes": size}}
         except HTTPException:
             raise
         except (KeyError, ValueError) as exc:
@@ -141,7 +141,7 @@ def register_design_proof_routes(app, get_application, customer_user, administra
     def send_admin_proof(proof_id: str, payload: ProofComment, user=Depends(administrator_user), application=Depends(get_application)):
         try:
             proof = application.design_proofs.send(proof_id, payload.comment if payload.comment else None)
-            return {"proof": application.design_proofs._public(proof)}
+            return {"proof": application.design_proofs._admin(proof)}
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:

@@ -65,10 +65,13 @@ class DesignProofService:
         return row
 
     def _public(self, row):
+        # Customer-safe projection. ``notes`` is staff-authored (set by the
+        # admin-only proof create/upload routes) and must never reach
+        # customers; the customer-visible field is ``customer_comment``.
         return {
             "id": row["id"], "quote_id": row["quote_id"], "quote_number": row["quote_number"],
             "design_id": row["design_id"], "design_version": row["design_version"],
-            "asset_id": row["asset_id"], "status": row["status"], "notes": row["notes"],
+            "asset_id": row["asset_id"], "status": row["status"],
             "customer_comment": row["customer_comment"], "sent_at": row["sent_at"],
             "approved_at": row["approved_at"], "created_at": row["created_at"],
             "updated_at": row["updated_at"], "design_name": row["design_name"],
@@ -77,6 +80,12 @@ class DesignProofService:
                 "width": row["width_mm"], "depth": row["depth_mm"], "height": row["height_mm"]
             },
         }
+
+    def _admin(self, row):
+        # Admin projection: everything customers see plus staff notes.
+        payload = self._public(row)
+        payload["notes"] = row["notes"]
+        return payload
 
     def create(self, quote_id, *, notes="", status="draft"):
         link = self._quote_design(quote_id)
@@ -139,7 +148,7 @@ class DesignProofService:
                    LEFT JOIN design_assets a ON a.id=p.asset_id""" + clause +
                 " ORDER BY p.created_at DESC", args
             ).fetchall()
-        return [self._public(row) for row in rows]
+        return [self._admin(row) for row in rows]
 
     def latest_for_quote(self, quote_id):
         with self.database.connect() as conn:

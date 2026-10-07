@@ -28,6 +28,43 @@ def _mapping(value):
         return None
 
 
+def _parse_multipart(body_bytes, content_type):
+    """Parse a multipart/form-data body with the stdlib email parser.
+
+    Returns ``(fields, files)`` where ``fields`` maps field name → text and
+    ``files`` maps field name → ``(filename, bytes)``. Returns ``None`` when
+    the content type is not multipart or the body cannot be parsed.
+    """
+    try:
+        if not content_type or "multipart/form-data" not in str(content_type).lower():
+            return None
+        from email import policy
+        from email.parser import BytesParser
+        preamble = (
+            "Content-Type: " + str(content_type) + "\r\n"
+            "MIME-Version: 1.0\r\n"
+            "\r\n"
+        ).encode("latin-1") + (body_bytes or b"")
+        msg = BytesParser(policy=policy.default).parsebytes(preamble)
+        if not msg.is_multipart():
+            return None
+        fields = {}
+        files = {}
+        for part in msg.iter_parts():
+            name = part.get_param("name", header="content-disposition")
+            if not name:
+                continue
+            payload = part.get_payload(decode=True) or b""
+            filename = part.get_filename()
+            if filename:
+                files[name] = (filename, payload)
+            else:
+                fields[name] = payload.decode("utf-8", errors="replace")
+        return fields, files
+    except Exception:
+        return None
+
+
 class FabOSAPI:
     """Small, dependency-free transport adapter over the existing FabOS core."""
 
@@ -130,9 +167,22 @@ class FabOSAPI:
     def _response(self, status, data):
         return {"status": int(status), "data": self._jsonable(data)}
 
+    # Messages that mean "no usable session" (→ 401). Every other
+    # PermissionError means the caller IS authenticated but not allowed
+    # (wrong role, unlinked account, disabled feature, denied action) → 403.
+    _UNAUTHENTICATED_ERRORS = frozenset({
+        "authentication required",
+        "authentication token is required",
+        "authenticated user is required",
+        "authenticated user is inactive or not found",
+        "invalid or expired session",
+    })
+
     def _error(self, exc):
         if isinstance(exc, PermissionError):
-            return self._response(403 if "required" not in str(exc).lower() else 401, {"error": str(exc) or "Access denied"})
+            message = str(exc) or "Access denied"
+            status = 401 if message.strip().lower() in self._UNAUTHENTICATED_ERRORS else 403
+            return self._response(status, {"error": message})
         if isinstance(exc, KeyError):
             return self._response(404, {"error": str(exc).strip("'")})
         if isinstance(exc, (ValueError, TypeError)):
@@ -235,7 +285,7 @@ class FabOSAPI:
         except Exception: actions=[]
         return {"generated_at":now.isoformat(timespec="seconds"),"viewer":{"id":user["id"],"account_type":user.get("account_type"),"role":user.get("role")},"business":{"orders_today":orders_today,"sales_today_cents":sales_today,"sales_30d_cents":sales_30d,"active_orders":active_orders,"open_quotes":open_quotes,"unpaid_invoices":unpaid,"overdue_orders":overdue,"pending_qc":pending_qc},"production":{"active_jobs":active_jobs,"printing_jobs":printing_jobs,"failed_jobs":failed_jobs,"jobs":jobs},"printers":{"total":printer_total,"online":printer_online,"items":printers},"inventory":{"low_filament":low_filament,"low_supplies":low_supplies,"filament_threshold_g":low_threshold,"spools":spools},"maintenance":{"items":maintenance},"recent_orders":recent_orders,"action_items":actions}
 
-    def request(self, method, path, body=None, headers=None):
+    def request(self, method, path, body=None, headers=None, raw_body=None):
         method = (method or "GET").upper()
         parsed = urlsplit(path or "/")
         route = [p for p in parsed.path.strip("/").split("/") if p]
@@ -330,6 +380,44 @@ class FabOSAPI:
                 context = self._context(headers)
                 quote, items = self.core.customer_commerce.create_quote_request(context["id"], body.get("project") or body)
                 return self._response(201, {"quote": quote, "items": items, "quote_number": quote["quote_number"]})
+
+            if route == ["api", self.VERSION, "customer", "quotes", "upload"] and method == "POST":
+                # Authenticated customer model upload. Mirrors the FastAPI
+                # route via the shared store_customer_quote_upload core; the
+                # multipart body is parsed from the raw request bytes because
+                # the WSGI layer otherwise only decodes JSON.
+                from fabos_core.services.customer_api_writes import store_customer_quote_upload
+                context = self._context(headers)
+                if context.get("account_type") != "customer":
+                    raise PermissionError("Customer account required")
+                parsed = _parse_multipart(raw_body, (headers or {}).get("Content-Type", ""))
+                if parsed is None:
+                    raise ValueError("Expected a multipart/form-data request")
+                fields, files = parsed
+                if "file" not in files:
+                    raise ValueError("A model file is required")
+                filename, file_bytes = files["file"]
+                try:
+                    result = store_customer_quote_upload(
+                        self.core,
+                        context["id"],
+                        idea=fields.get("idea", ""),
+                        dimensions=fields.get("dimensions", ""),
+                        material=fields.get("material", ""),
+                        quantity=fields.get("quantity", 1),
+                        notes=fields.get("notes", ""),
+                        cad_job_id=fields.get("cad_job_id") or None,
+                        filename=filename,
+                        file_bytes=file_bytes,
+                    )
+                except Exception as exc:
+                    # The shared core raises fastapi.HTTPException; map it to
+                    # the WSGI status shape without importing fastapi here.
+                    status = getattr(exc, "status_code", None)
+                    if isinstance(status, int):
+                        return self._response(status, {"error": getattr(exc, "detail", str(exc)) or "Upload failed"})
+                    raise
+                return self._response(201, result)
 
             if route == ["api", self.VERSION, "customer", "quotes"] and method == "GET":
                 context = self._context(headers)
@@ -616,6 +704,30 @@ class FabOSAPI:
                     context = self._context(headers, "fulfillment.read")
                     return self._response(200, {"fulfillment": self.core.fulfillment.get_for_user(context["id"], route[3])})
 
+            if len(route) == 5 and route[:4] == ["api", self.VERSION, "webhooks", "payments"] and method == "POST":
+                # Provider webhook receiver. Mirrors the FastAPI route: no
+                # customer auth (the provider signature is the credential), so
+                # the RAW body bytes must reach handle_webhook untouched —
+                # signature verification fails on re-serialized JSON.
+                from fabos_core.services.payment_api import _record_refund
+                from fabos_core.services.payments import PaymentProviderError, PaymentProviderNotConfigured
+                provider = str(route[4] or "").strip().lower()
+                if provider == "stripe":
+                    signature = (headers or {}).get("Stripe-Signature", "")
+                else:
+                    signature = (headers or {}).get("X-Square-Hmacsha256-Signature", "")
+                payload = raw_body or b""
+                try:
+                    result = self.core.payments.handle_webhook(payload, signature, provider)
+                    refund = _record_refund(self.core, provider, payload)
+                    if refund:
+                        result["refund"] = refund
+                    return self._response(200, result)
+                except PaymentProviderNotConfigured as exc:
+                    return self._response(503, {"error": str(exc)})
+                except PaymentProviderError as exc:
+                    return self._response(400, {"error": str(exc)})
+
             return self._response(404, {"error": "API route not found"})
         except Exception as exc:
             return self._error(exc)
@@ -637,8 +749,11 @@ def create_wsgi_app(core):
         except (ValueError, UnicodeDecodeError):
             body = {}
         headers = {"Authorization": environ.get("HTTP_AUTHORIZATION", ""), "User-Agent": environ.get("HTTP_USER_AGENT", ""),
-                   "X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR", "")}
-        result = api.request(environ.get("REQUEST_METHOD", "GET"), environ.get("PATH_INFO", "/") + (("?" + environ["QUERY_STRING"]) if environ.get("QUERY_STRING") else ""), body, headers)
+                   "X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR", ""),
+                   "Content-Type": environ.get("CONTENT_TYPE", ""),
+                   "Stripe-Signature": environ.get("HTTP_STRIPE_SIGNATURE", ""),
+                   "X-Square-Hmacsha256-Signature": environ.get("HTTP_X_SQUARE_HMACSHA256_SIGNATURE", "")}
+        result = api.request(environ.get("REQUEST_METHOD", "GET"), environ.get("PATH_INFO", "/") + (("?" + environ["QUERY_STRING"]) if environ.get("QUERY_STRING") else ""), body, headers, raw_body=raw)
         data = result["data"]
         if isinstance(data, dict) and "_wsgi_file" in data:
             # Binary escape hatch used by the proof-file route: serve the raw
