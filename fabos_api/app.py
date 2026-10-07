@@ -65,8 +65,12 @@ def _parse_multipart(body_bytes, content_type):
     """Parse a multipart/form-data body with the stdlib email parser.
 
     Returns ``(fields, files)`` where ``fields`` maps field name → text and
-    ``files`` maps field name → ``(filename, bytes)``. Returns ``None`` when
-    the content type is not multipart or the body cannot be parsed.
+    ``files`` maps field name → a **list** of ``(filename, bytes)`` tuples —
+    repeated file field names (e.g. the frontend appending every reference
+    image under the same ``files`` field) are all kept, in order, instead of
+    overwriting each other. Call sites expecting a single file take ``[0]``.
+    Returns ``None`` when the content type is not multipart or the body
+    cannot be parsed.
     """
     try:
         if not content_type or "multipart/form-data" not in str(content_type).lower():
@@ -90,7 +94,7 @@ def _parse_multipart(body_bytes, content_type):
             payload = part.get_payload(decode=True) or b""
             filename = part.get_filename()
             if filename:
-                files[name] = (filename, payload)
+                files.setdefault(name, []).append((filename, payload))
             else:
                 fields[name] = payload.decode("utf-8", errors="replace")
         return fields, files
@@ -111,6 +115,9 @@ class FabOSAPI:
             "register": RateLimiter(10, 900),
             "quote": RateLimiter(5, 900),
             "team_login": RateLimiter(10, 900),
+            # Mirrors FastAPI's 30/hr/IP upload limiter
+            # (customer_api_writes.py create_public_quote_request_with_file).
+            "upload": RateLimiter(30, 3600),
         }
 
     def _allow_auth_attempt(self, client_ip):
@@ -463,6 +470,12 @@ class FabOSAPI:
                 }
 
             if route == ["api", self.VERSION, "auth", "login"] and method == "POST":
+                # DELIBERATE DIVERGENCE from FastAPI: the WSGI customer
+                # storefront login is customer-only — non-customer tokens are
+                # logged out immediately with 401, so team/administrator
+                # accounts cannot hold a customer session. FastAPI's login
+                # route returns a token for any valid credentials. Do not
+                # "fix" this as a bug; team logins belong on /auth/team-login.
                 client_ip = _rate_limit_client_ip(headers)
                 if not self._allow_auth_attempt(client_ip):
                     return self._response(429, {"error": "Too many sign-in attempts. Please try again later."})
@@ -504,6 +517,10 @@ class FabOSAPI:
                 return self._response(200, self._customer_safe_profile(self.core.accounts.account_summary(context["id"])))
 
             if route == ["api", self.VERSION, "customer", "me"] and method == "GET":
+                # NOTE (B-L10): the fabos_api/__init__.py monkey-patch
+                # intercepts GET /api/v1/customer/me before this dispatcher,
+                # adding a customer-only check. Edits to this branch are
+                # silently dead — changes belong in the patch in __init__.py.
                 context = self._context(headers)
                 return self._response(200, self._customer_safe_profile(self.core.accounts.account_summary(context["id"])))
 
@@ -535,8 +552,30 @@ class FabOSAPI:
 
             if route == ["api", self.VERSION, "customer", "quotes"] and method == "POST":
                 context = self._context(headers)
-                quote, items = self.core.customer_commerce.create_quote_request(context["id"], body.get("project") or body)
-                return self._response(201, {"quote": quote, "items": items, "quote_number": quote["quote_number"]})
+                project = body.get("project") or body
+                quote, items = self.core.customer_commerce.create_quote_request(context["id"], project)
+                # Mirror the FastAPI create_customer_quote route
+                # (customer_api_writes.py): a generated CAD design selected on
+                # the custom-work page must be attached to the quote — the
+                # WSGI route previously dropped payload.project.cad_job_id,
+                # silently leaving the design unlinked.
+                from fabos_core.services.cad_generation import CadGenerationError
+                attached = None
+                cad_job_id = (project or {}).get("cad_job_id")
+                if cad_job_id:
+                    try:
+                        attached = self.core.cad_generation.attach_to_quote(
+                            cad_job_id, quote["id"], context["id"]
+                        )
+                    except CadGenerationError as exc:
+                        with self.core.database.connect() as conn:
+                            conn.execute("DELETE FROM quotes WHERE id=?", (quote["id"],))
+                            conn.commit()
+                        return self._response(400, {"error": str(exc)})
+                result = {"quote": quote, "items": items, "quote_number": quote["quote_number"]}
+                if attached:
+                    result["cad"] = attached
+                return self._response(201, result)
 
             if route == ["api", self.VERSION, "customer", "quotes", "upload"] and method == "POST":
                 # Authenticated customer model upload. Mirrors the FastAPI
@@ -553,7 +592,7 @@ class FabOSAPI:
                 fields, files = parsed
                 if "file" not in files:
                     raise ValueError("A model file is required")
-                filename, file_bytes = files["file"]
+                filename, file_bytes = files["file"][0]
                 try:
                     result = store_customer_quote_upload(
                         self.core,
@@ -628,7 +667,19 @@ class FabOSAPI:
 
             if len(route) == 6 and route[:4] == ["api", self.VERSION, "customer", "orders"] and route[5] == "payment-session" and method == "POST":
                 context = self._context(headers)
-                payment = self.core.payments.create_checkout(context["id"], route[4])
+                # Mirror the FastAPI except-chain (customer_api_writes.py): an
+                # unconfigured provider is 503 (retry later / configure), a
+                # provider failure is 502 (upstream down), and an unavailable
+                # payment is 409 — not the generic 500/400 _error() mapping.
+                from fabos_core.services.payments import PaymentProviderError, PaymentProviderNotConfigured
+                try:
+                    payment = self.core.payments.create_checkout(context["id"], route[4])
+                except PaymentProviderNotConfigured as exc:
+                    return self._response(503, {"error": str(exc)})
+                except PaymentProviderError:
+                    return self._response(502, {"error": "Payment provider request failed"})
+                except ValueError as exc:
+                    return self._response(409, {"error": str(exc)})
                 # Mirror the FastAPI projection: (status, checkout_url) only —
                 # never the full payment_transactions row.
                 row = dict(payment) if not isinstance(payment, dict) else payment
@@ -760,6 +811,13 @@ class FabOSAPI:
                 }
 
             if route == ["api", self.VERSION, "auth", "register"] and method == "POST":
+                # NOTE (B-L10): UNREACHABLE DEAD CODE. The
+                # fabos_api/__init__.py monkey-patch intercepts
+                # POST /api/v1/auth/register before this dispatcher ever runs
+                # (B-M1: it applies the "register" rate limiter there itself).
+                # Editing this branch — including its limiter or the register
+                # call below — silently does nothing. Changes belong in the
+                # patch in __init__.py.
                 allowed, retry_after = self._allow_public_attempt("register", _rate_limit_client_ip(headers))
                 if not allowed:
                     return self._response(429, {"error": "Too many registration attempts. Please try again later.", "retry_after": retry_after})
@@ -965,6 +1023,7 @@ def create_wsgi_app(core):
             200: "OK", 201: "Created",
             400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
             409: "Conflict", 413: "Content Too Large", 415: "Unsupported Media Type",
+            422: "Unprocessable Entity",
             429: "Too Many Requests",
             500: "Internal Server Error", 502: "Bad Gateway", 503: "Service Unavailable",
         }.get(result["status"], "OK")
