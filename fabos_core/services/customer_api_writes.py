@@ -380,8 +380,11 @@ def register_customer_write_routes(app, get_application, current_user):
         notes: str = File(default="", max_length=4000),
         cad_job_id: Optional[str] = File(default=None, max_length=128),
         file: UploadFile = File(...),
+        user=Depends(current_user),
         application=Depends(get_application),
     ):
+        # File uploads require an account (anonymous -> 401 via current_user).
+        # The text-only quote-request form stays public.
         client = request_client_key(request)
         if not app.state.public_rate_limiter.allow("upload:" + client):
             raise HTTPException(status_code=429, detail="Too many upload requests. Try again later.", headers={"Retry-After": str(app.state.public_rate_limiter.retry_after("upload:" + client))})
