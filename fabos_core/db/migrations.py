@@ -192,6 +192,12 @@ CREATE TABLE IF NOT EXISTS payment_webhook_events(
  payment_id TEXT,
  received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );"""),
+
+(55,"""INSERT OR IGNORE INTO shop_settings(key,value)
+SELECT 'quote_validity_days',COALESCE((SELECT value FROM shop_settings WHERE key='quote_valid_days'),'14');
+DELETE FROM shop_settings WHERE key='quote_valid_days';"""),
+
+(56,"""ALTER TABLE design_proofs ADD COLUMN customer_note TEXT NOT NULL DEFAULT '';"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:

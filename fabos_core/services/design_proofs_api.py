@@ -7,6 +7,8 @@ from fastapi import Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 
+from fabos_core.services.design_proofs import DesignProofService
+
 
 ALLOWED_PROOF_EXTENSIONS = {".stl", ".3mf", ".step", ".stp", ".obj", ".png", ".jpg", ".jpeg"}
 MAX_PROOF_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -14,14 +16,20 @@ MAX_PROOF_UPLOAD_BYTES = 25 * 1024 * 1024
 
 class ProofCreateRequest(BaseModel):
     notes: str = Field(default="", max_length=4000)
+    customer_note: str = Field(default="", max_length=4000)
     send: bool = False
 
 
 class ProofComment(BaseModel):
     comment: str = Field(default="", max_length=4000)
+    customer_note: str = Field(default="", max_length=4000)
 
 
 def register_design_proof_routes(app, get_application, customer_user, administrator_user):
+    def _validate_proof_status(status):
+        if status and status != "All" and str(status).lower() not in DesignProofService.VALID_STATUSES:
+            raise HTTPException(status_code=400, detail="Unknown proof status")
+
     @app.get("/api/v1/customer/proofs")
     def customer_proofs(user=Depends(customer_user), application=Depends(get_application)):
         return {"proofs": application.design_proofs.list_for_customer(user["id"])}
@@ -73,13 +81,32 @@ def register_design_proof_routes(app, get_application, customer_user, administra
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/v1/admin/quotes/{quote_id}/proofs")
-    def admin_quote_proofs(quote_id: str, user=Depends(administrator_user), application=Depends(get_application)):
-        return {"proofs": application.design_proofs.list_for_admin(quote_id=quote_id)}
+    def admin_quote_proofs(quote_id: str, status: str = "All", user=Depends(administrator_user), application=Depends(get_application)):
+        _validate_proof_status(status)
+        return {"proofs": application.design_proofs.list_for_admin(quote_id=quote_id, status=status)}
+
+    @app.get("/api/v1/admin/proofs")
+    def admin_proofs(status: str = "All", user=Depends(administrator_user), application=Depends(get_application)):
+        # Global Proofs-queue view: filterable by status across all quotes.
+        _validate_proof_status(status)
+        return {"proofs": application.design_proofs.list_for_admin(status=status)}
+
+    @app.get("/api/v1/admin/proofs/{proof_id}")
+    def admin_proof(proof_id: str, user=Depends(administrator_user), application=Depends(get_application)):
+        # Single-proof view: admin projection includes the staff notes plus
+        # the customer's change-request comment.
+        try:
+            row = application.design_proofs._row(proof_id)
+            return {"proof": application.design_proofs._admin(row)}
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.post("/api/v1/admin/quotes/{quote_id}/proofs")
     def create_admin_proof(quote_id: str, payload: ProofCreateRequest, user=Depends(administrator_user), application=Depends(get_application)):
         try:
-            proof = application.design_proofs.create(quote_id, notes=payload.notes, status="sent" if payload.send else "draft")
+            proof = application.design_proofs.create(
+                quote_id, notes=payload.notes, customer_note=payload.customer_note,
+                status="sent" if payload.send else "draft")
             return {"proof": application.design_proofs._admin(proof)}
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -90,6 +117,7 @@ def register_design_proof_routes(app, get_application, customer_user, administra
     async def upload_admin_proof(
         quote_id: str,
         notes: str = File(default="", max_length=4000),
+        customer_note: str = File(default="", max_length=4000),
         file: UploadFile = File(...),
         user=Depends(administrator_user),
         application=Depends(get_application),
@@ -121,7 +149,7 @@ def register_design_proof_routes(app, get_application, customer_user, administra
 
             application.design_vault.new_version(link["design_id"])
             application.design_vault.import_file(link["design_id"], temp_path, make_primary=extension in {".stl", ".3mf", ".step", ".stp"})
-            proof = application.design_proofs.create(quote_id, notes=notes, status="sent")
+            proof = application.design_proofs.create(quote_id, notes=notes, customer_note=customer_note, status="sent")
             return {"proof": application.design_proofs._admin(proof), "file": {"name": filename, "bytes": size}}
         except HTTPException:
             raise
@@ -140,7 +168,11 @@ def register_design_proof_routes(app, get_application, customer_user, administra
     @app.post("/api/v1/admin/proofs/{proof_id}/send")
     def send_admin_proof(proof_id: str, payload: ProofComment, user=Depends(administrator_user), application=Depends(get_application)):
         try:
-            proof = application.design_proofs.send(proof_id, payload.comment if payload.comment else None)
+            proof = application.design_proofs.send(
+                proof_id,
+                payload.comment if payload.comment else None,
+                payload.customer_note if payload.customer_note else None,
+            )
             return {"proof": application.design_proofs._admin(proof)}
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

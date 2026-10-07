@@ -148,7 +148,7 @@ def _public_customer(value):
 
 
 def _public_quote(value):
-    return _pick(value, ("id", "quote_number", "status", "notes", "created_at", "updated_at", "total_cents"))
+    return _pick(value, ("id", "quote_number", "status", "notes", "created_at", "updated_at", "total_cents", "expires_at"))
 
 
 def _public_quote_item(value):

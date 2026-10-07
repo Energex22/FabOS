@@ -5,6 +5,7 @@ from datetime import date, timedelta
 
 from fabos_core.services.commerce_pricing import CommercePricingService
 from fabos_core.services.quotes import ensure_quote_audit_schema
+from fabos_core.services.shop_settings import resolve_quote_validity_days
 
 
 class CheckoutService:
@@ -116,7 +117,7 @@ class CheckoutService:
             qseq = int(qrow[0].split("-")[-1]) + 1 if qrow else 1
             quote_number = quote_number_prefix + ("%04d" % qseq)
             order_number = prefix + ("%04d" % seq)
-            quote_expires_at = (date.today() + timedelta(days=14)).isoformat()
+            quote_expires_at = (date.today() + timedelta(days=resolve_quote_validity_days(self.shop_settings))).isoformat()
             conn.execute(
                 "INSERT INTO quotes(id,quote_number,customer_id,status,total_cents,expires_at,notes) VALUES(?,?,?,?,?,?,?)",
                 (quote_id, quote_number, customer["id"], "approved", total_cents,

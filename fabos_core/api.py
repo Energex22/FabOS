@@ -8,7 +8,7 @@ Administrator routes are separately protected and are not part of the customer U
 import json
 import base64
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 import re
 from pathlib import Path
@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fabos_core.services.rate_limit import RateLimiter, request_client_key
+from fabos_core.services.shop_settings import resolve_quote_validity_days
 from pydantic import BaseModel, Field
 from fabos_core.services.cad_generation import CadGenerationError
 
@@ -77,7 +78,7 @@ def _customer_payload(customer: Any) -> Optional[Dict[str, Any]]:
 
 
 def _quote_payload(row: Any) -> Dict[str, Any]:
-    return _pick(row, ("id", "quote_number", "status", "notes", "created_at", "updated_at", "total_cents"))
+    return _pick(row, ("id", "quote_number", "status", "notes", "created_at", "updated_at", "total_cents", "expires_at"))
 
 
 def _quote_item_payload(item: Any) -> Dict[str, Any]:
@@ -85,7 +86,7 @@ def _quote_item_payload(item: Any) -> Dict[str, Any]:
 
 
 def _order_payload(row: Any) -> Dict[str, Any]:
-    return _pick(row, ("id", "order_number", "status", "created_at", "updated_at", "total_cents", "shipping_cents", "tax_cents", "shipping_address_json", "checkout_notes"))
+    return _pick(row, ("id", "order_number", "status", "created_at", "updated_at", "total_cents", "shipping_cents", "tax_cents", "shipping_address_json", "checkout_notes", "quote_id"))
 
 
 def _order_item_payload(item: Any) -> Dict[str, Any]:
@@ -694,7 +695,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
                 items = [dict(item) for item in existing_items]
             expires_at = payload.get("expires_at", row["expires_at"])
             if requested_status == "sent" and not expires_at:
-                expires_at = (datetime.utcnow().date() + timedelta(days=14)).isoformat()
+                expires_at = (date.today() + timedelta(days=resolve_quote_validity_days(application.shop_settings))).isoformat()
             data = {"customer_id": row["customer_id"], "status": requested_status, "expires_at": expires_at, "notes": payload.get("notes", row["notes"])}
             application.quotes.save(data, items, quote_id=quote_id)
             updated, updated_items = application.quotes.get(quote_id)

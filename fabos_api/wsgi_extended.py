@@ -18,11 +18,12 @@ import os
 import re
 import tempfile
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from fabos_core.services.cad_generation import CadGenerationError
 from fabos_core.services.rate_limit import RateLimiter
+from fabos_core.services.shop_settings import resolve_quote_validity_days
 
 # Mirrors the FastAPI CAD limiter (20 requests / 5 minutes per customer and
 # operation) so the WSGI transport cannot be used to bypass it.
@@ -58,6 +59,16 @@ def _admin(api, headers):
     if str(context.get("account_type") or "").lower() != "administrator":
         raise PermissionError("Administrator account required")
     return context
+
+
+_PROOF_STATUSES = {"draft", "sent", "changes_requested", "approved", "superseded"}
+
+
+def _validate_proof_status(api, status):
+    """Mirror the FastAPI proof-status validation (400 on unknown status)."""
+    if status and status != "All" and str(status).lower() not in _PROOF_STATUSES:
+        return api._response(400, {"error": "Unknown proof status"})
+    return None
 
 
 def _operations(api, headers):
@@ -548,7 +559,7 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
             items = [dict(item) for item in existing_items]
         expires_at = body.get("expires_at", row["expires_at"])
         if requested_status == "sent" and not expires_at:
-            expires_at = (datetime.utcnow().date() + timedelta(days=14)).isoformat()
+            expires_at = (date.today() + timedelta(days=resolve_quote_validity_days(core.shop_settings))).isoformat()
         data = {
             "customer_id": row["customer_id"], "status": requested_status,
             "expires_at": expires_at, "notes": body.get("notes", row["notes"]),
@@ -1052,7 +1063,30 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
     # ------------------------------------------------------------------
     if len(route) == 6 and route[:4] == ["api", v, "admin", "quotes"] and route[5] == "proofs" and method == "GET":
         _admin(api, headers)
-        return api._response(200, {"proofs": _rows(core.design_proofs.list_for_admin(quote_id=route[4]))})
+        status = _q(query, "status", "All")
+        bad = _validate_proof_status(api, status)
+        if bad is not None:
+            return bad
+        return api._response(200, {"proofs": _rows(core.design_proofs.list_for_admin(quote_id=route[4], status=status))})
+
+    # Global Proofs queue: filterable by status across all quotes.
+    if route == ["api", v, "admin", "proofs"] and method == "GET":
+        _admin(api, headers)
+        status = _q(query, "status", "All")
+        bad = _validate_proof_status(api, status)
+        if bad is not None:
+            return bad
+        return api._response(200, {"proofs": _rows(core.design_proofs.list_for_admin(status=status))})
+
+    # Single proof view: admin projection carries the staff notes plus the
+    # customer's change-request comment.
+    if len(route) == 5 and route[:4] == ["api", v, "admin", "proofs"] and method == "GET":
+        _admin(api, headers)
+        try:
+            proof = core.design_proofs._row(route[4])
+        except KeyError as exc:
+            return api._response(404, {"error": str(exc)})
+        return api._response(200, {"proof": core.design_proofs._admin(proof)})
 
     if len(route) == 6 and route[:4] == ["api", v, "admin", "quotes"] and route[5] == "proofs" and method == "POST":
         _admin(api, headers)
@@ -1060,8 +1094,11 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         notes = str(body.get("notes") or "")
         if len(notes) > 4000:
             raise ValueError("Notes must be at most 4000 characters.")
+        customer_note = str(body.get("customer_note") or "")
+        if len(customer_note) > 4000:
+            raise ValueError("Customer note must be at most 4000 characters.")
         try:
-            proof = core.design_proofs.create(quote_id, notes=notes, status="sent" if body.get("send") else "draft")
+            proof = core.design_proofs.create(quote_id, notes=notes, customer_note=customer_note, status="sent" if body.get("send") else "draft")
         except KeyError as exc:
             return api._response(404, {"error": str(exc)})
         except ValueError as exc:
@@ -1083,6 +1120,7 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         if len(file_bytes) > MAX_PROOF_UPLOAD_BYTES:
             return api._response(413, {"error": "Proof file must be 25 MB or smaller"})
         notes = str(fields.get("notes", "") or "")
+        customer_note = str(fields.get("customer_note", "") or "")
         temp_path = None
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
@@ -1094,7 +1132,7 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
                 return api._response(404, {"error": "No customer design is attached to this quote."})
             core.design_vault.new_version(link["design_id"])
             core.design_vault.import_file(link["design_id"], temp_path, make_primary=extension in {".stl", ".3mf", ".step", ".stp"})
-            proof = core.design_proofs.create(quote_id, notes=notes, status="sent")
+            proof = core.design_proofs.create(quote_id, notes=notes, customer_note=customer_note, status="sent")
             return api._response(200, {
                 "proof": core.design_proofs._admin(proof),
                 "file": {"name": filename, "bytes": len(file_bytes)},
@@ -1116,8 +1154,11 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         comment = str(body.get("comment") or "")
         if len(comment) > 4000:
             raise ValueError("Comment must be at most 4000 characters.")
+        customer_note = str(body.get("customer_note") or "")
+        if len(customer_note) > 4000:
+            raise ValueError("Customer note must be at most 4000 characters.")
         try:
-            proof = core.design_proofs.send(proof_id, comment if comment else None)
+            proof = core.design_proofs.send(proof_id, comment if comment else None, customer_note if customer_note else None)
         except KeyError as exc:
             return api._response(404, {"error": str(exc)})
         except ValueError as exc:

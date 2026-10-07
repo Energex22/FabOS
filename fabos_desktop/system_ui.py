@@ -272,7 +272,7 @@ class SystemReliabilityMixin:
         # Pricing and billing
         add_entry(pricing,'Invoice Prefix','invoice_prefix','Example: INV creates INV-YYYYMM-0001.')
         add_entry(pricing,'Invoice Due Days','invoice_due_days','Default number of days before a new invoice is due.')
-        add_entry(pricing,'Quote Valid Days','quote_valid_days','Default quote-expiration window.')
+        add_entry(pricing,'Quote Validity Days','quote_validity_days','Default quote-expiration window (days).')
         add_entry(pricing,'Machine Cost / Hour ($)','machine_hourly_cost',
                   'Used in manufacturing cost and profitability calculations.')
         add_entry(pricing,'Default Packaging / Job ($)','default_packaging_cost',
@@ -365,7 +365,7 @@ class SystemReliabilityMixin:
         if not getattr(self,'_settings_vars',None):return
         values={k:v.get().strip() for k,v in self._settings_vars.items()}
         numeric={
-            'invoice_due_days':(1,365),'default_tax_percent':(0,100),'quote_valid_days':(1,365),
+            'invoice_due_days':(1,365),'default_tax_percent':(0,100),'quote_validity_days':(1,365),
             'machine_hourly_cost':(0,1000),'default_packaging_cost':(0,1000),
             'target_margin_percent':(0,1000),'filament_low_threshold_g':(0,100000),
             'filament_reorder_days':(1,3650),'backup_retention':(1,3650)
