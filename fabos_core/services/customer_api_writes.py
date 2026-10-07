@@ -212,6 +212,124 @@ class CustomProductRequest(BaseModel):
     license_status: str = Field(default="review_required", max_length=50)
     visibility: str = Field(default="draft", max_length=20)
 
+def store_customer_quote_upload(application, user_id, *, idea, dimensions="",
+                                material="", quantity=1, notes="", cad_job_id=None,
+                                filename="", file_bytes=b""):
+    """Shared core for authenticated customer model uploads.
+
+    Used by both the FastAPI route (``POST /api/v1/customer/quotes/upload``)
+    and the WSGI adapter so the two transports cannot drift apart. Raises
+    ``fastapi.HTTPException`` with the appropriate status on failure; each
+    transport maps it to its own response shape. Returns the response
+    payload dict.
+    """
+    filename = Path(filename or "").name
+    extension = Path(filename).suffix.lower()
+    idea = str(idea or "").strip()
+    dimensions = str(dimensions or "")
+    material = str(material or "")
+    notes = str(notes or "")
+    if not filename:
+        raise HTTPException(status_code=400, detail="A model filename is required")
+    if extension not in ALLOWED_CUSTOM_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Unsupported 3D model file type")
+    if not idea or len(idea) > 4000:
+        raise HTTPException(status_code=400, detail="A project idea is required")
+    if len(dimensions) > 1000 or len(material) > 200 or len(notes) > 4000:
+        raise HTTPException(status_code=400, detail="A project field exceeds its length limit")
+    try:
+        quantity = int(quantity)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Quantity must be a positive integer") from None
+    if quantity < 1 or quantity > 1000:
+        raise HTTPException(status_code=400, detail="Quantity must be between 1 and 1000")
+    if cad_job_id is not None:
+        cad_job_id = str(cad_job_id).strip() or None
+        if cad_job_id and len(cad_job_id) > 128:
+            raise HTTPException(status_code=400, detail="cad_job_id is too long")
+    data = file_bytes or b""
+    size = len(data)
+    if size > MAX_CUSTOM_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="3D model must be 25 MB or smaller")
+    temp_path = None
+    quote_id = None
+    design_id = None
+    success = False
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
+            temp_path = tmp.name
+            tmp.write(data)
+        try:
+            _validate_model_file(temp_path, extension)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        project = {
+            "idea": idea,
+            "dimensions": dimensions,
+            "material": material,
+            "quantity": quantity,
+            "notes": notes.strip(),
+            "cad_job_id": cad_job_id,
+        }
+        project["notes"] += ("\n" if project["notes"] else "") + "File: " + filename
+        quote, items = application.customer_commerce.create_quote_request(user_id, project)
+        quote_id = str(quote["id"])
+
+        design_id = str(uuid.uuid4())
+        version_id = str(uuid.uuid4())
+        safe_name = "Custom Quote " + str(quote["quote_number"])
+        with application.database.connect() as conn:
+            conn.execute(
+                "INSERT INTO designs(id,product_id,name,current_version,notes) VALUES(?,?,?,1,?)",
+                (design_id, None, safe_name, "Customer custom quote %s" % quote["quote_number"]),
+            )
+            conn.execute(
+                "INSERT INTO design_versions(id,design_id,version,label,notes) VALUES(?,?,?,?,?)",
+                (version_id, design_id, 1, "Customer upload", "Uploaded with custom quote request"),
+            )
+            conn.execute("INSERT INTO quote_designs(quote_id,design_id) VALUES(?,?)", (quote_id, design_id))
+            conn.commit()
+        application.design_vault.import_file(design_id, temp_path, make_primary=True)
+
+        if project.get("cad_job_id"):
+            application.cad_generation.attach_to_quote(project["cad_job_id"], quote_id, user_id)
+        success = True
+        return {
+            "quote": _public_quote(quote),
+            "items": [_public_quote_item(item) for item in items],
+            "request_number": str(quote["quote_number"]),
+            "design_id": design_id,
+            "file": {"name": filename, "bytes": size, "extension": extension},
+        }
+    except HTTPException:
+        raise
+    except CadGenerationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="The model could not be stored") from exc
+    finally:
+        if not success and quote_id:
+            try:
+                if design_id:
+                    application.design_vault.remove_design(design_id)
+                with application.database.connect() as conn:
+                    conn.execute("DELETE FROM quote_designs WHERE quote_id=?", (quote_id,))
+                    conn.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
+                    conn.commit()
+            except Exception:
+                pass
+        try:
+            if temp_path:
+                os.unlink(temp_path)
+        except OSError:
+            pass
+
+
 def register_customer_write_routes(app, get_application, current_user):
     @app.post("/api/v1/auth/register")
     def register_customer(payload: RegistrationRequest, request: Request, application=Depends(get_application)):
@@ -381,98 +499,37 @@ def register_customer_write_routes(app, get_application, current_user):
         user=Depends(current_user),
         application=Depends(get_application),
     ):
-        filename = Path(file.filename or "").name
-        extension = Path(filename).suffix.lower()
-        if not filename:
-            raise HTTPException(status_code=400, detail="A model filename is required")
-        if extension not in ALLOWED_CUSTOM_UPLOAD_EXTENSIONS:
-            raise HTTPException(status_code=415, detail="Unsupported 3D model file type")
-        temp_path = None
+        # Stream the upload with an early size cap, then delegate to the
+        # shared core (also used by the WSGI adapter) so both transports
+        # behave identically.
+        chunks = []
         size = 0
-        quote_id = None
-        design_id = None
-        success = False
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
-                temp_path = tmp.name
-                while True:
-                    chunk = await file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    size += len(chunk)
-                    if size > MAX_CUSTOM_UPLOAD_BYTES:
-                        raise HTTPException(status_code=413, detail="3D model must be 25 MB or smaller")
-                    tmp.write(chunk)
-            try:
-                _validate_model_file(temp_path, extension)
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-            project = {
-                "idea": idea,
-                "dimensions": dimensions,
-                "material": material,
-                "quantity": quantity,
-                "notes": (notes or "").strip(),
-                "cad_job_id": cad_job_id,
-            }
-            project["notes"] += ("\n" if project["notes"] else "") + "File: " + filename
-            quote, items = application.customer_commerce.create_quote_request(user["id"], project)
-            quote_id = str(quote["id"])
-
-            design_id = str(uuid.uuid4())
-            version_id = str(uuid.uuid4())
-            safe_name = "Custom Quote " + str(quote["quote_number"])
-            with application.database.connect() as conn:
-                conn.execute(
-                    "INSERT INTO designs(id,product_id,name,current_version,notes) VALUES(?,?,?,1,?)",
-                    (design_id, None, safe_name, "Customer custom quote %s" % quote["quote_number"]),
-                )
-                conn.execute(
-                    "INSERT INTO design_versions(id,design_id,version,label,notes) VALUES(?,?,?,?,?)",
-                    (version_id, design_id, 1, "Customer upload", "Uploaded with custom quote request"),
-                )
-                conn.execute("INSERT INTO quote_designs(quote_id,design_id) VALUES(?,?)", (quote_id, design_id))
-                conn.commit()
-            application.design_vault.import_file(design_id, temp_path, make_primary=True)
-
-            if project.get("cad_job_id"):
-                application.cad_generation.attach_to_quote(project["cad_job_id"], quote_id, user["id"])
-            success = True
-            return {
-                "quote": _public_quote(quote),
-                "items": [_public_quote_item(item) for item in items],
-                "request_number": str(quote["quote_number"]),
-                "design_id": design_id,
-                "file": {"name": filename, "bytes": size, "extension": extension},
-            }
-        except HTTPException:
-            raise
-        except CadGenerationError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        except (KeyError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail="The model could not be stored") from exc
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_CUSTOM_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="3D model must be 25 MB or smaller")
+                chunks.append(chunk)
         finally:
-            if not success and quote_id:
-                try:
-                    if design_id:
-                        application.design_vault.remove_design(design_id)
-                    with application.database.connect() as conn:
-                        conn.execute("DELETE FROM quote_designs WHERE quote_id=?", (quote_id,))
-                        conn.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
-                        conn.commit()
-                except Exception:
-                    pass
             try:
-                if temp_path:
-                    os.unlink(temp_path)
-            except OSError:
+                await file.close()
+            except Exception:
                 pass
-            await file.close()
+        return store_customer_quote_upload(
+            application,
+            user["id"],
+            idea=idea,
+            dimensions=dimensions,
+            material=material,
+            quantity=quantity,
+            notes=notes,
+            cad_job_id=cad_job_id,
+            filename=file.filename,
+            file_bytes=b"".join(chunks),
+        )
 
     @app.post("/api/v1/customer/orders")
     def create_customer_order(payload: OrderRequest, user=Depends(current_user), application=Depends(get_application)):

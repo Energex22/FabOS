@@ -8,8 +8,21 @@ from fabos_core.services.customer_accounts import CustomerAccountService
 
 _original_request = FabOSAPI.request
 
+# Shipping mode is server-authoritative: the storefront may display estimates,
+# but the checkout charge must always come from shop settings. Never trust a
+# client-supplied shipping_mode (H1: a customer posting {"shipping_mode":"free"}
+# would otherwise zero out shipping on the WSGI checkout path).
+_ALLOWED_SHIPPING_MODES = {"calculated", "flat", "free"}
 
-def _api_request(self, method, path, body=None, headers=None):
+
+def _server_shipping_mode(core):
+    settings = getattr(core, "shop_settings", None)
+    raw = settings.get("shipping_mode", "flat") if settings else "flat"
+    mode = str(raw or "flat").strip().lower()
+    return mode if mode in _ALLOWED_SHIPPING_MODES else "flat"
+
+
+def _api_request(self, method, path, body=None, headers=None, raw_body=None):
     parsed_url = urlsplit(path or "/")
     parsed = [part for part in parsed_url.path.strip("/").split("/") if part]
     method = (method or "GET").upper()
@@ -40,7 +53,7 @@ def _api_request(self, method, path, body=None, headers=None):
             if context.get("account_type") != "customer":
                 raise PermissionError("Customer account required")
             service = CommercePricingService(self.core.products, self.core.shop_settings)
-            return self._response(200, service.estimate(body.get("items"), body.get("shipping_mode"), body.get("shipping_weight_g", 0)))
+            return self._response(200, service.estimate(body.get("items"), _server_shipping_mode(self.core), body.get("shipping_weight_g", 0)))
         except Exception as exc:
             return self._error(exc)
 
@@ -50,12 +63,12 @@ def _api_request(self, method, path, body=None, headers=None):
             if context.get("account_type") != "customer":
                 raise PermissionError("Customer account required")
             service = CheckoutService(self.core.database, self.core.accounts, self.core.products, self.core.shop_settings)
-            result = service.create_order(context["id"], body.get("items"), body.get("shipping_address"), body.get("notes", ""), body.get("shipping_mode"))
+            result = service.create_order(context["id"], body.get("items"), body.get("shipping_address"), body.get("notes", ""), _server_shipping_mode(self.core))
             return self._response(201, {"order": result})
         except Exception as exc:
             return self._error(exc)
 
-    return _original_request(self, method, path, body, headers)
+    return _original_request(self, method, path, body, headers, raw_body=raw_body)
 
 
 FabOSAPI.request = _api_request

@@ -106,7 +106,7 @@ class WsgiCustomerQuoteProofRouteTests(unittest.TestCase):
     def test_proofs_list_requires_customer_account(self):
         self.assertEqual(self.api.request("GET", "/api/v1/customer/proofs")["status"], 401)
         denied = self.api.request("GET", "/api/v1/customer/proofs", headers=self.employee)
-        self.assertEqual(denied["status"], 401)
+        self.assertEqual(denied["status"], 403)
 
     def test_proofs_list_returns_proofs(self):
         self.core.design_proofs.rows["p1"] = {"id": "p1", "status": "sent"}
