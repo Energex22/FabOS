@@ -158,6 +158,11 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         spec = body.get("spec")
         if not prompt and not spec:
             raise ValueError("Provide a design prompt or structured specification")
+        # B-L6: mirror FastAPI's CadGenerationRequest.prompt cap (12000,
+        # fabos_core/api.py). FastAPI returns 422 on pydantic validation
+        # failures; the WSGI route returns 422 here to match.
+        if prompt is not None and len(str(prompt)) > 12000:
+            return api._response(422, {"error": "Design prompt is too long (maximum 12000 characters)"})
         try:
             result = core.cad_generation.generate(
                 spec=spec, prompt=prompt,
@@ -180,7 +185,11 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         if limited:
             return limited
         fields, files = _parse_multipart_body(headers, raw_body)
-        uploads = [files[name] for name in sorted(files)]
+        # _parse_multipart keeps every repeated file field as a list (the
+        # frontend appends all reference images under the same "files" name),
+        # so flatten all lists in field-name order instead of keeping only
+        # the last image per field.
+        uploads = [entry for name in sorted(files) for entry in files[name]]
         if not uploads:
             return api._response(400, {"error": "Upload at least one reference image"})
         if len(uploads) > 4:
@@ -220,6 +229,10 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         spec = body.get("spec")
         if not prompt and not spec:
             raise ValueError("Provide a design prompt or structured specification")
+        # B-L6: preflight uses FastAPI's CadGenerationRequest too, so the
+        # 12000-character prompt cap applies here as well.
+        if prompt is not None and len(str(prompt)) > 12000:
+            return api._response(422, {"error": "Design prompt is too long (maximum 12000 characters)"})
         try:
             result = core.cad_generation.preflight(spec=spec, prompt=prompt, printer_id=body.get("printer_id"))
         except CadGenerationError as exc:
@@ -239,6 +252,10 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         instruction = str(body.get("instruction") or "")
         if not instruction:
             raise ValueError("A revision instruction is required")
+        # B-L6: mirror FastAPI's CadRevisionRequest.instruction cap (8000,
+        # fabos_core/api.py); 422 matches FastAPI's pydantic behavior.
+        if len(instruction) > 8000:
+            return api._response(422, {"error": "Revision instruction is too long (maximum 8000 characters)"})
         try:
             result = core.cad_generation.revise(
                 job_id=job_id, instruction=instruction,
@@ -317,10 +334,17 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         # File uploads require an account; anonymous callers get a 401 from
         # _context, mirroring the FastAPI current_user dependency.
         api._context(headers)
+        # B-M5: enforce the "upload" public rate limiter (30/hr/IP, mirroring
+        # FastAPI's create_public_quote_request_with_file limiter) BEFORE the
+        # multipart body is buffered in memory.
+        from fabos_api.app import _rate_limit_client_ip
+        allowed, retry_after = api._allow_public_attempt("upload", _rate_limit_client_ip(headers))
+        if not allowed:
+            return api._response(429, {"error": "Too many upload requests. Try again later.", "retry_after": retry_after})
         fields, files = _parse_multipart_body(headers, raw_body)
         if "file" not in files:
             raise ValueError("A model file is required")
-        filename, file_bytes = files["file"]
+        filename, file_bytes = files["file"][0]
         from fabos_core.services.customer_api_writes import (
             ALLOWED_CUSTOM_UPLOAD_EXTENSIONS, MAX_CUSTOM_UPLOAD_BYTES,
             _create_public_quote, _public_quote, _validate_model_file,
@@ -338,6 +362,16 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         idea = str(fields.get("idea", "") or "").strip()
         if not name or not email or "@" not in email or not idea:
             raise ValueError("Name, a valid email, and a project idea are required")
+        # B-L8: mirror FastAPI's pydantic field length caps
+        # (customer_api_writes.py create_public_quote_request_with_file).
+        dimensions = str(fields.get("dimensions", "") or "")
+        material = str(fields.get("material", "") or "")
+        notes = str(fields.get("notes", "") or "")
+        for label, value, cap in (("name", name, 200), ("email", email, 320),
+                                 ("idea", idea, 4000), ("dimensions", dimensions, 1000),
+                                 ("material", material, 200), ("notes", notes, 4000)):
+            if len(value) > cap:
+                return api._response(400, {"error": "%s is too long (maximum %d characters)" % (label, cap)})
         try:
             quantity = int(fields.get("quantity", 1))
         except (TypeError, ValueError):
@@ -370,10 +404,10 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
                 })
             project = {
                 "idea": idea,
-                "dimensions": str(fields.get("dimensions", "") or ""),
-                "material": str(fields.get("material", "") or ""),
+                "dimensions": dimensions,
+                "material": material,
                 "quantity": quantity,
-                "notes": str(fields.get("notes", "") or ""),
+                "notes": notes,
             }
             project["notes"] = (project["notes"] or "").strip()
             project["notes"] += ("\n" if project["notes"] else "") + "File: " + filename
@@ -585,6 +619,18 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
                 bed = body.get("bed")
                 if hotend is None and bed is None:
                     return api._response(400, {"error": "Set a hotend or bed target."})
+                # B-M4: mirror FastAPI's PrinterPreheatRequest bounds
+                # (hotend 0-300, bed 0-130, admin_api.py) so WSGI cannot send
+                # unbounded M104/M140 temperatures to OctoPrint.
+                for label, value, upper in (("Hotend", hotend, 300), ("Bed", bed, 130)):
+                    if value is None:
+                        continue
+                    try:
+                        temp = float(value)
+                    except (TypeError, ValueError):
+                        return api._response(400, {"error": "%s temperature must be a number" % label})
+                    if not 0 <= temp <= upper:
+                        return api._response(400, {"error": "%s temperature must be between 0 and %d" % (label, upper)})
                 result = core.octoprint_print.preheat_together(printer, hotend, bed)
             elif action == "pause":
                 result = core.octoprint_print.pause(printer)
@@ -734,7 +780,9 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
     if route == ["api", v, "admin", "settings"] and method == "PUT":
         context = _admin(api, headers)
         key = str(body.get("key") or "")
-        value = str(body.get("value") or "")
+        # B-L7: check the key's presence, not its truthiness — {"value": 0}
+        # must be treated as 0, not "", so numeric settings can be zeroed.
+        value = str(body["value"]) if "value" in body else ""
         if not key:
             raise ValueError("key is required")
         protected_keys = {"console_lock_enabled", "console_idle_timeout_minutes", "console_local_only"}
@@ -1026,7 +1074,7 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         fields, files = _parse_multipart_body(headers, raw_body)
         if "file" not in files:
             raise ValueError("A proof file is required")
-        filename, file_bytes = files["file"]
+        filename, file_bytes = files["file"][0]
         from fabos_core.services.design_proofs_api import ALLOWED_PROOF_EXTENSIONS, MAX_PROOF_UPLOAD_BYTES
         filename = Path(filename or "").name
         extension = Path(filename).suffix.lower()
