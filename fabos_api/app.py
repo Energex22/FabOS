@@ -596,6 +596,9 @@ class FabOSAPI:
                 file_bytes = None
                 file_base64 = body.get("file_base64") or ""
                 if file_base64:
+                    # Uploads require an account; the text-only quote form
+                    # stays public. Raises 401 when no valid session is sent.
+                    self._context(headers)
                     try:
                         file_bytes = base64.b64decode(file_base64, validate=True)
                     except (ValueError, binascii.Error) as exc:

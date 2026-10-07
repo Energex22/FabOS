@@ -28,3 +28,7 @@ Thumbs.db
 .idea/
 
 deployment/windows/server.env
+
+# local build artifacts
+build/
+*.egg-info/
