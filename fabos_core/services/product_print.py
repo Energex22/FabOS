@@ -94,7 +94,20 @@ class ProductPrintService:
     members=[x for x in z.namelist() if Path(x).suffix.lower() in ('.stl','.3mf') and not x.endswith('/')]
     if not members:raise ValueError('Downloaded ZIP did not contain an STL or 3MF file.')
     member=members[0];out=folder/Path(member).name
-    out.write_bytes(z.read(member));target=out
+    # Zip-bomb guard: stream the member with a hard cap on decompressed bytes
+    # instead of inflating it all at once via z.read().
+    max_decompressed=500*1024*1024;total=0
+    with z.open(member) as src,open(out,'wb') as dst:
+     while True:
+      chunk=src.read(1024*1024)
+      if not chunk:break
+      total+=len(chunk)
+      if total>max_decompressed:
+       try:out.unlink()
+       except OSError:pass
+       raise ValueError('Downloaded ZIP member exceeds the 500 MB decompressed size limit.')
+      dst.write(chunk)
+    target=out
   self.vault.import_file(did,target)
   asset=self.vault.primary_model_asset(did)
   return Path(asset['stored_path']),'downloaded'

@@ -1,5 +1,6 @@
 """HTTP endpoints for provider callbacks and internal physical payments."""
 import json
+import sqlite3
 
 from fabos_core.services.payments import PaymentProviderError, PaymentProviderNotConfigured
 from fabos_core.services.admin_api import register_admin_routes
@@ -89,6 +90,29 @@ def _record_refund(application, provider_name, payload):
         refund_amount = amount_cents
         if refund_amount <= 0:
             return {"recorded": False, "duplicate": False, "reason": "refund_exceeds_recorded_payment"}
+
+        # Claim the refund before recording so two concurrent deliveries cannot
+        # both pass the reference check above and double-insert the ledger row.
+        # The claim is keyed on refund_reference (the true idempotency key: the
+        # same refund can arrive as different events, e.g. refund.created and
+        # refund.updated, with different event_ids), and shares this transaction
+        # with the ledger INSERT, so the loser sees the winner's claim (PRIMARY
+        # KEY on payment_webhook_events.id) and is treated as a duplicate.
+        # Note: this intentionally does NOT claim on the early-return paths
+        # above — if the FabOS payment transaction is not visible yet, a
+        # legitimate provider retry must remain able to reconcile later.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS payment_webhook_events(
+                id TEXT PRIMARY KEY,provider TEXT NOT NULL,event_type TEXT,
+                payment_id TEXT,received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"""
+        )
+        try:
+            conn.execute(
+                "INSERT INTO payment_webhook_events(id,provider,event_type,payment_id) VALUES(?,?,?,?)",
+                (f"refund-claim:{refund_reference}", provider_name, event_type, transaction["id"]),
+            )
+        except sqlite3.IntegrityError:
+            return {"recorded": False, "duplicate": True, "reference": refund_reference}
 
         conn.execute(
             "INSERT INTO payments(id,invoice_id,amount_cents,method,reference,notes) VALUES(?,?,?,?,?,?)",

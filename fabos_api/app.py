@@ -28,6 +28,26 @@ def _mapping(value):
         return None
 
 
+_LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _rate_limit_client_ip(headers):
+    """Resolve the client IP used to key rate limits.
+
+    X-Forwarded-For is client-controlled, so it is only trusted when the
+    direct TCP peer is loopback — i.e. a local reverse proxy such as Caddy
+    (the supported production deployment) set the header. Otherwise the
+    direct peer address is used, so rotating X-Forwarded-For cannot be used
+    to bypass rate limits.
+    """
+    headers = headers or {}
+    direct = str(headers.get("X-Direct-Peer") or "").strip()
+    forwarded = str(headers.get("X-Forwarded-For") or "").strip()
+    if forwarded and direct in _LOOPBACK_PEERS:
+        return forwarded.split(",")[0].strip() or direct or "unknown"
+    return direct or "unknown"
+
+
 def _parse_multipart(body_bytes, content_type):
     """Parse a multipart/form-data body with the stdlib email parser.
 
@@ -323,7 +343,7 @@ class FabOSAPI:
                 })
 
             if route == ["api", self.VERSION, "auth", "login"] and method == "POST":
-                client_ip = (headers or {}).get("X-Forwarded-For", "")
+                client_ip = _rate_limit_client_ip(headers)
                 if not self._allow_auth_attempt(client_ip):
                     return self._response(429, {"error": "Too many sign-in attempts. Please try again later."})
                 result = self.core.auth.login(body.get("identifier", ""), body.get("password", ""),
@@ -339,7 +359,7 @@ class FabOSAPI:
                 return self._response(401, {"error": "Invalid email/username or password"})
 
             if route == ["api", self.VERSION, "auth", "team-login"] and method == "POST":
-                allowed, retry_after = self._allow_public_attempt("team_login", (headers or {}).get("X-Forwarded-For", ""))
+                allowed, retry_after = self._allow_public_attempt("team_login", _rate_limit_client_ip(headers))
                 if not allowed:
                     return self._response(429, {"error": "Too many team sign-in attempts. Please try again later.", "retry_after": retry_after})
                 result = self.core.auth.login(body.get("identifier", ""), body.get("password", ""))
@@ -528,8 +548,11 @@ class FabOSAPI:
                 context = self._context(headers)
                 if context.get("account_type") != "customer":
                     raise PermissionError("Customer account required")
+                comment = str((body or {}).get("comment") or "")
+                if len(comment) > 4000:
+                    raise ValueError("Comment must be at most 4000 characters.")
                 try:
-                    proof = self.core.design_proofs.approve(context["id"], route[4], str((body or {}).get("comment") or ""))
+                    proof = self.core.design_proofs.approve(context["id"], route[4], comment)
                 except KeyError:
                     return self._response(404, {"error": "Design proof not found."})
                 except ValueError as exc:
@@ -540,8 +563,11 @@ class FabOSAPI:
                 context = self._context(headers)
                 if context.get("account_type") != "customer":
                     raise PermissionError("Customer account required")
+                comment = str((body or {}).get("comment") or "")
+                if len(comment) > 4000:
+                    raise ValueError("Comment must be at most 4000 characters.")
                 try:
-                    proof = self.core.design_proofs.request_changes(context["id"], route[4], str((body or {}).get("comment") or ""))
+                    proof = self.core.design_proofs.request_changes(context["id"], route[4], comment)
                 except KeyError:
                     return self._response(404, {"error": "Design proof not found."})
                 except ValueError as exc:
@@ -581,7 +607,7 @@ class FabOSAPI:
                 }
 
             if route == ["api", self.VERSION, "auth", "register"] and method == "POST":
-                allowed, retry_after = self._allow_public_attempt("register", (headers or {}).get("X-Forwarded-For", ""))
+                allowed, retry_after = self._allow_public_attempt("register", _rate_limit_client_ip(headers))
                 if not allowed:
                     return self._response(429, {"error": "Too many registration attempts. Please try again later.", "retry_after": retry_after})
                 result = self.core.customer_commerce.register_customer(
@@ -590,7 +616,7 @@ class FabOSAPI:
                 return self._response(201, result)
 
             if route == ["api", self.VERSION, "quote-requests"] and method == "POST":
-                allowed, retry_after = self._allow_public_attempt("quote", (headers or {}).get("X-Forwarded-For", ""))
+                allowed, retry_after = self._allow_public_attempt("quote", _rate_limit_client_ip(headers))
                 if not allowed:
                     return self._response(429, {"error": "Too many quote requests. Please try again later.", "retry_after": retry_after})
                 file_bytes = None
@@ -752,7 +778,8 @@ def create_wsgi_app(core):
         except (ValueError, UnicodeDecodeError):
             body = {}
         headers = {"Authorization": environ.get("HTTP_AUTHORIZATION", ""), "User-Agent": environ.get("HTTP_USER_AGENT", ""),
-                   "X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR") or environ.get("REMOTE_ADDR", ""),
+                   "X-Forwarded-For": environ.get("HTTP_X_FORWARDED_FOR", ""),
+                   "X-Direct-Peer": environ.get("REMOTE_ADDR", ""),
                    "Content-Type": environ.get("CONTENT_TYPE", ""),
                    "Stripe-Signature": environ.get("HTTP_STRIPE_SIGNATURE", ""),
                    "X-Square-Hmacsha256-Signature": environ.get("HTTP_X_SQUARE_HMACSHA256_SIGNATURE", "")}

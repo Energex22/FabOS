@@ -90,6 +90,27 @@ def _payment_payload(payment: Any) -> Dict[str, Any]:
     return _pick(payment, ("status", "checkout_url"))
 
 
+_REFERENCE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
+
+
+def _sniff_reference_image_type(raw: bytes) -> Optional[str]:
+    """Detect a reference image's true type from magic bytes.
+
+    The client-supplied Content-Type header is not trustworthy; a non-image
+    with a spoofed header must not be base64-embedded and sent to the AI
+    service. Returns the canonical MIME type or None if unrecognized.
+    """
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if raw[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 def _public_product(row: Any, application: FabOSApplication, storefront: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     raw = _json(row) or {}
     item = _pick(raw, ("id", "sku", "name", "description", "category", "subcategory", "active"))
@@ -407,12 +428,17 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         images = []
         for uploaded in files:
             content_type = str(uploaded.content_type or "").lower()
-            if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+            if content_type not in _REFERENCE_IMAGE_TYPES:
                 raise HTTPException(status_code=400, detail="Only PNG, JPEG, and WebP reference images are supported")
             raw = await uploaded.read(5 * 1024 * 1024 + 1)
             if len(raw) > 5 * 1024 * 1024:
                 raise HTTPException(status_code=400, detail="Each reference image must be 5 MB or smaller")
-            images.append("data:%s;base64,%s" % (content_type, base64.b64encode(raw).decode("ascii")))
+            # Never trust the client-supplied Content-Type: verify the magic
+            # bytes and embed the sniffed type, not the claimed one.
+            actual_type = _sniff_reference_image_type(raw)
+            if actual_type != content_type:
+                raise HTTPException(status_code=400, detail="Uploaded file is not a valid %s image" % content_type.split("/", 1)[1].upper())
+            images.append("data:%s;base64,%s" % (actual_type, base64.b64encode(raw).decode("ascii")))
         try:
             result = application.ai.design_spec_from_images(images, reference_note=reference_note)
             metadata = result.get("metadata") or {}
