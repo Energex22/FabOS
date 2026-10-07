@@ -1,6 +1,9 @@
 from __future__ import absolute_import
 
 import json
+import os
+import shutil
+import tempfile
 import unittest
 import uuid
 
@@ -8,6 +11,33 @@ from fabos_core.application import FabOSApplication
 
 
 class ProductionAutomationTests(unittest.TestCase):
+    def setUp(self):
+        # Each test gets a fresh, isolated on-disk database. Without this,
+        # every FabOSApplication() constructed in this file shares the same
+        # database (~/WireVault FabOS Data/fabos.sqlite3, unless FABOS_DATA_DIR
+        # is set), so fixture spools/jobs and shop settings leak between
+        # tests -- and between runs. That cross-test pollution is the root
+        # cause of the 6 pre-existing failures in this file:
+        #  - test_automation_settings_are_validated permanently flips
+        #    production_auto_start to "true", breaking
+        #    test_application_wires_automation_without_starting_worker
+        #    on every subsequent run.
+        #  - the leftover "automation-test-spool" (PLA) from
+        #    test_completed_job_consumes_assigned_filament_once is picked up
+        #    by _choose_spool in the spool-selection tests, which then select
+        #    the wrong spool (or a spool at all when they expect None).
+        self._fabos_data_dir = tempfile.mkdtemp(prefix="fabos-test-")
+        self._previous_data_dir = os.environ.get("FABOS_DATA_DIR")
+        os.environ["FABOS_DATA_DIR"] = self._fabos_data_dir
+        self.addCleanup(self._restore_data_dir)
+
+    def _restore_data_dir(self):
+        if self._previous_data_dir is None:
+            os.environ.pop("FABOS_DATA_DIR", None)
+        else:
+            os.environ["FABOS_DATA_DIR"] = self._previous_data_dir
+        shutil.rmtree(self._fabos_data_dir, ignore_errors=True)
+
     @staticmethod
     def _cleanup_print_job_fixture(conn, job_id, spool_id):
         # The production schema has multiple print-job dependents. Discover them
@@ -477,6 +507,11 @@ class ProductionAutomationTests(unittest.TestCase):
         from unittest.mock import patch
 
         app = FabOSApplication()
+        # _start_job is gated on the production_auto_start shop setting
+        # (default "false"). Previously this test only passed because an
+        # earlier test leaked production_auto_start="true" into the shared
+        # database; with per-test isolation the precondition must be explicit.
+        app.shop_settings.set_validated("production_auto_start", "true")
         job_id = str(uuid.uuid4())
         printer_id = str(uuid.uuid4())
         try:
@@ -527,6 +562,10 @@ class ProductionAutomationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 app.shop_settings.set_validated("production_automation_interval_seconds", "-1")
         finally:
+            try:
+                app.shop_settings.set_validated("production_auto_start", "false")
+            except Exception:
+                pass
             close = getattr(app, "close", None)
             if callable(close):
                 close()
