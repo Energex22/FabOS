@@ -6,6 +6,30 @@ cents so checkout can use the same values when an order is created later.
 """
 
 
+def calculated_shipping_cents(base_cents, per_kg_cents, weight_kg):
+    """Shared calculated-shipping math for every storefront order path.
+
+    Both CommercePricingService (estimate + /api/v1/checkout/order) and
+    CustomerCommerceService.create_order (/api/v1/customer/orders) use this
+    helper so the displayed estimate and every charged total always agree to
+    the cent: the configured base is truncated to whole cents, the per-kg
+    rate is kept unrounded, and the total is rounded exactly once.
+    """
+    try:
+        base = int(float(base_cents or 0))
+    except (TypeError, ValueError):
+        base = 0
+    try:
+        per_kg = float(per_kg_cents or 0)
+    except (TypeError, ValueError):
+        per_kg = 0.0
+    try:
+        weight = max(0.0, float(weight_kg or 0))
+    except (TypeError, ValueError):
+        weight = 0.0
+    return int(round(base + per_kg * weight))
+
+
 class CommercePricingService:
     def __init__(self, products, shop_settings):
         self.products = products
@@ -35,14 +59,15 @@ class CommercePricingService:
         if mode == "flat":
             return self._money(self.shop_settings.get("shipping_flat_cents", "0"))
         if mode == "calculated":
-            base = self._money(self.shop_settings.get("shipping_calculated_base_cents", "0"))
-            per_kg = self._money(self.shop_settings.get("shipping_calculated_per_kg_cents", "0"))
             try:
                 weight = max(0.0, float(weight_g or 0))
             except (TypeError, ValueError):
                 weight = 0.0
-            kilograms = weight / 1000.0
-            return base + self._money(kilograms * per_kg)
+            return calculated_shipping_cents(
+                self.shop_settings.get("shipping_calculated_base_cents", "0"),
+                self.shop_settings.get("shipping_calculated_per_kg_cents", "0"),
+                weight / 1000.0,
+            )
         raise ValueError("Unsupported shipping mode")
 
     def estimate(self, items, shipping_mode=None, shipping_weight_g=0):

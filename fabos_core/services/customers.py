@@ -69,6 +69,15 @@ class CustomerService:
         return self.get(customer_id)
 
     def save(self, data, customer_id=None):
+        data = dict(data or {})
+        if customer_id:
+            # Partial updates (e.g. PATCH /api/v1/customer/me with only an
+            # email or phone) merge with the stored row instead of failing on
+            # the required name. New customers still require a name below.
+            existing = self.get(customer_id)
+            for key in ("name", "email", "phone", "notes"):
+                if key not in data:
+                    data[key] = existing[key]
         name = (data.get("name") or "").strip()
         if not name:
             raise ValueError("Customer name is required.")

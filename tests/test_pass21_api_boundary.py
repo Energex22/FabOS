@@ -90,7 +90,10 @@ class Pass21APIBoundaryTests(unittest.TestCase):
         self.assertEqual(login["status"], 200)
         me = self.api.request("GET", "/api/v1/me", headers={"Authorization": "Bearer good-token"})
         self.assertEqual(me["status"], 200)
-        self.assertEqual(me["data"]["user"]["user"]["id"], "u1")
+        # M3: the profile is returned directly, not wrapped in another "user"
+        # key, and projected to the customer-safe shape.
+        self.assertNotIn("user", me["data"]["user"])
+        self.assertEqual(me["data"], {"user": {}, "customer": None})
 
     def test_unauthenticated_protected_route_is_rejected(self):
         result = self.api.request("GET", "/api/v1/orders")

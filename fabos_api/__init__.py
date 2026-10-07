@@ -33,7 +33,16 @@ def _api_request(self, method, path, body=None, headers=None, raw_body=None):
                 self.core.database, self.core.accounts, self.core.auth, getattr(self.core, "shop_settings", None)
             )
             result = service.register(body.get("name"), body.get("email"), body.get("password"), body.get("phone", ""))
-            return self._response(201, result)
+            # Project the raw auth result into the FastAPI register shape
+            # ({"token","expires_at","user":{"name","email"},"customer":{...}});
+            # never expose the nested account summary rows.
+            return self._response(201, self._project_auth_response(result))
+        except ValueError as exc:
+            # Includes the racy duplicate-registration IntegrityError, which
+            # the service converts to a duplicate-email ValueError.
+            if "already exists" in str(exc):
+                return self._response(409, {"error": str(exc)})
+            return self._error(exc)
         except Exception as exc:
             return self._error(exc)
 
@@ -53,7 +62,11 @@ def _api_request(self, method, path, body=None, headers=None, raw_body=None):
             if context.get("account_type") != "customer":
                 raise PermissionError("Customer account required")
             service = CommercePricingService(self.core.products, self.core.shop_settings)
-            return self._response(200, service.estimate(body.get("items"), _server_shipping_mode(self.core), body.get("shipping_weight_g", 0)))
+            # Shipping weight is always recomputed server-side from the
+            # catalog items; a client-supplied weight must never influence
+            # the estimate (it only ever affected the displayed number, but
+            # ignoring it removes the divergence entirely).
+            return self._response(200, service.estimate(body.get("items"), _server_shipping_mode(self.core)))
         except Exception as exc:
             return self._error(exc)
 

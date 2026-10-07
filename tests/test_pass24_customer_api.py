@@ -49,7 +49,9 @@ class Pass24CustomerAPITests(unittest.TestCase):
         )
         self.assertEqual(profile["status"], 200)
         self.assertEqual(profile["data"]["customer"]["email"], "api@example.com")
-        self.assertEqual(profile["data"]["user"]["account_type"], "customer")
+        # M2/L10: the profile matches the FastAPI /customer/me shape; the
+        # display name comes from the customer profile.
+        self.assertEqual(profile["data"]["user"], {"name": "Test Customer", "email": "api@example.com"})
 
     def test_invalid_session_cannot_use_customer_profile_route(self):
         result = self.api.request(

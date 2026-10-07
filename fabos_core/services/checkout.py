@@ -4,6 +4,7 @@ import uuid
 from datetime import date, timedelta
 
 from fabos_core.services.commerce_pricing import CommercePricingService
+from fabos_core.services.quotes import ensure_quote_audit_schema
 
 
 class CheckoutService:
@@ -97,6 +98,7 @@ class CheckoutService:
             # BEGIN IMMEDIATE serializes the order-number sequence so concurrent
             # checkouts cannot mint the same order number (mirrors
             # CustomerCommerceService.create_order).
+            ensure_quote_audit_schema(self.database)
             conn.execute("BEGIN IMMEDIATE")
             prefix = "O-" + date.today().strftime("%Y%m") + "-"
             row = conn.execute(
@@ -114,18 +116,40 @@ class CheckoutService:
             qseq = int(qrow[0].split("-")[-1]) + 1 if qrow else 1
             quote_number = quote_number_prefix + ("%04d" % qseq)
             order_number = prefix + ("%04d" % seq)
+            quote_expires_at = (date.today() + timedelta(days=14)).isoformat()
             conn.execute(
                 "INSERT INTO quotes(id,quote_number,customer_id,status,total_cents,expires_at,notes) VALUES(?,?,?,?,?,?,?)",
                 (quote_id, quote_number, customer["id"], "approved", total_cents,
-                 (date.today() + timedelta(days=14)).isoformat(), notes or ""),
+                 quote_expires_at, notes or ""),
             )
             for item in clean_items:
+                quote_item_id = str(uuid.uuid4())
                 conn.execute(
                     "INSERT INTO quote_items(id,quote_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), quote_id, item["product_id"], item["variant_id"], item["description"], item["quantity"],
+                    (quote_item_id, quote_id, item["product_id"], item["variant_id"], item["description"], item["quantity"],
                      item["unit_price_cents"], item["material"], item["color"], item["estimated_minutes"],
                      item["estimated_filament_g"]),
                 )
+                # Audit trail: mirror QuoteService.save so checkout-created
+                # quotes carry the same price snapshots and version history
+                # as quotes created through the quote workflow.
+                conn.execute(
+                    "INSERT INTO quote_price_snapshots(id,quote_id,quote_item_id,unit_price_cents,pricing_mode,calculation_json) VALUES(?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), quote_id, quote_item_id, int(item["unit_price_cents"] or 0), "manual", None),
+                )
+            snapshot = {
+                "customer_id": customer["id"],
+                "status": "approved",
+                "total_cents": total_cents,
+                "expires_at": quote_expires_at,
+                "notes": notes or "",
+                "items": [dict(item) for item in clean_items],
+            }
+            conn.execute(
+                "INSERT INTO quote_versions(id,quote_id,version,status,total_cents,expires_at,notes,snapshot_json) VALUES(?,?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), quote_id, 1, "approved", total_cents, quote_expires_at,
+                 notes or "", json.dumps(snapshot, sort_keys=True, default=str)),
+            )
             conn.execute(
                 "INSERT INTO orders(id,order_number,customer_id,quote_id,status,due_at,total_cents,tax_cents,shipping_cents,shipping_address_json,checkout_notes,checkout_channel) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (order_id, order_number, customer["id"], quote_id, "pending",

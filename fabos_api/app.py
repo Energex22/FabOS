@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fabos_core.services.rate_limit import RateLimiter
+from fabos_api.wsgi_extended import handle_extended_routes
 from urllib.parse import parse_qs, urlsplit
 
 
@@ -29,6 +30,18 @@ def _mapping(value):
 
 
 _LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+# Friendly customer-facing order statuses. Mirrors CUSTOMER_STATUS in
+# fabos_core/api.py; kept as a local copy so the WSGI layer does not import
+# the FastAPI application module (which would pull fastapi into WSGI-only
+# deployments).
+_CUSTOMER_STATUS = {
+    "new": "Order received", "pending": "Order received", "confirmed": "Order received",
+    "in_production": "Preparing your order", "production": "Preparing your order",
+    "ready": "Final quality check", "shipped": "Shipping", "completed": "Delivered",
+    "cancelled": "Cancelled",
+}
 
 
 def _rate_limit_client_ip(headers):
@@ -144,6 +157,11 @@ class FabOSAPI:
 
     @classmethod
     def _jsonable(cls, value):
+        # Mirror FastAPI's _json (fabos_core/api.py): primitives pass through
+        # untouched. Without this, _row() turns every empty string into {}
+        # because dict('') succeeds and returns an empty dict.
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
         if isinstance(value, dict):
             return {str(k): cls._jsonable(v) for k, v in value.items()}
         if isinstance(value, (list, tuple)):
@@ -213,69 +231,114 @@ class FabOSAPI:
             pass
         return self._response(500, {"error": "Internal server error"})
 
-    # Fields a customer is allowed to see about themselves. Staff/internal fields
-    # (e.g. customer notes, employee profiles) are never projected here.
-    _CUSTOMER_SAFE_USER_FIELDS = ("id", "username", "email", "role", "account_type", "active", "created_at")
-    _CUSTOMER_SAFE_CUSTOMER_FIELDS = ("id", "name", "email", "phone", "created_at")
+    @classmethod
+    def _auth_user_payload(cls, summary):
+        """Project the login identity, mirroring FastAPI's _user_payload.
+
+        The users table has no name column, so the display name is sourced
+        from the linked customer profile when one is available.
+        """
+        data = summary if isinstance(summary, dict) else {}
+        user = data.get("user") or {}
+        customer = data.get("customer")
+        urow = dict(user) if not isinstance(user, dict) else user
+        payload = {}
+        if customer:
+            crow = dict(customer) if not isinstance(customer, dict) else customer
+            name = str(crow.get("name") or "").strip()
+            if name:
+                payload["name"] = name
+        if "email" in urow:
+            payload["email"] = urow.get("email")
+        return payload
+
+    @classmethod
+    def _auth_customer_payload(cls, summary):
+        """Project the customer identity, mirroring FastAPI's _customer_payload."""
+        data = summary if isinstance(summary, dict) else {}
+        customer = data.get("customer")
+        if not customer:
+            return None
+        crow = dict(customer) if not isinstance(customer, dict) else customer
+        return {key: crow[key] for key in ("name", "email", "phone") if key in crow}
 
     @classmethod
     def _customer_safe_profile(cls, summary):
         """Project an account summary into customer-safe fields.
 
-        Mirrors the FastAPI-side _user_payload/_customer_payload projection so the
-        WSGI routes never leak staff notes or internal profile rows.
+        Mirrors the FastAPI /api/v1/customer/me shape
+        ({"user": {"name","email"}, "customer": {"name","email","phone"}}) so
+        the WSGI routes never leak staff notes or internal profile rows.
         """
-        data = cls._row(summary) if not isinstance(summary, dict) else summary
-        profile = {}
-        user = (data or {}).get("user")
-        customer = (data or {}).get("customer")
-        if user is not None:
-            row = dict(user) if not isinstance(user, dict) else user
-            profile["user"] = {key: row.get(key) for key in cls._CUSTOMER_SAFE_USER_FIELDS if key in row}
-        if customer is not None:
-            row = dict(customer) if not isinstance(customer, dict) else customer
-            profile["customer"] = {key: row.get(key) for key in cls._CUSTOMER_SAFE_CUSTOMER_FIELDS if key in row}
-        return profile
+        return {
+            "user": cls._auth_user_payload(summary),
+            "customer": cls._auth_customer_payload(summary),
+        }
 
-    @staticmethod
-    def _public_product(row):
+    @classmethod
+    def _project_auth_response(cls, result, include_customer=True):
+        """Project a raw auth.login() result into the FastAPI auth shape.
+
+        login/register return {"token","expires_at","user":...,"customer":...};
+        pass include_customer=False for team-login, whose user projection is
+        {"name","email","account_type","role"} with no customer block.
+        """
+        summary = (result or {}).get("user") or {}
+        user = summary.get("user") or {}
+        urow = dict(user) if not isinstance(user, dict) else user
+        if include_customer:
+            projected_user = cls._auth_user_payload(summary)
+        else:
+            projected_user = {key: urow[key] for key in ("name", "email", "account_type", "role") if key in urow}
+        payload = {
+            "token": (result or {}).get("token"),
+            "expires_at": (result or {}).get("expires_at"),
+            "user": projected_user,
+        }
+        if include_customer:
+            payload["customer"] = cls._auth_customer_payload(summary)
+        return payload
+
+    def _public_product(self, row, storefront=None):
+        """Project a product row for the customer catalog.
+
+        Mirrors fabos_core.api._public_product exactly: picked base fields,
+        storefront title/description overrides, image URLs served by the
+        /api/v1/catalog/{id}/images/{iid} route, projected variants, and
+        storefront metadata.
+        """
         if row is None:
             return None
         data = dict(row)
-        return {
-            "id": data.get("id"),
-            "sku": data.get("sku"),
-            "name": data.get("name"),
-            "category": data.get("category") or "Other",
-            "description": data.get("description") or "",
-            "designer": data.get("designer") or "",
-            "source_url": data.get("source_url") or "",
-            "license_name": data.get("license_name") or "",
-            "license_status": data.get("license_status") or "",
-            "price": round(float(data.get("price_cents") or 0) / 100.0, 2),
-            "estimated_minutes": data.get("estimated_minutes") or 0,
-            "estimated_filament_g": data.get("estimated_filament_g") or 0,
-        }
-
-    @staticmethod
-    def _public_images(rows):
-        public = []
-        for row in rows:
-            item = dict(row)
-            raw = str(item.get("path") or "").strip()
-            if raw.startswith(("http://", "https://", "/")):
-                url = raw
-            else:
-                continue
-            # Project only customer-safe fields; never expose the server-local
-            # filesystem path stored on the image row.
-            public.append({
-                "id": item.get("id"),
-                "url": url,
-                "is_primary": bool(item.get("is_primary")),
-                "alt_text": item.get("alt_text"),
+        item = {key: data[key] for key in ("id", "sku", "name", "description", "category", "subcategory", "active") if key in data}
+        item["price"] = round(int(data.get("price_cents") or 0) / 100, 2)
+        if storefront:
+            if storefront.get("customer_title"):
+                item["name"] = storefront["customer_title"]
+            if storefront.get("customer_description"):
+                item["description"] = storefront["customer_description"]
+        product_id = data.get("id")
+        images = []
+        for image in (self.core.products.images(product_id) or []):
+            # Tolerate a missing alt_text column on older databases instead
+            # of raising on products with images (mirrors fabos_core.api).
+            img = dict(image) if not isinstance(image, dict) else image
+            images.append({
+                "id": img.get("id"),
+                "url": "/api/%s/catalog/%s/images/%s" % (self.VERSION, product_id, img.get("id")),
+                "is_primary": bool(img.get("is_primary")),
+                "alt_text": img.get("alt_text"),
             })
-        return public
+        item["images"] = images
+        item["variants"] = [
+            {key: variant[key] for key in ("id", "name", "material", "color", "price_cents", "active") if key in variant}
+            for variant in [dict(candidate) for candidate in (self.core.products.variants(product_id) or [])]
+        ]
+        item["storefront"] = {
+            "origin": storefront.get("origin_type", "catalog_import") if storefront else "catalog_import",
+            "model_file_count": storefront.get("model_file_count", 0) if storefront else 0,
+        }
+        return item
 
     def _operations_dashboard(self, user):
         from datetime import datetime, timedelta
@@ -325,7 +388,7 @@ class FabOSAPI:
                     query.get("sort", ["name"])[0],
                     query.get("desc", ["0"])[0] not in ("0", "false", "no"),
                 )
-                return self._response(200, {"products": [{**self._public_product(row), "images": self._public_images(self.core.products.images(row["id"]))} for row, _readiness in rows]})
+                return self._response(200, {"products": [self._public_product(row, storefront) for row, storefront in rows]})
 
             if route == ["api", self.VERSION, "catalog", "categories"] and method == "GET":
                 rows = self.core.products.customer_catalog()
@@ -336,11 +399,68 @@ class FabOSAPI:
                 product = self.core.products.get(route[3])
                 if product is None or not self.core.products.is_customer_eligible(route[3]):
                     raise KeyError("Product not found")
-                return self._response(200, {
-                    "product": self._public_product(product),
-                    "images": self._public_images(self.core.products.images(route[3])),
-                    "variants": [dict(row) for row in self.core.products.variants(route[3])],
-                })
+                return self._response(200, self._public_product(product, self.core.products.storefront_state(route[3])))
+
+            if len(route) == 6 and route[:3] == ["api", self.VERSION, "catalog"] and route[4] == "images" and method == "GET":
+                # File-serving route mirroring fabos_core.api:catalog_product_image,
+                # with the same traversal guard: the resolved file must stay
+                # inside the project root or the configured data directory.
+                product_id, image_id = route[3], route[5]
+                product = self.core.products.get(product_id)
+                if product is None or not self.core.products.is_customer_eligible(product_id):
+                    raise KeyError("Product not found")
+                with self.core.database.connect() as conn:
+                    image = conn.execute(
+                        "SELECT path FROM product_images WHERE id=? AND product_id=?",
+                        (image_id, product_id),
+                    ).fetchone()
+                if not image:
+                    raise KeyError("Image not found")
+                raw = str(image["path"] or "").replace("\\", "/").strip()
+                if not raw or raw.lower().startswith(("http://", "https://", "data:")):
+                    raise KeyError("Image file not available")
+                project_root = Path(__file__).resolve().parents[1]
+                settings = getattr(self.core, "settings", None)
+                data_dir = getattr(settings, "data_dir", None) if settings else None
+                candidates = []
+                path = Path(raw)
+                if path.is_absolute():
+                    candidates.append(path)
+                else:
+                    candidates.append(project_root / raw)
+                    candidates.append(project_root / "data" / raw)
+                    if data_dir:
+                        candidates.append(Path(str(data_dir)) / raw)
+                    if raw.startswith("Catalog_Images/"):
+                        candidates.append(project_root / "data" / "catalog" / raw)
+                allowed_roots = [project_root.resolve()]
+                if data_dir:
+                    allowed_roots.append(Path(str(data_dir)).resolve())
+                target = None
+                for candidate in candidates:
+                    try:
+                        resolved = candidate.resolve()
+                        if not resolved.is_file():
+                            continue
+                        if not any(os.path.commonpath([str(resolved), str(root)]) == str(root) for root in allowed_roots):
+                            continue
+                        target = resolved
+                        break
+                    except (OSError, ValueError):
+                        continue
+                if target is None:
+                    raise KeyError("Image file not available")
+                # Binary escape hatch: served inline (not as an attachment) so
+                # <img> tags and the storefront can render it directly.
+                return {
+                    "status": 200,
+                    "data": {"_wsgi_file": {
+                        "bytes": target.read_bytes(),
+                        "filename": target.name,
+                        "content_type": mimetypes.guess_type(target.name)[0] or "application/octet-stream",
+                        "disposition": "inline",
+                    }},
+                }
 
             if route == ["api", self.VERSION, "auth", "login"] and method == "POST":
                 client_ip = _rate_limit_client_ip(headers)
@@ -355,7 +475,7 @@ class FabOSAPI:
                         self.core.auth.logout(result.get("token", ""))
                         return self._response(401, {"error": "This sign-in is not available through the customer storefront."})
                     self._clear_auth_attempts(client_ip)
-                    return self._response(200, result)
+                    return self._response(200, self._project_auth_response(result))
                 return self._response(401, {"error": "Invalid email/username or password"})
 
             if route == ["api", self.VERSION, "auth", "team-login"] and method == "POST":
@@ -369,17 +489,19 @@ class FabOSAPI:
                 if str(account.get("account_type") or "").lower() not in {"employee", "administrator"}:
                     self.core.auth.logout(result.get("token", ""))
                     return self._response(403, {"error": "A team or administrator account is required"})
-                return self._response(200, result)
+                return self._response(200, self._project_auth_response(result, include_customer=False))
 
             if route == ["api", self.VERSION, "auth", "logout"] and method == "POST":
+                # Idempotent like the FastAPI route: logging out without a
+                # token (or with an already-dead one) still reports success.
                 token = self._auth_token(headers)
-                if not token:
-                    raise PermissionError("Authentication required")
-                return self._response(200, {"logged_out": bool(self.core.auth.logout(token))})
+                if token:
+                    self.core.auth.logout(token)
+                return self._response(200, {"logged_out": True})
 
             if route == ["api", self.VERSION, "me"] and method == "GET":
                 context = self._context(headers)
-                return self._response(200, {"user": self._customer_safe_profile(self.core.accounts.account_summary(context["id"]))})
+                return self._response(200, self._customer_safe_profile(self.core.accounts.account_summary(context["id"])))
 
             if route == ["api", self.VERSION, "customer", "me"] and method == "GET":
                 context = self._context(headers)
@@ -391,7 +513,22 @@ class FabOSAPI:
                 if not customer:
                     raise PermissionError("Customer account is not linked")
                 allowed = {"name", "email", "phone"}
-                payload = {key: body.get(key) for key in allowed if key in body}
+                payload = {key: body.get(key) for key in allowed if key in body and body.get(key) is not None}
+                if "email" in payload:
+                    # Mirror the FastAPI update_me validation: malformed
+                    # emails are a 400, duplicates are a 409, and the login
+                    # identifier in users stays in sync with the profile.
+                    email = str(payload["email"] or "").strip().lower()
+                    if not email or "@" not in email:
+                        raise ValueError("A valid email is required")
+                    existing = self.core.accounts.get_by_email(email)
+                    if existing and str(existing["id"]) != str(context["id"]):
+                        return self._response(409, {"error": "An account with that email already exists"})
+                    payload["email"] = email
+                    try:
+                        self.core.accounts.update_account(context["id"], email=email)
+                    except ValueError as exc:
+                        return self._response(409, {"error": str(exc)})
                 if payload:
                     self.core.customers.save(payload, customer["id"])
                 return self._response(200, self._customer_safe_profile(self.core.accounts.account_summary(context["id"])))
@@ -470,17 +607,33 @@ class FabOSAPI:
 
             if route == ["api", self.VERSION, "customer", "orders"] and method == "GET":
                 context = self._context(headers)
-                return self._response(200, {"orders": self.core.orders.list_for_user(context["id"])})
+                orders = []
+                for row in self.core.orders.list_for_user(context["id"]):
+                    data = dict(row)
+                    data["status"] = _CUSTOMER_STATUS.get(str(data.get("status") or "new").lower(), "Order received")
+                    orders.append(data)
+                return self._response(200, {"orders": orders})
 
             if len(route) == 5 and route[:4] == ["api", self.VERSION, "customer", "orders"] and method == "GET":
                 context = self._context(headers)
                 order, items = self.core.orders.get_for_user(context["id"], route[4])
-                return self._response(200, {"order": order, "items": items})
+                order_data = dict(order)
+                order_data["status"] = _CUSTOMER_STATUS.get(str(order_data.get("status") or "new").lower(), "Order received")
+                dossier = self.core.orders.dossier(route[4])
+                designs = [
+                    {key: design[key] for key in ("id", "name", "current_version", "design_version", "design_version_label") if key in design}
+                    for design in [dict(candidate) for candidate in (dossier.get("designs") or [])]
+                ]
+                return self._response(200, {"order": order_data, "items": items, "designs": designs})
 
-            if len(route) == 6 and route[:5] == ["api", self.VERSION, "customer", "orders"] and route[5] == "payment-session" and method == "POST":
+            if len(route) == 6 and route[:4] == ["api", self.VERSION, "customer", "orders"] and route[5] == "payment-session" and method == "POST":
                 context = self._context(headers)
                 payment = self.core.payments.create_checkout(context["id"], route[4])
-                return self._response(200, {"payment": payment})
+                # Mirror the FastAPI projection: (status, checkout_url) only —
+                # never the full payment_transactions row.
+                row = dict(payment) if not isinstance(payment, dict) else payment
+                projected = {key: row[key] for key in ("status", "checkout_url") if key in row}
+                return self._response(200, {"payment": projected, **projected})
 
             # Customer quote/proof workflow (mirrors the FastAPI routes in
             # fabos_core/api.py + fabos_core/services/design_proofs_api.py so
@@ -613,7 +766,7 @@ class FabOSAPI:
                 result = self.core.customer_commerce.register_customer(
                     body.get("name", ""), body.get("email", ""), body.get("password", ""), body.get("phone", "")
                 )
-                return self._response(201, result)
+                return self._response(201, self._project_auth_response(result))
 
             if route == ["api", self.VERSION, "quote-requests"] and method == "POST":
                 allowed, retry_after = self._allow_public_attempt("quote", _rate_limit_client_ip(headers))
@@ -757,6 +910,13 @@ class FabOSAPI:
                 except PaymentProviderError as exc:
                     return self._response(400, {"error": str(exc)})
 
+            # Admin-workspace, customer CAD, and remaining customer routes live
+            # in fabos_api/wsgi_extended.py so this dispatcher stays readable;
+            # they mirror the FastAPI routes via the same core services.
+            extended = handle_extended_routes(self, method, route, query, body, headers, raw_body)
+            if extended is not None:
+                return extended
+
             return self._response(404, {"error": "API route not found"})
         except Exception as exc:
             return self._error(exc)
@@ -786,19 +946,28 @@ def create_wsgi_app(core):
         result = api.request(environ.get("REQUEST_METHOD", "GET"), environ.get("PATH_INFO", "/") + (("?" + environ["QUERY_STRING"]) if environ.get("QUERY_STRING") else ""), body, headers, raw_body=raw)
         data = result["data"]
         if isinstance(data, dict) and "_wsgi_file" in data:
-            # Binary escape hatch used by the proof-file route: serve the raw
-            # bytes instead of JSON so the frontend can fetch them as a blob.
+            # Binary escape hatch used by the proof-file and catalog-image
+            # routes: serve the raw bytes instead of JSON so the frontend can
+            # fetch them as a blob. Images are served inline so <img> tags
+            # render them; everything else defaults to an attachment.
             info = data["_wsgi_file"] or {}
             payload = info.get("bytes") or b""
             filename = os.path.basename(str(info.get("filename") or "file")).replace('"', "").replace("\r", "").replace("\n", "")
             content_type = str(info.get("content_type") or "application/octet-stream")
+            disposition = str(info.get("disposition") or "attachment")
             start_response("200 OK", [("Content-Type", content_type),
-                                      ("Content-Disposition", 'attachment; filename="%s"' % filename),
+                                      ("Content-Disposition", '%s; filename="%s"' % (disposition, filename)),
                                       ("Cache-Control", "no-store"),
                                       ("Content-Length", str(len(payload)))])
             return [payload]
         payload = json.dumps(data, default=str).encode("utf-8")
-        status_text = {200: "OK", 201: "Created", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 429: "Too Many Requests", 500: "Internal Server Error"}.get(result["status"], "OK")
+        status_text = {
+            200: "OK", 201: "Created",
+            400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
+            409: "Conflict", 413: "Content Too Large", 415: "Unsupported Media Type",
+            429: "Too Many Requests",
+            500: "Internal Server Error", 502: "Bad Gateway", 503: "Service Unavailable",
+        }.get(result["status"], "OK")
         start_response("%d %s" % (result["status"], status_text), [("Content-Type", "application/json; charset=utf-8"), ("Cache-Control", "no-store"), ("Content-Length", str(len(payload)))])
         return [payload]
 

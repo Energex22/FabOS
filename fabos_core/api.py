@@ -56,8 +56,18 @@ def _pick(value: Any, fields: Tuple[str, ...]) -> Dict[str, Any]:
     return {field: data[field] for field in fields if field in data}
 
 
-def _user_payload(user: Any) -> Dict[str, Any]:
-    return _pick(user, ("name", "email"))
+def _user_payload(user: Any, customer: Any = None) -> Dict[str, Any]:
+    """Project the login identity.
+
+    The users table has no name column, so the display name is sourced from
+    the linked customer profile when one is available.
+    """
+    payload = _pick(user, ("name", "email"))
+    if "name" not in payload and customer:
+        name = str((_json(customer) or {}).get("name") or "").strip()
+        if name:
+            payload = {"name": name, **payload}
+    return payload
 
 
 def _customer_payload(customer: Any) -> Optional[Dict[str, Any]]:
@@ -120,15 +130,17 @@ def _public_product(row: Any, application: FabOSApplication, storefront: Optiona
             item["name"] = storefront["customer_title"]
         if storefront.get("customer_description"):
             item["description"] = storefront["customer_description"]
-    item["images"] = [
-        {
-            "id": image["id"],
-            "url": "/api/v1/catalog/%s/images/%s" % (row["id"], image["id"]),
-            "is_primary": bool(image["is_primary"]),
-            "alt_text": image["alt_text"],
-        }
-        for image in application.products.images(row["id"])
-    ]
+    item["images"] = []
+    for image in application.products.images(row["id"]):
+        # The product_images table has no alt_text column on older databases;
+        # tolerate its absence instead of raising on products with images.
+        img = dict(image)
+        item["images"].append({
+            "id": img["id"],
+            "url": "/api/v1/catalog/%s/images/%s" % (row["id"], img["id"]),
+            "is_primary": bool(img["is_primary"]),
+            "alt_text": img.get("alt_text"),
+        })
     item["variants"] = [_pick(variant, ("id", "name", "material", "color", "price_cents", "active")) for variant in application.products.variants(row["id"])]
     item["storefront"] = {
         "origin": storefront.get("origin_type", "catalog_import") if storefront else "catalog_import",
@@ -337,7 +349,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         if not result:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         summary = result["user"]
-        return {"token": result["token"], "expires_at": result["expires_at"], "user": _user_payload(summary["user"]), "customer": _customer_payload(summary.get("customer"))}
+        return {"token": result["token"], "expires_at": result["expires_at"], "user": _user_payload(summary["user"], summary.get("customer")), "customer": _customer_payload(summary.get("customer"))}
 
     @app.post("/api/v1/auth/team-login")
     def team_login(payload: LoginRequest, request: Request, application: FabOSApplication = Depends(get_application)):
@@ -545,7 +557,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     @app.get("/api/v1/customer/me")
     def me(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         customer = application.accounts.customer_for_user(user["id"])
-        return {"user": _user_payload(user), "customer": _customer_payload(customer)}
+        return {"user": _user_payload(user, customer), "customer": _customer_payload(customer)}
 
     @app.patch("/api/v1/customer/me")
     def update_me(payload: ProfileUpdate, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
@@ -571,7 +583,8 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         updated_user = application.accounts.get_user(user["id"])
-        return {"user": _user_payload(updated_user), "customer": _customer_payload(application.accounts.customer_for_user(user["id"]))}
+        customer = application.accounts.customer_for_user(user["id"])
+        return {"user": _user_payload(updated_user, customer), "customer": _customer_payload(customer)}
 
     @app.post("/api/v1/customer/quotes/{quote_id}/accept")
     def accept_customer_quote(quote_id: str, user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
@@ -717,6 +730,54 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    # Invoices and fulfillments exist on the WSGI transport (fabos_api/app.py)
+    # and the admin frontend calls them; mirror them here so both transports
+    # serve the same surface. Permission checks mirror the WSGI _context
+    # permission arguments ("payment.read" / "fulfillment.read").
+    def permission_user(permission: str):
+        def check(user: Any = Depends(current_user), application: FabOSApplication = Depends(get_application)):
+            try:
+                application.permissions.require(user["account_type"], permission, user_id=user["id"])
+            except PermissionError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+            return user
+        return check
+
+    @app.get("/api/v1/invoices")
+    def invoices(q: str = "", status: str = "All", sort: str = "created", desc: bool = True,
+                 user: Any = Depends(permission_user("payment.read")),
+                 application: FabOSApplication = Depends(get_application)):
+        rows = application.invoices.list_for_user(user["id"], q, status, sort, desc)
+        return {"invoices": [_json(row) for row in rows]}
+
+    @app.get("/api/v1/invoices/{invoice_id}")
+    def invoice_detail(invoice_id: str, user: Any = Depends(permission_user("payment.read")),
+                       application: FabOSApplication = Depends(get_application)):
+        try:
+            invoice, items, payments = application.invoices.get_for_user(user["id"], invoice_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Invoice not found") from exc
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"invoice": _json(invoice), "items": [_json(item) for item in items],
+                "payments": [_json(payment) for payment in payments]}
+
+    @app.get("/api/v1/fulfillments")
+    def fulfillments(user: Any = Depends(permission_user("fulfillment.read")),
+                     application: FabOSApplication = Depends(get_application)):
+        return {"fulfillments": [_json(row) for row in application.fulfillment.list_for_user(user["id"])]}
+
+    @app.get("/api/v1/fulfillments/{fulfillment_id}")
+    def fulfillment_detail(fulfillment_id: str, user: Any = Depends(permission_user("fulfillment.read")),
+                           application: FabOSApplication = Depends(get_application)):
+        try:
+            row = application.fulfillment.get_for_user(user["id"], fulfillment_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Fulfillment not found") from exc
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"fulfillment": _json(row)}
 
     register_admin_routes(app, get_application, administrator_user)
     register_customer_write_routes(app, get_application, customer_user)

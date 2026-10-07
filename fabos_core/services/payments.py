@@ -237,11 +237,24 @@ class PaymentService:
     def handle_webhook(self,payload,signature=None,provider_name=None):
         provider=self._build_provider(provider_name);event=provider.parse_webhook(payload,signature);event_id=event.get("event_id")
         if not event_id: raise PaymentProviderError("Webhook event has no id")
-        # Refunds are reconciled by the refund-ledger path in payment_api.py.
-        # Do not consume the provider event here: if the FabOS payment transaction
-        # is not visible yet, a legitimate provider retry must remain able to
-        # reconcile the refund later. The ledger reference itself is idempotent.
+        # Refunds are reconciled by the refund-ledger path in payment_api.py
+        # (_record_refund, idempotent on the refund reference). Claim the
+        # provider event id here so a duplicate redelivery reports
+        # duplicate:true at this level instead of processed:true/duplicate:false
+        # while the ledger reports the same event as a duplicate. Late
+        # reconciliation still works: _record_refund runs independently of
+        # this claim and can reconcile a refund whose FabOS payment
+        # transaction was not visible on the first delivery.
         if "refund" in str(event.get("event_type") or "").lower():
+            with self.database.connect() as conn:
+                existing=conn.execute("SELECT 1 FROM payment_webhook_events WHERE id=?",(event_id,)).fetchone()
+                if existing: return {"processed":False,"duplicate":True,"event_id":event_id}
+                try:
+                    conn.execute("INSERT INTO payment_webhook_events(id,provider,event_type,payment_id) VALUES(?,?,?,?)",(event_id,provider.name,event.get("event_type"),event.get("payment_id") or event.get("provider_payment_id")));conn.commit()
+                except sqlite3.IntegrityError:
+                    # A concurrent redelivery won the claim between the check
+                    # and the insert; report it as the duplicate it is.
+                    return {"processed":False,"duplicate":True,"event_id":event_id}
             return {"processed": True, "duplicate": False, "event_id": event_id, "status": event.get("status")}
 
         # Claim the event before processing so concurrent deliveries cannot settle it twice.
@@ -279,19 +292,16 @@ class PaymentService:
                         raise PaymentProviderError("Paid webhook is missing a valid amount")
                     if int(payment_row["amount_cents"] or 0) != int(provider_amount):
                         raise PaymentProviderError("Paid webhook amount does not match the FabOS payment amount")
-                elif event.get("status") in ("partially_refunded","refunded"):
-                    refund_amount=int(event.get("amount_cents") or payment_row["amount_cents"] or 0)
-                    if refund_amount <= 0 or refund_amount > int(payment_row["amount_cents"] or 0):
-                        raise PaymentProviderError("Refund webhook amount is invalid")
+                # NOTE: provider refund events never reach this point. The
+                # early return above claims every event whose type contains
+                # "refund", and no provider emits partially_refunded/refunded
+                # statuses under any other event type. Refund reconciliation
+                # lives in payment_api._record_refund; _settle_refund remains
+                # available for direct _set_status callers.
                 self._set_status(
                     payment_id,
                     event["status"],
                     provider_payment_id=event.get("provider_payment_id"),
-                    refund_amount_cents=(
-                        int(event.get("amount_cents") or 0)
-                        if event.get("status") in ("partially_refunded", "refunded")
-                        else None
-                    ),
                 )
             return {"processed":True,"duplicate":False,"event_id":event_id,"status":event.get("status")}
         except Exception:

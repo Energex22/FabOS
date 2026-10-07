@@ -103,7 +103,13 @@ class PaymentRetryRefundTests(unittest.TestCase):
             provider._request("/checkout/sessions", {"mode": "payment"}, idempotency_key="payment-1")
         self.assertEqual(opened.call_args.args[0].headers.get("Idempotency-key"), "payment-1")
 
-    def test_refund_webhook_is_not_consumed_before_ledger_reconciliation(self):
+    def test_refund_webhook_claims_event_id_for_consistent_duplicates(self):
+        # L7: the refund early-return claims the provider event id so a
+        # duplicate redelivery reports duplicate:true at this level,
+        # consistent with _record_refund's ledger-level duplicate report
+        # (previously: processed:true/duplicate:false while the ledger said
+        # duplicate). Late reconciliation still works because _record_refund
+        # runs independently of this claim.
         class _Provider:
             name = "stripe"
             def parse_webhook(self, payload, signature=None):
@@ -122,10 +128,15 @@ class PaymentRetryRefundTests(unittest.TestCase):
         service = object.__new__(PaymentService)
         service.database = database
         service._build_provider = lambda name=None: _Provider()
-        result = service.handle_webhook(b"{}", "signature", "stripe")
-        self.assertTrue(result["processed"])
+        first = service.handle_webhook(b"{}", "signature", "stripe")
+        self.assertTrue(first["processed"])
+        self.assertFalse(first["duplicate"])
         with database.connect() as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM payment_webhook_events").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM payment_webhook_events").fetchone()[0], 1)
+        second = service.handle_webhook(b"{}", "signature", "stripe")
+        self.assertFalse(second["processed"])
+        self.assertTrue(second["duplicate"])
+        self.assertEqual(second["event_id"], "evt_refund_retry")
 
     def test_partial_refund_sets_partially_refunded(self):
         application = _Application()
