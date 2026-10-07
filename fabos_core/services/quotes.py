@@ -3,19 +3,29 @@ import uuid
 from datetime import date, timedelta
 
 
+def ensure_quote_audit_schema(database):
+    """Create the quote price-snapshot/version audit tables if missing.
+
+    QuoteService.__init__ calls this, but CheckoutService.create_order also
+    writes these audit rows, so it ensures the schema itself instead of
+    relying on QuoteService having been constructed first.
+    """
+    with database.connect() as conn:
+        columns={str(row[1]) for row in conn.execute("PRAGMA table_info(quote_items)").fetchall()}
+        if "variant_id" not in columns:
+            conn.execute("ALTER TABLE quote_items ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL")
+        conn.execute("CREATE TABLE IF NOT EXISTS quote_price_snapshots(id TEXT PRIMARY KEY,quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,quote_item_id TEXT NOT NULL,unit_price_cents INTEGER NOT NULL,pricing_mode TEXT NOT NULL DEFAULT 'manual',calculation_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_quote_price_snapshots_quote ON quote_price_snapshots(quote_id,created_at)")
+        conn.execute("CREATE TABLE IF NOT EXISTS quote_versions(id TEXT PRIMARY KEY,quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,version INTEGER NOT NULL,status TEXT NOT NULL,total_cents INTEGER NOT NULL,expires_at TEXT,notes TEXT,snapshot_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_quote_versions_quote_version ON quote_versions(quote_id,version)")
+        conn.commit()
+
+
 class QuoteService:
     SORT_COLUMNS={"number":"q.quote_number","customer":"customer_name COLLATE NOCASE","status":"q.status","total":"q.total_cents","expires":"q.expires_at","created":"q.created_at"}
-    def __init__(self,database,pricing=None): self.database=database; self.pricing=pricing; self._ensure_snapshot_schema() if self.database is not None else None
+    def __init__(self,database,pricing=None): self.database=database; self.pricing=pricing; ensure_quote_audit_schema(database) if database is not None else None
     def _ensure_snapshot_schema(self):
-        with self.database.connect() as conn:
-            columns={str(row[1]) for row in conn.execute("PRAGMA table_info(quote_items)").fetchall()}
-            if "variant_id" not in columns:
-                conn.execute("ALTER TABLE quote_items ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL")
-            conn.execute("CREATE TABLE IF NOT EXISTS quote_price_snapshots(id TEXT PRIMARY KEY,quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,quote_item_id TEXT NOT NULL,unit_price_cents INTEGER NOT NULL,pricing_mode TEXT NOT NULL DEFAULT 'manual',calculation_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_quote_price_snapshots_quote ON quote_price_snapshots(quote_id,created_at)")
-            conn.execute("CREATE TABLE IF NOT EXISTS quote_versions(id TEXT PRIMARY KEY,quote_id TEXT NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,version INTEGER NOT NULL,status TEXT NOT NULL,total_cents INTEGER NOT NULL,expires_at TEXT,notes TEXT,snapshot_json TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
-            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_quote_versions_quote_version ON quote_versions(quote_id,version)")
-            conn.commit()
+        ensure_quote_audit_schema(self.database)
     def list(self,query="",status="All",sort_column="created",descending=True,group="all"):
         col=self.SORT_COLUMNS.get(sort_column,"q.created_at"); direction="DESC" if descending else "ASC"; like="%%%s%%"%query.strip(); where=["(?='' OR q.quote_number LIKE ? OR COALESCE(c.name,'') LIKE ?)"]; args=[query.strip(),like,like]
         if group == "active": where.append("q.status IN ('draft','sent')")
@@ -93,6 +103,12 @@ class QuoteService:
         with self.database.connect() as conn:
             return conn.execute("SELECT id,quote_id,version,status,total_cents,expires_at,notes,snapshot_json,created_at FROM quote_versions WHERE quote_id=? ORDER BY version DESC",(quote_id,)).fetchall()
     def convert_to_order(self,quote_id):
+        # DELIBERATE: orders converted from quotes keep total_cents = the quote
+        # total only. A custom quote is a staff-negotiated all-in price, so
+        # auto-adding default_tax_percent + shipping on top (as catalog
+        # checkout does) would surprise staff and customers who agreed on the
+        # quoted total. Tax/shipping for quote conversions remain a manual
+        # staff decision, not an automatic surcharge.
         with self.database.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             q=conn.execute("SELECT * FROM quotes WHERE id=?",(quote_id,)).fetchone()
