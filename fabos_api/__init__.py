@@ -1,7 +1,7 @@
 """Provider-independent FabOS API boundary."""
 from urllib.parse import urlsplit
 
-from fabos_api.app import FabOSAPI, _mapping, create_wsgi_app
+from fabos_api.app import FabOSAPI, _mapping, _rate_limit_client_ip, create_wsgi_app
 from fabos_core.services.checkout import CheckoutService
 from fabos_core.services.commerce_pricing import CommercePricingService
 from fabos_core.services.customer_accounts import CustomerAccountService
@@ -28,6 +28,14 @@ def _api_request(self, method, path, body=None, headers=None, raw_body=None):
     method = (method or "GET").upper()
 
     if parsed == ["api", self.VERSION, "auth", "register"] and method == "POST":
+        # This patch intercepts the register path before the real dispatcher,
+        # so the app.py register route (with its rate limiter) is unreachable
+        # dead code (see the B-L10 comment there). The "register" limiter must
+        # therefore be enforced here as well — otherwise account-creation
+        # spam and 409 email enumeration are unlimited on the WSGI transport.
+        allowed, retry_after = self._allow_public_attempt("register", _rate_limit_client_ip(headers))
+        if not allowed:
+            return self._response(429, {"error": "Too many registration attempts. Please try again later.", "retry_after": retry_after})
         try:
             service = CustomerAccountService(
                 self.core.database, self.core.accounts, self.core.auth, getattr(self.core, "shop_settings", None)
