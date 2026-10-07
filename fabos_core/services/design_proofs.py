@@ -5,8 +5,13 @@ Only the customer owning the quote can approve/request changes, and production c
 the latest proof before creating print jobs.
 """
 import json
+import logging
 import uuid
 from datetime import datetime
+
+from fabos_core.services import notifications
+
+logger = logging.getLogger(__name__)
 
 
 class DesignProofService:
@@ -27,6 +32,7 @@ class DesignProofService:
                 asset_id TEXT REFERENCES design_assets(id) ON DELETE SET NULL,
                 status TEXT NOT NULL DEFAULT 'draft',
                 notes TEXT NOT NULL DEFAULT '',
+                customer_note TEXT NOT NULL DEFAULT '',
                 customer_comment TEXT NOT NULL DEFAULT '',
                 sent_at TEXT,
                 approved_at TEXT,
@@ -67,11 +73,17 @@ class DesignProofService:
     def _public(self, row):
         # Customer-safe projection. ``notes`` is staff-authored (set by the
         # admin-only proof create/upload routes) and must never reach
-        # customers; the customer-visible field is ``customer_comment``.
+        # customers; the customer-visible fields are ``customer_note`` (the
+        # staff-approved per-revision note, set at send time) and
+        # ``customer_comment`` (the customer's own change-request text).
+        # ``customer_note`` falls back to "" for partial rows (e.g. unit-test
+        # fakes); every real query selects p.* so the column is present.
+        keys = row.keys() if hasattr(row, "keys") else ()
         return {
             "id": row["id"], "quote_id": row["quote_id"], "quote_number": row["quote_number"],
             "design_id": row["design_id"], "design_version": row["design_version"],
             "asset_id": row["asset_id"], "status": row["status"],
+            "customer_note": row["customer_note"] if "customer_note" in keys else "",
             "customer_comment": row["customer_comment"], "sent_at": row["sent_at"],
             "approved_at": row["approved_at"], "created_at": row["created_at"],
             "updated_at": row["updated_at"], "design_name": row["design_name"],
@@ -87,7 +99,7 @@ class DesignProofService:
         payload["notes"] = row["notes"]
         return payload
 
-    def create(self, quote_id, *, notes="", status="draft"):
+    def create(self, quote_id, *, notes="", customer_note="", status="draft"):
         link = self._quote_design(quote_id)
         status = str(status or "draft").strip().lower()
         if status not in {"draft", "sent"}:
@@ -110,23 +122,26 @@ class DesignProofService:
             sent_at = datetime.utcnow().isoformat(timespec="seconds") if status == "sent" else None
             conn.execute(
                 """INSERT INTO design_proofs(
-                   id,quote_id,design_id,design_version,asset_id,status,notes,sent_at)
-                   VALUES(?,?,?,?,?,?,?,?)""",
+                   id,quote_id,design_id,design_version,asset_id,status,notes,customer_note,sent_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
                 (proof_id,quote_id,link["design_id"],link["current_version"],
-                 asset["id"] if asset else None,status,str(notes or "").strip(),sent_at),
+                 asset["id"] if asset else None,status,str(notes or "").strip(),
+                 str(customer_note or "").strip(),sent_at),
             )
             conn.commit()
         return self._row(proof_id)
 
-    def send(self, proof_id, notes=None):
+    def send(self, proof_id, notes=None, customer_note=None):
         row = self._row(proof_id)
         if row["status"] not in {"draft", "changes_requested"}:
             raise ValueError("Only a draft or revised proof can be sent.")
         with self.database.connect() as conn:
             conn.execute(
-                "UPDATE design_proofs SET status='sent',notes=?,sent_at=CURRENT_TIMESTAMP,"
+                "UPDATE design_proofs SET status='sent',notes=?,customer_note=?,sent_at=CURRENT_TIMESTAMP,"
                 "updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (row["notes"] if notes is None else str(notes or "").strip(), proof_id),
+                (row["notes"] if notes is None else str(notes or "").strip(),
+                 row["customer_note"] if customer_note is None else str(customer_note or "").strip(),
+                 proof_id),
             )
             conn.commit()
         return self._row(proof_id)
@@ -209,7 +224,15 @@ class DesignProofService:
                  user_id if status == "approved" else None,proof_id),
             )
             conn.commit()
-        return self._row(proof_id)
+        updated = self._row(proof_id)
+        if status == "changes_requested":
+            # Phase 1 notification hook (Phase 2 consumes it for staff
+            # alerts). Never let the hook break the customer's action.
+            try:
+                notifications.notify_proof_changes_requested(updated)
+            except Exception:
+                logger.exception("proof changes_requested hook failed for proof %s", proof_id)
+        return updated
 
     def approve(self, user_id, proof_id, comment=""):
         return self._customer_action(user_id, proof_id, "approve", comment)

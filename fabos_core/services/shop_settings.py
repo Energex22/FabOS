@@ -1,8 +1,26 @@
+def resolve_quote_validity_days(settings):
+    """Number of days a newly-sent quote stays valid (Phase 1: D5).
+
+    Reads the ``quote_validity_days`` shop setting (default 14) through any
+    settings object exposing ``.get(key, default)`` — the real
+    :class:`ShopSettingsService` or a plain mapping. Garbage or non-positive
+    values fall back to the 14-day default rather than producing a nonsense
+    expiry date.
+    """
+    getter = getattr(settings, "get", None)
+    raw = getter("quote_validity_days", "14") if callable(getter) else "14"
+    try:
+        days = int(float(raw if raw not in (None, "") else "14"))
+    except (TypeError, ValueError):
+        days = 14
+    return days if days > 0 else 14
+
+
 class ShopSettingsService:
     DEFAULTS = {
         "shop_name": "WireVault FabOS", "shop_owner_name": "", "shop_email": "", "shop_phone": "",
         "shop_address": "", "shop_city": "", "shop_state": "MO", "shop_postal_code": "", "business_hours": "", "timezone": "America/Chicago", "currency_code": "USD", "currency_symbol": "$",
-        "invoice_prefix": "INV", "invoice_due_days": "14", "tax_state": "MO", "tax_rate_source": "state_default", "default_tax_percent": "4.225", "quote_valid_days": "14",
+        "invoice_prefix": "INV", "invoice_due_days": "14", "tax_state": "MO", "tax_rate_source": "state_default", "default_tax_percent": "4.225", "quote_validity_days": "14",
         "machine_hourly_cost": "0.35", "default_packaging_cost": "0.50", "target_margin_percent": "60",
         "minimum_order_cents": "0", "rush_multiplier": "1.00", "quantity_discount_enabled": "false", "quantity_discount_percent": "0",
         "default_material_cost_per_g": "0", "labor_hourly_rate": "0", "setup_labor_hourly_rate": "0",
@@ -34,7 +52,7 @@ class ShopSettingsService:
             "shop_address": "Business mailing address", "business_hours": "Customer-facing business hours", "timezone": "Business timezone", "shop_city": "Business city", "shop_state": "Business state/province code", "shop_postal_code": "Business ZIP/postal code", "currency_code": "Currency code", "currency_symbol": "Currency display symbol",
         },
         "sales": {
-            "invoice_prefix": "Invoice number prefix", "invoice_due_days": "Default invoice due period", "tax_state": "Tax jurisdiction state/province code", "tax_rate_source": "Tax-rate mode used by the pricing engine", "default_tax_percent": "Default tax percentage when no destination-specific rate is available", "quote_valid_days": "Quote validity period",
+            "invoice_prefix": "Invoice number prefix", "invoice_due_days": "Default invoice due period", "tax_state": "Tax jurisdiction state/province code", "tax_rate_source": "Tax-rate mode used by the pricing engine", "default_tax_percent": "Default tax percentage when no destination-specific rate is available", "quote_validity_days": "Quote validity period",
             "minimum_order_cents": "Minimum order amount in cents", "default_turnaround_days": "Normal turnaround in days", "rush_turnaround_days": "Rush turnaround in days",
         },
         "pricing": {
@@ -102,7 +120,7 @@ class ShopSettingsService:
         "ai_provider": {"disabled", "openai_compatible", "ollama"},
     }
     NUMERIC_KEYS = {
-        "invoice_due_days", "default_tax_percent", "quote_valid_days", "machine_hourly_cost", "default_material_cost_per_g", "labor_hourly_rate",
+        "invoice_due_days", "default_tax_percent", "quote_validity_days", "machine_hourly_cost", "default_material_cost_per_g", "labor_hourly_rate",
         "setup_labor_hourly_rate", "post_process_labor_hourly_rate", "qc_labor_hourly_rate", "default_packaging_cost", "overhead_percent", "target_margin_percent",
         "minimum_order_cents", "rush_multiplier", "quantity_discount_percent", "payment_fee_percent", "payment_fee_fixed_cents", "filament_low_threshold_g", "filament_reorder_days", "filament_waste_percent", "backup_retention",
         "backup_frequency_hours", "custom_upload_max_mb", "console_idle_timeout_minutes", "default_turnaround_days", "rush_turnaround_days", "shipping_flat_cents",
@@ -120,6 +138,10 @@ class ShopSettingsService:
         if key in self.DEFAULTS:
             return self.DEFAULTS[key]
         return default
+
+    def quote_validity_days(self):
+        """Number of days a newly-sent quote stays valid (Phase 1: D5)."""
+        return resolve_quote_validity_days(self)
 
     def set(self, key, value):
         self.set_validated(key, value)
