@@ -27,6 +27,8 @@ from fabos_core.services.admin_api import register_admin_routes
 from fabos_core.services.customer_api_writes import register_customer_write_routes
 from fabos_core.services.design_proofs_api import register_design_proof_routes
 from fabos_core.services.payment_api import register_payment_routes
+from fabos_core.services.customer_notifications import (
+    CustomerNotificationService, normalize_notification_preference)
 
 
 CUSTOMER_STATUS = {
@@ -74,7 +76,23 @@ def _user_payload(user: Any, customer: Any = None) -> Dict[str, Any]:
 def _customer_payload(customer: Any) -> Optional[Dict[str, Any]]:
     if not customer:
         return None
-    return _pick(customer, ("name", "email", "phone"))
+    payload = _pick(customer, ("name", "email", "phone"))
+    try:
+        payload["notification_preference"] = normalize_notification_preference(
+            customer["notification_preference"])
+    except (KeyError, IndexError, TypeError):
+        payload["notification_preference"] = "email"
+    return payload
+
+
+def _notification_payload(row: Any) -> Dict[str, Any]:
+    payload = _pick(row, ("id", "event_type", "entity_type", "entity_id",
+                          "title", "body", "deep_link", "channels_json", "created_at"))
+    try:
+        payload["is_read"] = bool(int(row["is_read"]))
+    except (KeyError, IndexError, TypeError, ValueError):
+        payload["is_read"] = False
+    return payload
 
 
 def _quote_payload(row: Any) -> Dict[str, Any]:
@@ -155,6 +173,7 @@ class ProfileUpdate(BaseModel):
     email: Optional[str] = Field(default=None, max_length=320)
     phone: Optional[str] = Field(default=None, max_length=50)
     notes: Optional[str] = Field(default=None, max_length=4000)
+    notification_preference: Optional[str] = Field(default=None, max_length=10)
 
 
 class LoginRequest(BaseModel):
@@ -566,6 +585,11 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         if not customer:
             raise HTTPException(status_code=409, detail="Customer account is not linked")
         values = {key: value for key, value in payload.model_dump().items() if value is not None}
+        if "notification_preference" in values:
+            preference = str(values["notification_preference"] or "").strip().lower()
+            if preference not in {"email", "sms", "both"}:
+                raise HTTPException(status_code=400, detail="notification_preference must be one of: email, sms, both")
+            values["notification_preference"] = preference
         if "email" in values:
             email = str(values["email"] or "").strip().lower()
             if not email or "@" not in email:
@@ -669,6 +693,51 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             "items": [_order_item_payload(item) for item in items],
             "designs": [_customer_design_payload(design) for design in dossier.get("designs", [])],
         }
+
+    def _notification_customer(user: Any, application: FabOSApplication):
+        customer = application.accounts.customer_for_user(user["id"])
+        if not customer:
+            raise HTTPException(status_code=409, detail="Customer account is not linked")
+        return customer
+
+    @app.get("/api/v1/customer/notifications")
+    def customer_notifications(page: int = 1, per_page: int = 25,
+                               user: Any = Depends(customer_user),
+                               application: FabOSApplication = Depends(get_application)):
+        customer = _notification_customer(user, application)
+        service = CustomerNotificationService(application.database, application.shop_settings)
+        rows, total = service.list_for_customer(customer["id"], page=page, per_page=per_page)
+        return {
+            "notifications": [_notification_payload(row) for row in rows],
+            "page": max(1, int(page or 1)),
+            "per_page": min(100, max(1, int(per_page or 25))),
+            "total": total,
+            "unread": service.unread_count(customer["id"]),
+        }
+
+    @app.get("/api/v1/customer/notifications/unread-count")
+    def customer_notifications_unread_count(user: Any = Depends(customer_user),
+                                            application: FabOSApplication = Depends(get_application)):
+        customer = _notification_customer(user, application)
+        service = CustomerNotificationService(application.database, application.shop_settings)
+        return {"unread": service.unread_count(customer["id"])}
+
+    @app.post("/api/v1/customer/notifications/{notification_id}/read")
+    def customer_notification_read(notification_id: str, user: Any = Depends(customer_user),
+                                    application: FabOSApplication = Depends(get_application)):
+        customer = _notification_customer(user, application)
+        service = CustomerNotificationService(application.database, application.shop_settings)
+        if not service.mark_read(customer["id"], notification_id):
+            raise HTTPException(status_code=404, detail="Notification not found")
+        return {"read": True, "unread": service.unread_count(customer["id"])}
+
+    @app.post("/api/v1/customer/notifications/read-all")
+    def customer_notifications_read_all(user: Any = Depends(customer_user),
+                                         application: FabOSApplication = Depends(get_application)):
+        customer = _notification_customer(user, application)
+        service = CustomerNotificationService(application.database, application.shop_settings)
+        marked = service.mark_all_read(customer["id"])
+        return {"read": True, "marked": marked, "unread": 0}
 
     @app.get("/api/v1/admin/quotes")
     def admin_quotes(q: str = "", status: str = "All", group: str = "all", user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):

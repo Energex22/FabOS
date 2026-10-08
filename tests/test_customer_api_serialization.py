@@ -5,7 +5,7 @@ def test_user_and_customer_payloads_exclude_internal_fields():
     user = _user_payload({"id": "u1", "name": "Jane", "email": "jane@example.com", "account_type": "customer", "password_hash": "secret"})
     customer = _customer_payload({"id": "c1", "name": "Jane", "email": "jane@example.com", "phone": "555", "notes": "internal"})
     assert user == {"name": "Jane", "email": "jane@example.com"}
-    assert customer == {"name": "Jane", "email": "jane@example.com", "phone": "555"}
+    assert customer == {"name": "Jane", "email": "jane@example.com", "phone": "555", "notification_preference": "email"}
 
 
 def test_quote_payloads_exclude_internal_identifiers():

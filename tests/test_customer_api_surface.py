@@ -22,7 +22,9 @@ def test_customer_api_docs_are_opt_in():
 
 def test_customer_payload_is_allowlisted():
     value = _customer_payload({"id": "cust-1", "name": "Alex", "email": "a@example.com", "phone": "555", "notes": "internal", "account_type": "customer"})
-    assert value == {"name": "Alex", "email": "a@example.com", "phone": "555"}
+    assert value == {"name": "Alex", "email": "a@example.com", "phone": "555", "notification_preference": "email"}
+    sms_value = _customer_payload({"name": "Alex", "notification_preference": "both"})
+    assert sms_value["notification_preference"] == "both"
 
 
 def test_quote_payload_excludes_internal_fields():
