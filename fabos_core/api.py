@@ -688,6 +688,7 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         order = _order_payload(row)
         order["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
         dossier = application.orders.dossier(order_id)
+        order["next_step"] = dossier.get("next_step")
         return {
             "order": order,
             "items": [_order_item_payload(item) for item in items],
@@ -832,6 +833,80 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"invoice": _json(invoice), "items": [_json(item) for item in items],
                 "payments": [_json(payment) for payment in payments]}
+
+    @app.get("/api/v1/admin/orders/{order_id}")
+    def admin_order_detail(order_id: str, user: Any = Depends(administrator_user),
+                           application: FabOSApplication = Depends(get_application)):
+        """Phase 3 money handoff: full admin order detail (dossier) for the web
+        console's order-detail panel — quote/jobs/QC/fulfillment/invoice/payment
+        state plus the machine-readable next_step, with invoice/invoice_id
+        convenience keys."""
+        try:
+            dossier = application.orders.dossier(order_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Order not found") from exc
+        invoices = dossier.get("invoices") or []
+        first = invoices[0] if invoices else None
+        invoice_payload = _json(first) if first else None
+        payload = {key: _json(value) for key, value in dossier.items()}
+        payload["invoice"] = invoice_payload
+        payload["invoice_id"] = invoice_payload.get("id") if isinstance(invoice_payload, dict) else None
+        return payload
+
+    @app.post("/api/v1/admin/orders/{order_id}/invoice")
+    def create_order_invoice(order_id: str, payload: Optional[dict] = None,
+                             user: Any = Depends(permission_user("payment.manage")),
+                             application: FabOSApplication = Depends(get_application)):
+        """Phase 3 money handoff: create (or fetch) the order's invoice.
+
+        Invoices normally auto-create when the order is created; this endpoint
+        is the manual path for back-office corrections. Idempotent: returns
+        the existing live invoice when one already exists."""
+        try:
+            due_days = None
+            if isinstance(payload, dict) and payload.get("due_days") is not None:
+                due_days = int(payload.get("due_days"))
+            invoice_id, created = application.invoices.create_from_order_for_user(
+                user["id"], order_id, due_days=due_days)
+            invoice, items, payments = application.invoices.get_for_user(user["id"], invoice_id)
+            return {"invoice_id": invoice_id, "created": created,
+                    "invoice": _json(invoice), "items": [_json(item) for item in items],
+                    "payments": [_json(payment) for payment in payments]}
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/v1/admin/invoices/{invoice_id}/payments")
+    def record_invoice_payment(invoice_id: str, payload: dict,
+                               user: Any = Depends(permission_user("payment.manage")),
+                               application: FabOSApplication = Depends(get_application)):
+        """Phase 3 money handoff: record a payment against an invoice.
+
+        Updates the invoice paid_cents/status (open -> partial -> paid).
+        Rejects overpayment and payments on void invoices with 400."""
+        try:
+            amount_cents = int((payload or {}).get("amount_cents", 0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="amount_cents must be an integer number of cents") from None
+        try:
+            application.invoices.record_payment_for_user(
+                user["id"], invoice_id, amount_cents,
+                method=str((payload or {}).get("method") or ""),
+                reference=str((payload or {}).get("reference") or ""),
+                notes=str((payload or {}).get("notes") or ""))
+            invoice, items, payments = application.invoices.get_for_user(user["id"], invoice_id)
+            return {"invoice_id": invoice_id, "recorded_cents": amount_cents,
+                    "invoice": _json(invoice), "items": [_json(item) for item in items],
+                    "payments": [_json(payment) for payment in payments]}
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/v1/fulfillments")
     def fulfillments(user: Any = Depends(permission_user("fulfillment.read")),

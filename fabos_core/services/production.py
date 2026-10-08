@@ -1,6 +1,9 @@
+import logging
 import math
 import uuid
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class ProductionService:
     VALID_JOB_STATUSES={"queued","scheduled","printing","paused","completed","failed","cancelled"}
@@ -162,6 +165,25 @@ class ProductionService:
             order_status = str(order["status"] or "").strip().lower()
             if order_status not in {"confirmed", "in_production", "production"}:
                 raise ValueError("Order must be confirmed before production jobs can be created.")
+            # Phase 3 money handoff: production must not start on an unpaid
+            # order, even if staff manually confirmed it. The latest live
+            # invoice is the source of truth; a positive balance blocks job
+            # creation with a human-readable reason (surfaced as 409).
+            invoice = conn.execute(
+                "SELECT invoice_number,total_cents,paid_cents,(total_cents-paid_cents) balance_cents "
+                "FROM invoices WHERE order_id=? AND status<>'void' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (order_id,),
+            ).fetchone()
+            if invoice and int(invoice["balance_cents"] or 0) > 0:
+                raise ValueError(
+                    "Order %s cannot start production until it is fully paid "
+                    "($%.2f still due on invoice %s). Collect payment first." % (
+                        order["order_number"],
+                        int(invoice["balance_cents"]) / 100.0,
+                        invoice["invoice_number"],
+                    )
+                )
             # Custom customer designs require an approved proof before any print job
 
             # can be created. This remains enforced for automation and direct API callers.
@@ -228,7 +250,14 @@ class ProductionService:
                 "SELECT id FROM orders WHERE status IN ('confirmed','in_production','production') ORDER BY created_at"
             ).fetchall()
         for order in orders:
-            total += len(self.create_jobs_from_order(order["id"]))
+            try:
+                total += len(self.create_jobs_from_order(order["id"]))
+            except (KeyError, ValueError) as exc:
+                # One order that is not ready (unconfirmed, unpaid, proof not
+                # approved, ...) must not abort job creation for every other
+                # order in the automation pass. Surface it in the log for
+                # operator review.
+                logger.warning("skipping job creation for order %s: %s", order["id"], exc)
         return total
 
     def _record_post_status_error(self, job_id, status, exc):

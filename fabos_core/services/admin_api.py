@@ -299,20 +299,32 @@ def register_admin_routes(app, get_application, administrator_user):
 
     @app.get("/api/v1/admin/settings")
     def get_admin_settings(user=Depends(administrator_user), application=Depends(get_application)):
-        return {"settings": application.shop_settings.snapshot(), "metadata": application.shop_settings.metadata()}
+        # Secret values are never serialized: masked_snapshot() replaces them
+        # with a {"configured": bool} indicator for every caller.
+        return {
+            "settings": application.shop_settings.masked_snapshot(),
+            "metadata": application.shop_settings.metadata(),
+            "secret_keys": application.shop_settings.secret_keys(),
+        }
 
     @app.put("/api/v1/admin/settings")
     def update_admin_settings(payload: SettingUpdate, user=Depends(administrator_user), application=Depends(get_application)):
         protected_keys = {"console_lock_enabled", "console_idle_timeout_minutes", "console_local_only"}
         if payload.key in protected_keys and str(user["role"] or "").lower() != "owner":
             raise HTTPException(status_code=403, detail="Only the owner can change console security settings")
+        # An empty submission for a secret key means "keep the existing value"
+        # — a settings form that leaves the password field blank must not wipe
+        # the stored key.
+        if application.shop_settings.is_secret_key(payload.key) and not str(payload.value or "").strip():
+            return {"key": payload.key, "value": application.shop_settings.present_setting(payload.key),
+                    "metadata": application.shop_settings.metadata().get(payload.key), "unchanged": True}
         try:
             application.shop_settings.set_validated(payload.key, payload.value)
         except KeyError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"key": payload.key, "value": application.shop_settings.get(payload.key), "metadata": application.shop_settings.metadata().get(payload.key)}
+        return {"key": payload.key, "value": application.shop_settings.present_setting(payload.key), "metadata": application.shop_settings.metadata().get(payload.key)}
 
     @app.post("/api/v1/admin/pricing/estimate")
     def estimate_admin_pricing(payload: PricingEstimate, user=Depends(administrator_user), application=Depends(get_application)):

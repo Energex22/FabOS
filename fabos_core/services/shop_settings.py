@@ -35,8 +35,12 @@ class ShopSettingsService:
         "default_turnaround_days": "7", "rush_turnaround_days": "3", "shipping_mode": "calculated", "shipping_flat_cents": "0",
         "shipping_calculated_base_cents": "0", "shipping_calculated_per_kg_cents": "0", "free_shipping_threshold_cents": "0",
         "payment_provider": "stripe", "payment_test_mode": "true", "online_payment_required": "true",
+        "stripe_secret_key": "", "stripe_publishable_key": "", "stripe_webhook_secret": "",
+        "stripe_success_url": "", "stripe_cancel_url": "",
+        "square_access_token": "", "square_location_id": "", "square_webhook_signature_key": "", "square_webhook_url": "",
         "notification_order_received": "true", "notification_payment_received": "true", "notification_production_started": "true",
         "notification_qc_required": "true", "notification_shipped": "true", "notification_low_inventory": "true",
+        "resend_api_key": "", "resend_from_email": "", "notification_from_email": "",
         "console_lock_enabled": "true", "console_idle_timeout_minutes": "15", "console_local_only": "true",
         "ai_provider": "disabled", "ai_model": "", "ai_endpoint": "", "ai_api_key_env": "FABOS_AI_API_KEY", "ai_allow_customer_data": "false", "ai_require_action_approval": "true",
         "marketing_enabled": "true", "marketing_require_approval": "true", "marketing_default_publish_mode": "manual", "marketing_timezone": "America/Chicago",
@@ -72,6 +76,9 @@ class ShopSettingsService:
         },
         "payments": {
             "payment_provider": "Primary online payment provider", "payment_test_mode": "Use payment provider test mode", "online_payment_required": "Require online payment for checkout",
+            "stripe_secret_key": "Stripe secret API key (sk_test_… / sk_live_…)", "stripe_publishable_key": "Stripe publishable key (pk_test_… / pk_live_…)",
+            "stripe_webhook_secret": "Stripe webhook signing secret (whsec_…)", "stripe_success_url": "Stripe checkout success redirect URL", "stripe_cancel_url": "Stripe checkout cancel redirect URL",
+            "square_access_token": "Square access token", "square_location_id": "Square location ID", "square_webhook_signature_key": "Square webhook signature key", "square_webhook_url": "Square webhook notification URL",
         },
         "shipping": {
             "shipping_mode": "Shipping calculation mode", "shipping_flat_cents": "Flat shipping amount", "shipping_calculated_base_cents": "Calculated shipping base amount", "shipping_calculated_per_kg_cents": "Calculated shipping per kilogram", "free_shipping_threshold_cents": "Order amount that qualifies for free shipping",
@@ -87,6 +94,8 @@ class ShopSettingsService:
         "notifications": {
             "notification_order_received": "Notify when an order is received", "notification_payment_received": "Notify when payment is received", "notification_production_started": "Notify when production starts",
             "notification_qc_required": "Notify when QC is required", "notification_shipped": "Notify when an order ships", "notification_low_inventory": "Notify on low inventory",
+            "resend_api_key": "Resend API key for transactional email", "resend_from_email": "Sender address override for transactional email (e.g. FABVEX <hello@fabvex.com>)",
+            "notification_from_email": "Default sender address for customer notifications",
         },
         "automation": {
             "production_automation_enabled": "Run the production automation worker continuously",
@@ -126,6 +135,60 @@ class ShopSettingsService:
         "backup_frequency_hours", "custom_upload_max_mb", "console_idle_timeout_minutes", "default_turnaround_days", "rush_turnaround_days", "shipping_flat_cents",
         "shipping_calculated_base_cents", "shipping_calculated_per_kg_cents", "free_shipping_threshold_cents", "production_automation_interval_seconds",
     }
+
+    # ------------------------------------------------------------------
+    # Integration secrets posture (Phase 3).
+    #
+    # Secret-bearing settings are stored in the SQLite shop_settings table
+    # alongside every other setting. That matches how FabOS already stores
+    # credentials (OctoPrint per-printer api_key_ref lives in the printers
+    # table the same way). It is NOT a vault: the values sit in plaintext in
+    # the database file, so database-file access == secret access. A vault
+    # migration is a separate future project.
+    #
+    # What the settings layer DOES guarantee:
+    # - API read paths must use masked_snapshot()/present_setting(), which
+    #   replace secret values with {"configured": bool} — a secret value is
+    #   never serialized to any API caller, admin or otherwise.
+    # - API write paths must treat an empty submission for a secret key as
+    #   "keep the existing value" (a form postback that omits the password
+    #   field must not wipe the stored key).
+    # OctoPrint keys are intentionally NOT promoted here: they are
+    # device-scoped (one api_key_ref per printer row), not global settings.
+    # ------------------------------------------------------------------
+    SECRET_KEYS = frozenset({
+        "resend_api_key",
+        "stripe_secret_key", "stripe_webhook_secret",
+        "square_access_token", "square_webhook_signature_key",
+    })
+
+    @classmethod
+    def secret_keys(cls):
+        """Sorted list of secret-bearing setting keys (safe to publish)."""
+        return sorted(cls.SECRET_KEYS)
+
+    @classmethod
+    def is_secret_key(cls, key):
+        return str(key) in cls.SECRET_KEYS
+
+    def masked_snapshot(self):
+        """Like snapshot(), but secret values are replaced with a configured
+        indicator. Use this for every API response — never snapshot()."""
+        result = {}
+        full = self.snapshot()
+        for key, value in full.items():
+            if key in self.SECRET_KEYS:
+                result[key] = {"configured": bool(str(value or "").strip())}
+            else:
+                result[key] = value
+        return result
+
+    def present_setting(self, key):
+        """Value representation of one setting for API responses: secrets
+        are masked to a configured indicator, everything else is the value."""
+        if key in self.SECRET_KEYS:
+            return {"configured": bool(str(self.get(key, "") or "").strip())}
+        return self.get(key)
 
     def __init__(self, db):
         self.db = db

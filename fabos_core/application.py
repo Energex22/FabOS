@@ -61,6 +61,14 @@ class FabOSApplication:
         self.production_queue_decision=ProductionQueueDecision(self)
         self.production_next_action=ProductionNextAction(self)
         self.production_action_board=ProductionActionBoard(self)
+        # Phase 3: every order gets its invoice at birth. The three order-
+        # creation paths (quote accept via QuoteService, catalog checkout via
+        # CustomerCommerceService, storefront checkout via CheckoutService)
+        # auto-create the order's invoice best-effort (idempotent; a failed
+        # invoice never breaks the order itself).
+        self.quotes.invoices=self.invoices
+        self.customer_commerce.invoices=self.invoices
+        self.checkout.invoices=self.invoices
 
 
     def _ensure_owner_account(self):

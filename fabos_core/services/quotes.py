@@ -42,7 +42,7 @@ def ensure_quote_audit_schema(database):
 
 class QuoteService:
     SORT_COLUMNS={"number":"q.quote_number","customer":"customer_name COLLATE NOCASE","status":"q.status","total":"q.total_cents","expires":"q.expires_at","created":"q.created_at"}
-    def __init__(self,database,pricing=None): self.database=database; self.pricing=pricing; ensure_quote_audit_schema(database) if database is not None else None
+    def __init__(self,database,pricing=None): self.database=database; self.pricing=pricing; self.invoices=None; ensure_quote_audit_schema(database) if database is not None else None
     def _ensure_snapshot_schema(self):
         ensure_quote_audit_schema(self.database)
     def list(self,query="",status="All",sort_column="created",descending=True,group="all"):
@@ -151,4 +151,11 @@ class QuoteService:
             for item in quote_items:
                 conn.execute("INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?,?)",(str(uuid.uuid4()),oid,item["product_id"],item["variant_id"],item["description"],item["quantity"],item["unit_price_cents"],item["material"],item["color"],item["estimated_minutes"],item["estimated_filament_g"]))
             conn.execute("UPDATE quotes SET status='approved' WHERE id=?",(quote_id,)); conn.commit()
+        # Phase 3: the order's invoice is created when the quote is accepted
+        # (idempotent, best-effort — auto_create_for_order never raises, so a
+        # failed invoice cannot break the conversion). create_from_order
+        # returns the existing live invoice on repeat calls, so this is safe
+        # even if payment-time code creates it first.
+        if self.invoices is not None:
+            self.invoices.auto_create_for_order(oid)
         return oid

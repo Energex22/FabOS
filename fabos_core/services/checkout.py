@@ -16,6 +16,10 @@ class CheckoutService:
         self.accounts = accounts
         self.products = products
         self.shop_settings = shop_settings
+        # Optional InvoiceService, wired by FabOSApplication. When present,
+        # order creation auto-creates the order's invoice (best-effort: a
+        # failed invoice must never break the order itself).
+        self.invoices = None
 
     def _customer(self, user_id):
         user = self.accounts.get_user(user_id)
@@ -166,6 +170,10 @@ class CheckoutService:
                      item["estimated_minutes"], item["estimated_filament_g"]),
                 )
             conn.commit()
+        # Phase 3: the order's invoice is created at birth (idempotent,
+        # best-effort — auto_create_for_order never raises).
+        if self.invoices is not None:
+            self.invoices.auto_create_for_order(order_id)
         return {
             "id": order_id,
             "order_number": order_number,

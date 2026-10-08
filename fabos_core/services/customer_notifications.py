@@ -12,14 +12,18 @@ default ``email``):
 - order_shipped         -> /order.html?id={order_id}
 - order_cancelled       -> /order.html?id={order_id}
 
-Configuration (environment; never hardcode keys):
+Configuration (shop settings first, environment as fallback; never hardcode keys):
 
-- ``RESEND_API_KEY``   -- Resend API key. When unset, email payloads are
-  logged instead of sent (dev-safe). This is the exact key name.
-- ``RESEND_FROM_EMAIL`` -- optional sender override, e.g.
-  "FABVEX <hello@fabvex.com>". Falls back to the ``notification_from_email``
-  shop setting, then ``shop_email``. Without any from address the email
-  channel is recorded as skipped (logged, not sent).
+- ``resend_api_key`` shop setting, else ``RESEND_API_KEY`` env var. When
+  neither is set, email payloads are logged instead of sent (dev-safe).
+- ``resend_from_email`` shop setting, else ``RESEND_FROM_EMAIL`` env var,
+  else the ``notification_from_email`` shop setting, then ``shop_email``.
+  Without any from address the email channel is recorded as skipped
+  (logged, not sent).
+
+Integration secrets live in the SQLite shop_settings table (see the secrets
+posture comment in fabos_core/services/shop_settings.py) and are masked at
+the API boundary; they are never returned in plaintext by any settings API.
 
 SMS is not wired to a provider yet: when a customer's preference includes
 SMS, the SMS payload is logged and the record is marked
@@ -35,6 +39,9 @@ import urllib.request
 import urllib.error
 import uuid
 from abc import ABC, abstractmethod
+
+from fabos_core.services.shop_settings import ShopSettingsService
+
 
 logger = logging.getLogger(__name__)
 
@@ -81,12 +88,16 @@ class NotificationProvider(ABC):
 
 
 class ResendEmailProvider(NotificationProvider):
-    """Resend implementation. Key comes only from ``RESEND_API_KEY``."""
+    """Resend implementation. Key comes from the ``resend_api_key`` shop
+    setting first, falling back to the ``RESEND_API_KEY`` env var."""
 
     name = "resend"
 
     def __init__(self, api_key=None, api_url=None, timeout=10):
-        self.api_key = api_key if api_key is not None else os.environ.get("RESEND_API_KEY", "").strip()
+        if api_key is not None:
+            self.api_key = api_key
+        else:
+            self.api_key = os.environ.get("RESEND_API_KEY", "").strip()
         self.api_url = api_url or RESEND_API_URL
         self.timeout = timeout
 
@@ -96,7 +107,7 @@ class ResendEmailProvider(NotificationProvider):
         if not to:
             raise NotificationSendError("No recipient email address")
         if not from_email:
-            raise NotificationSendError("No from address configured (RESEND_FROM_EMAIL or notification_from_email shop setting)")
+            raise NotificationSendError("No from address configured (RESEND_FROM_EMAIL env or resend_from_email shop setting)")
         payload = json.dumps({
             "from": from_email,
             "to": [to] if isinstance(to, str) else list(to),
@@ -140,18 +151,39 @@ class LoggingEmailProvider(NotificationProvider):
         return {"provider": "log", "status": "logged"}
 
 
-def default_email_provider():
-    """Resend when ``RESEND_API_KEY`` is configured, else the log fallback."""
-    if os.environ.get("RESEND_API_KEY", "").strip():
-        return ResendEmailProvider()
+def default_email_provider(shop_settings=None):
+    """Resend when an API key is configured, else the log fallback.
+
+    The ``resend_api_key`` shop setting (changeable in the admin settings UI)
+    wins; the ``RESEND_API_KEY`` environment variable is the fallback.
+    """
+    key = ""
+    if shop_settings is not None:
+        try:
+            key = str(shop_settings.get("resend_api_key", "") or "").strip()
+        except Exception:
+            key = ""
+    if not key:
+        key = os.environ.get("RESEND_API_KEY", "").strip()
+    if key:
+        return ResendEmailProvider(api_key=key)
     return LoggingEmailProvider()
 
 
 class CustomerNotificationService:
     def __init__(self, database, shop_settings=None, provider=None):
         self.database = database
+        # Internal emit sites (quotes, payments, fulfillment, ...) construct
+        # this service with only a database. Fall back to a DB-backed settings
+        # reader so the admin-UI-configured keys apply everywhere, not just on
+        # the HTTP paths that pass shop_settings explicitly.
+        if shop_settings is None:
+            try:
+                shop_settings = ShopSettingsService(database)
+            except Exception:
+                shop_settings = None
         self.shop_settings = shop_settings
-        self.provider = provider if provider is not None else default_email_provider()
+        self.provider = provider if provider is not None else default_email_provider(self.shop_settings)
 
     # -- low-level helpers -------------------------------------------------
     def _row(self, sql, args=()):
@@ -188,7 +220,8 @@ class CustomerNotificationService:
         if override:
             return override
         return str(
-            self._setting("notification_from_email", "")
+            self._setting("resend_from_email", "")
+            or self._setting("notification_from_email", "")
             or self._setting("shop_email", "")
         ).strip()
 

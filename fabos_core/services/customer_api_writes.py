@@ -544,6 +544,31 @@ def register_customer_write_routes(app, get_application, current_user):
             file_bytes=b"".join(chunks),
         )
 
+    @app.post("/api/v1/customer/orders/preview")
+    def preview_customer_order(payload: OrderRequest, user=Depends(current_user), application=Depends(get_application)):
+        """Phase 3: binding totals preview. Same inputs and the same
+        validation/calculation code path as order creation, but nothing is
+        persisted — the customer reviews these totals before continuing to
+        payment."""
+        try:
+            items = [item.dict() for item in payload.items]
+            totals = application.customer_commerce.preview_order_totals(
+                user["id"], items, payload.shippingAddress.dict(), payload.notes)
+            return {
+                "items": totals["items"],
+                "totals": {
+                    "subtotal": round(totals["subtotal_cents"] / 100, 2),
+                    "shipping": round(totals["shipping_cents"] / 100, 2),
+                    "tax": round(totals["tax_cents"] / 100, 2),
+                    "total": round(totals["total_cents"] / 100, 2),
+                    "currency": totals["currency"],
+                },
+            }
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.post("/api/v1/customer/orders")
     def create_customer_order(payload: OrderRequest, user=Depends(current_user), application=Depends(get_application)):
         try:

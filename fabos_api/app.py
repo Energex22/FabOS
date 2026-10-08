@@ -731,6 +731,7 @@ class FabOSAPI:
                 order_data = dict(order)
                 order_data["status"] = _CUSTOMER_STATUS.get(str(order_data.get("status") or "new").lower(), "Order received")
                 dossier = self.core.orders.dossier(route[4])
+                order_data["next_step"] = dossier.get("next_step")
                 designs = [
                     {key: design[key] for key in ("id", "name", "current_version", "design_version", "design_version_label") if key in design}
                     for design in [dict(candidate) for candidate in (dossier.get("designs") or [])]
@@ -757,6 +758,24 @@ class FabOSAPI:
                 row = dict(payment) if not isinstance(payment, dict) else payment
                 projected = {key: row[key] for key in ("status", "checkout_url") if key in row}
                 return self._response(200, {"payment": projected, **projected})
+
+            if len(route) == 5 and route[:4] == ["api", self.VERSION, "customer", "orders"] and route[4] == "preview" and method == "POST":
+                context = self._context(headers)
+                payload = body or {}
+                items = payload.get("items") or []
+                shipping = payload.get("shippingAddress") or payload.get("shipping_address") or {}
+                totals = self.core.customer_commerce.preview_order_totals(
+                    context["id"], items, shipping, payload.get("notes") or "")
+                return self._response(200, {
+                    "items": totals["items"],
+                    "totals": {
+                        "subtotal": totals["subtotal_cents"] / 100.0,
+                        "shipping": totals["shipping_cents"] / 100.0,
+                        "tax": totals["tax_cents"] / 100.0,
+                        "total": totals["total_cents"] / 100.0,
+                        "currency": totals["currency"],
+                    },
+                })
 
             # Customer quote/proof workflow (mirrors the FastAPI routes in
             # fabos_core/api.py + fabos_core/services/design_proofs_api.py so
@@ -988,7 +1007,12 @@ class FabOSAPI:
                     context = self._context(headers, "order.read" if method == "GET" else "order.manage")
                     if method == "GET":
                         order, items = self.core.orders.get_for_user(context["id"], route[3])
-                        return self._response(200, {"order": order, "items": items})
+                        order_data = dict(order)
+                        try:
+                            order_data["next_step"] = self.core.orders.dossier(route[3]).get("next_step")
+                        except KeyError:
+                            order_data["next_step"] = None
+                        return self._response(200, {"order": order_data, "items": items})
                     if method in ("PATCH", "PUT"):
                         status = body.get("status")
                         if not status:
@@ -1008,6 +1032,32 @@ class FabOSAPI:
                     context = self._context(headers, "payment.read")
                     invoice, items, payments = self.core.invoices.get_for_user(context["id"], route[3])
                     return self._response(200, {"invoice": invoice, "items": items, "payments": payments})
+            if route[:4] == ["api", self.VERSION, "admin", "invoices"] and len(route) == 6 and route[5] == "payments" and method == "POST":
+                # Phase 3 money handoff: record a payment against an invoice.
+                # Mirrors FastAPI POST /api/v1/admin/invoices/{id}/payments
+                # (the /admin/ prefix is the contract; FastAPI behavior wins
+                # per the production-transport decision).
+                context = self._context(headers, "payment.manage")
+                payload = body or {}
+                try:
+                    amount_cents = int(payload.get("amount_cents", 0))
+                except (TypeError, ValueError):
+                    return self._response(400, {"error": "amount_cents must be an integer number of cents"})
+                try:
+                    self.core.invoices.record_payment_for_user(
+                        context["id"], route[4], amount_cents,
+                        method=str(payload.get("method") or ""),
+                        reference=str(payload.get("reference") or ""),
+                        notes=str(payload.get("notes") or ""))
+                except PermissionError as exc:
+                    return self._response(403, {"error": str(exc)})
+                except KeyError:
+                    return self._response(404, {"error": "Invoice not found"})
+                except ValueError as exc:
+                    return self._response(400, {"error": str(exc)})
+                invoice, items, payments = self.core.invoices.get_for_user(context["id"], route[4])
+                return self._response(200, {"invoice_id": route[4], "recorded_cents": amount_cents,
+                                            "invoice": invoice, "items": items, "payments": payments})
 
             if route[:3] == ["api", self.VERSION, "fulfillments"]:
                 if len(route) == 3 and method == "GET":

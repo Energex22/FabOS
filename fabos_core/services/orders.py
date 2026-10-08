@@ -279,4 +279,46 @@ class OrderService:
         elif not fulfillment:next_action="Set fulfillment"
         elif fulfillment["status"] not in ("delivered","picked_up"):next_action="Complete fulfillment"
         else:next_action="Complete order"
-        return {"order":order,"items":items,"designs":designs,"jobs":jobs,"qc":qc,"invoices":invoices,"payments":payments,"fulfillment":fulfillment,"total_jobs":total_jobs,"completed_jobs":completed_jobs,"qc_total":qc_total,"qc_passed":qc_passed,"paid_cents":paid,"next_action":next_action}
+        next_step=self._next_step(order,total_jobs,completed_jobs,qc_total,qc_passed,active_invoice,fulfillment)
+        return {"order":order,"items":items,"designs":designs,"jobs":jobs,"qc":qc,"invoices":invoices,"payments":payments,"fulfillment":fulfillment,"total_jobs":total_jobs,"completed_jobs":completed_jobs,"qc_total":qc_total,"qc_passed":qc_passed,"paid_cents":paid,"next_action":next_action,"next_step":next_step}
+
+    # Phase 3 money handoffs: machine-readable order state for the frontend.
+    # Unlike next_action (a staff-oriented label with legacy ordering), this
+    # follows the enforced money-first lifecycle: payment -> production -> QC
+    # -> fulfillment -> completion. "step" is a stable enum the frontend can
+    # switch on; "label" is the human-readable text.
+    NEXT_STEPS=(
+        "awaiting_payment","ready_for_production","in_production","awaiting_qc",
+        "awaiting_fulfillment","in_transit","ready_to_complete","completed","cancelled",
+    )
+    def next_step(self,order_id):
+        """Machine-readable next step for an order: {"step","label","detail"}."""
+        dossier=self.dossier(order_id)
+        return dossier["next_step"]
+    @staticmethod
+    def _next_step(order,total_jobs,completed_jobs,qc_total,qc_passed,active_invoice,fulfillment):
+        status=str(order["status"] or "").lower()
+        if status=="cancelled":return {"step":"cancelled","label":"Cancelled","detail":"This order was cancelled."}
+        if status=="completed":return {"step":"completed","label":"Completed","detail":"This order is complete."}
+        total_cents=int(order["total_cents"] or 0)
+        balance=int(active_invoice["balance_cents"] or 0) if active_invoice else total_cents
+        if total_cents>0 and (active_invoice is None or balance>0):
+            return {"step":"awaiting_payment","label":"Awaiting payment",
+                    "detail":"$%.2f is still due on this order."%(balance/100.0)}
+        if total_jobs==0:
+            return {"step":"ready_for_production","label":"Ready for production",
+                    "detail":"Payment is settled. Production jobs can be started."}
+        if completed_jobs<total_jobs:
+            return {"step":"in_production","label":"In production",
+                    "detail":"%d of %d production jobs complete."%(completed_jobs,total_jobs)}
+        if qc_total==0 or qc_passed<qc_total:
+            return {"step":"awaiting_qc","label":"Awaiting QC",
+                    "detail":"Quality control is not complete."}
+        if not fulfillment:
+            return {"step":"awaiting_fulfillment","label":"Awaiting fulfillment",
+                    "detail":"No fulfillment is scheduled yet."}
+        if str(fulfillment["status"] or "").lower() not in ("delivered","picked_up"):
+            return {"step":"in_transit","label":"In transit",
+                    "detail":"Fulfillment is %s."%(str(fulfillment["status"] or "pending"))}
+        return {"step":"ready_to_complete","label":"Ready to complete",
+                "detail":"Production, QC, and fulfillment are done."}

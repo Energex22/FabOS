@@ -374,6 +374,22 @@ class Bl7SettingsValueTests(unittest.TestCase):
             def metadata(self):
                 return {}
 
+            # Phase 3: the settings interface grew secret-masking helpers;
+            # the fake tracks it (no key used here is a secret).
+            @staticmethod
+            def is_secret_key(key):
+                return False
+
+            def present_setting(self, key):
+                return self.get(key)
+
+            def masked_snapshot(self):
+                return {"some_key": seen.get("value"), "some_numeric_key": seen.get("value")}
+
+            @staticmethod
+            def secret_keys():
+                return []
+
         core = _quiet_core(security=_admin_security(),
                            accounts=SimpleNamespace(get_user=lambda uid: {"role": "owner"}),
                            shop_settings=_Settings())
