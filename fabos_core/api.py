@@ -29,6 +29,7 @@ from fabos_core.services.design_proofs_api import register_design_proof_routes
 from fabos_core.services.payment_api import register_payment_routes
 from fabos_core.services.customer_notifications import (
     CustomerNotificationService, normalize_notification_preference)
+from fabos_core.services.fulfillment import FulfillmentService
 
 
 CUSTOMER_STATUS = {
@@ -689,6 +690,11 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         order["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
         dossier = application.orders.dossier(order_id)
         order["next_step"] = dossier.get("next_step")
+        # Phase 4: customer-facing fulfillment / tracking card. Every key is
+        # present; unknown values are null, never omitted.
+        fulfillment_service = getattr(application, "fulfillment", None)
+        order["fulfillment"] = FulfillmentService.customer_payload(
+            fulfillment_service.get_for_order(order_id) if fulfillment_service else None)
         return {
             "order": order,
             "items": [_order_item_payload(item) for item in items],
