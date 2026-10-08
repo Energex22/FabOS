@@ -6,6 +6,34 @@ from fabos_core.services.customer_notifications import CustomerNotificationServi
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Action-item age-grade thresholds (Phase 5).
+#
+# New signals:
+#   - Quote needing pricing (draft/under_review):  medium until 24h old, then high.
+#   - Accepted-but-unstarted order (pending/confirmed, no active jobs):
+#       medium until 48h old, then high.
+# Existing items (aging applied only where trivially safe):
+#   - Sent quote awaiting approval: medium, escalates to high after 7d.
+#   - Everything else keeps its existing severity logic untouched.
+# ---------------------------------------------------------------------------
+ACTION_ITEM_PRICING_ESCALATION_HOURS = 24
+ACTION_ITEM_UNSTARTED_ORDER_ESCALATION_HOURS = 48
+ACTION_ITEM_AWAITING_APPROVAL_ESCALATION_DAYS = 7
+
+
+def _age_hours(created_at):
+    """Hours since a CURRENT_TIMESTAMP-style 'YYYY-MM-DD HH:MM:SS' value."""
+    if not created_at:
+        return 0.0
+    try:
+        ts = datetime.fromisoformat(str(created_at).strip())
+    except ValueError:
+        return 0.0
+    return max(0.0, (datetime.now() - ts).total_seconds() / 3600.0)
+
+
 class OperationsHubService:
     def __init__(self,app):
         self.app=app
@@ -105,16 +133,29 @@ class OperationsHubService:
                                   "page":"Production","id":j["id"],"key":"jobfile:"+j["id"]})
 
             # Quotes waiting on approval / expiring
-            quotes=c.execute("""SELECT q.id,q.quote_number,q.status,q.expires_at,COALESCE(cu.name,'No customer') customer_name
+            quotes=c.execute("""SELECT q.id,q.quote_number,q.status,q.expires_at,q.created_at,COALESCE(cu.name,'No customer') customer_name
                 FROM quotes q LEFT JOIN customers cu ON cu.id=q.customer_id
                 WHERE q.status IN ('draft','sent') ORDER BY q.expires_at,q.created_at""").fetchall()
             for q in quotes:
                 if q["status"]=='sent':
                     expired=bool(q["expires_at"] and str(q["expires_at"])<today)
-                    items.append({"severity":"high" if expired else "medium",
+                    escalated=_age_hours(q["created_at"])>ACTION_ITEM_AWAITING_APPROVAL_ESCALATION_DAYS*24
+                    items.append({"severity":"high" if (expired or escalated) else "medium",
                                   "title":"Quote expired" if expired else "Quote awaiting approval",
                                   "detail":"%s • %s"%(q["quote_number"],q["customer_name"]),
                                   "page":"Quotes","id":q["id"],"key":"quote:"+q["id"]})
+
+            # New quote requests needing pricing (Phase 5). Draft/under_review
+            # quotes are staff's pricing queue; they escalate to high after
+            # ACTION_ITEM_PRICING_ESCALATION_HOURS so nothing sits unpriced.
+            unpriced=c.execute("""SELECT q.id,q.quote_number,q.created_at,COALESCE(cu.name,'No customer') customer_name
+                FROM quotes q LEFT JOIN customers cu ON cu.id=q.customer_id
+                WHERE q.status IN ('draft','under_review') ORDER BY q.created_at""").fetchall()
+            for q in unpriced:
+                items.append({"severity":"high" if _age_hours(q["created_at"])>ACTION_ITEM_PRICING_ESCALATION_HOURS else "medium",
+                              "title":"Quote needs pricing",
+                              "detail":"%s • %s"%(q["quote_number"],q["customer_name"]),
+                              "page":"Quotes","id":q["id"],"key":"unpriced:"+q["id"]})
 
             # Active overdue orders
             overdue_orders=c.execute("""SELECT o.id,o.order_number,o.due_at,COALESCE(cu.name,'No customer') customer_name
@@ -125,6 +166,22 @@ class OperationsHubService:
                 items.append({"severity":"high","title":"Order overdue",
                               "detail":"%s • %s • due %s"%(o["order_number"],o["customer_name"],o["due_at"]),
                               "page":"Orders","id":o["id"],"key":"overdue:"+o["id"]})
+
+            # Accepted-but-unstarted orders (Phase 5). An order in
+            # pending/confirmed with no active production job is stuck
+            # before manufacturing; it escalates to high after
+            # ACTION_ITEM_UNSTARTED_ORDER_ESCALATION_HOURS.
+            unstarted=c.execute("""SELECT o.id,o.order_number,o.created_at,COALESCE(cu.name,'No customer') customer_name
+                FROM orders o LEFT JOIN customers cu ON cu.id=o.customer_id
+                WHERE o.status IN ('pending','confirmed')
+                  AND NOT EXISTS(SELECT 1 FROM print_jobs j WHERE j.order_id=o.id
+                                 AND j.status NOT IN ('completed','cancelled'))
+                ORDER BY o.created_at""").fetchall()
+            for o in unstarted:
+                items.append({"severity":"high" if _age_hours(o["created_at"])>ACTION_ITEM_UNSTARTED_ORDER_ESCALATION_HOURS else "medium",
+                              "title":"Order accepted — production not started",
+                              "detail":"%s • %s"%(o["order_number"],o["customer_name"]),
+                              "page":"Orders","id":o["id"],"key":"unstarted:"+o["id"]})
 
             # QC
             qc=c.execute("""SELECT q.id,q.order_id,q.print_job_id,o.order_number
@@ -267,17 +324,26 @@ class OperationsHubService:
               AND NOT EXISTS(SELECT 1 FROM qc_inspections q WHERE q.order_id=orders.id AND q.status<>'passed')""")
 
             # Every QC-passed order is ready for fulfillment. Create the pending
-            # fulfillment record once so the next operational step is explicit,
-            # while leaving the pickup/shipping choice editable by staff/customer.
+            # fulfillment record once so the next operational step is explicit.
+            # The initial method is derived from the order's shipping data —
+            # an order that paid for shipping (shipping_cents > 0) or carries
+            # a real shipping address is a shipping order; staff/internal
+            # orders with neither default to pickup. Staff can correct the
+            # method with PATCH /api/v1/admin/fulfillments/{id} before it
+            # advances past pending.
             c.execute("""INSERT OR IGNORE INTO fulfillments(id,order_id,method,status)
-              SELECT lower(hex(randomblob(16))),o.id,'pickup','pending'
+              SELECT lower(hex(randomblob(16))),o.id,
+                CASE WHEN COALESCE(o.shipping_cents,0)>0
+                       OR TRIM(COALESCE(o.shipping_address_json,'')) NOT IN ('','{}')
+                     THEN 'shipping' ELSE 'pickup' END,
+                'pending'
               FROM orders o
               WHERE o.status='ready'
                 AND NOT EXISTS(SELECT 1 FROM fulfillments f WHERE f.order_id=o.id)""")
 
-            # A default pickup fulfillment can become ready as soon as the order
-            # reaches ready. Shipping remains pending until staff selects/configures
-            # the shipping method and package details.
+            # A pickup fulfillment can become ready as soon as the order
+            # reaches ready. Shipping stays pending until staff packs it —
+            # the auto-flip applies to pickup-method orders only.
             c.execute("""UPDATE fulfillments SET status='ready_for_pickup',updated_at=CURRENT_TIMESTAMP
               WHERE status='pending' AND method='pickup'
                 AND EXISTS(SELECT 1 FROM orders o WHERE o.id=fulfillments.order_id AND o.status='ready')""")

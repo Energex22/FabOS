@@ -11,6 +11,7 @@ from pathlib import Path
 from fabos_core.services.rate_limit import RateLimiter
 from fabos_core.services.customer_notifications import (
     CustomerNotificationService, normalize_notification_preference)
+from fabos_core.services.fulfillment import FulfillmentService
 from fabos_api.wsgi_extended import handle_extended_routes
 from urllib.parse import parse_qs, urlsplit
 
@@ -365,7 +366,7 @@ class FabOSAPI:
         }
         return item
 
-    def _operations_dashboard(self, user):
+    def _operations_dashboard(self, user, action_limit=20):
         from datetime import datetime, timedelta
         now=datetime.now(); today=now.date().isoformat(); month_start=(now.date()-timedelta(days=29)).isoformat()
         with self.core.database.connect() as conn:
@@ -389,8 +390,12 @@ class FabOSAPI:
             printers=[dict(x) for x in conn.execute("SELECT id,name,model,status,connection_mode,simulation_progress,nozzle_temp,bed_temp,print_time_seconds,print_time_left_seconds,octoprint_state_text,octoprint_current_file,last_seen_at,total_hours FROM printers ORDER BY name").fetchall()]
             spools=[dict(x) for x in conn.execute("SELECT id,material,brand,color,remaining_g,initial_g,cost_cents,location FROM filament_spools WHERE active=1 AND remaining_g<? ORDER BY remaining_g LIMIT 10",(low_threshold,)).fetchall()]
             maintenance=[dict(x) for x in conn.execute("SELECT p.id,p.name,p.total_hours,COALESCE(MAX(m.printer_hours),0) last_service_hours,p.total_hours-COALESCE(MAX(m.printer_hours),0) hours_since_service FROM printers p LEFT JOIN maintenance_records m ON m.printer_id=p.id GROUP BY p.id ORDER BY hours_since_service DESC").fetchall()]
-        try: actions=[dict(x) for x in self.core.operations.action_items()[:20]]
+        try: actions=[dict(x) for x in self.core.operations.action_items()]
         except Exception: actions=[]
+        if action_limit is not None:
+            # Default display cap stays a frontend concern; ?all=true (or
+            # ?limit=N) returns the full list with no silent cap.
+            actions=actions[:max(1,min(int(action_limit or 20),500))]
         return {"generated_at":now.isoformat(timespec="seconds"),"viewer":{"id":user["id"],"account_type":user.get("account_type"),"role":user.get("role")},"business":{"orders_today":orders_today,"sales_today_cents":sales_today,"sales_30d_cents":sales_30d,"active_orders":active_orders,"open_quotes":open_quotes,"unpaid_invoices":unpaid,"overdue_orders":overdue,"pending_qc":pending_qc},"production":{"active_jobs":active_jobs,"printing_jobs":printing_jobs,"failed_jobs":failed_jobs,"jobs":jobs},"printers":{"total":printer_total,"online":printer_online,"items":printers},"inventory":{"low_filament":low_filament,"low_supplies":low_supplies,"filament_threshold_g":low_threshold,"spools":spools},"maintenance":{"items":maintenance},"recent_orders":recent_orders,"action_items":actions}
 
     def request(self, method, path, body=None, headers=None, raw_body=None):
@@ -405,7 +410,20 @@ class FabOSAPI:
 
             if route == ["api", self.VERSION, "admin", "operations", "dashboard"] and method == "GET":
                 context=self._context(headers, "production.read")
-                return self._response(200, self._operations_dashboard(context))
+                show_all=(query.get("all", [""])[0] or "").strip().lower() in ("1","true","yes")
+                try:
+                    limit=int(query.get("limit", ["20"])[0] or 20)
+                except (TypeError, ValueError):
+                    limit=20
+                return self._response(200, self._operations_dashboard(
+                    context, None if show_all else limit))
+
+            if route == ["api", self.VERSION, "admin", "notifications", "unread-count"] and method == "GET":
+                # Staff-scoped unread count for the admin header badge. Mirrors
+                # the FastAPI route above; the customer unread-count endpoint
+                # 409s for team sessions, so staff needs its own.
+                context=self._context(headers, "production.read")
+                return self._response(200, {"unread": int(self.core.operations.unread_count())})
 
             if route == ["api", self.VERSION, "catalog"] and method == "GET":
                 rows = self.core.products.customer_catalog(
@@ -732,6 +750,11 @@ class FabOSAPI:
                 order_data["status"] = _CUSTOMER_STATUS.get(str(order_data.get("status") or "new").lower(), "Order received")
                 dossier = self.core.orders.dossier(route[4])
                 order_data["next_step"] = dossier.get("next_step")
+                # Phase 4: customer-facing fulfillment / tracking card, mirroring
+                # fabos_core/api.py. Every key present; unknown values are null.
+                fulfillment_service = getattr(self.core, "fulfillment", None)
+                order_data["fulfillment"] = FulfillmentService.customer_payload(
+                    fulfillment_service.get_for_order(route[4]) if fulfillment_service else None)
                 designs = [
                     {key: design[key] for key in ("id", "name", "current_version", "design_version", "design_version_label") if key in design}
                     for design in [dict(candidate) for candidate in (dossier.get("designs") or [])]

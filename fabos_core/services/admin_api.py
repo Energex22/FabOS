@@ -39,8 +39,18 @@ def register_admin_routes(app, get_application, administrator_user):
             raise HTTPException(status_code=403, detail="Operations access denied")
         return user
 
+    @app.get("/api/v1/admin/notifications/unread-count")
+    def staff_notification_unread_count(user=Depends(operations_user),
+                                       application=Depends(get_application)):
+        # Staff-scoped unread count for the admin header badge (operations-hub
+        # notifications table, refreshed from action items). Distinct from the
+        # customer /api/v1/customer/notifications/unread-count endpoint, which
+        # 409s for team sessions without a linked customer account.
+        return {"unread": int(application.operations.unread_count())}
+
     @app.get("/api/v1/admin/operations/dashboard")
-    def operations_dashboard(user=Depends(operations_user), application=Depends(get_application)):
+    def operations_dashboard(all: bool = False, limit: int = 20,
+                             user=Depends(operations_user), application=Depends(get_application)):
         from datetime import datetime, timedelta
         now = datetime.now()
         today = now.date().isoformat()
@@ -113,7 +123,12 @@ def register_admin_routes(app, get_application, administrator_user):
                     job[field[:-5]] = None
         action_items=[]
         try:
-            action_items=[dict(item) for item in application.operations.action_items()[:20]]
+            items=application.operations.action_items()
+            if not all:
+                # Default display cap stays a frontend concern; ?all=true (or
+                # ?limit=N) returns the full list with no silent cap.
+                items=items[:max(1,min(int(limit or 20),500))]
+            action_items=[dict(item) for item in items]
         except Exception:
             pass
         return {
@@ -542,3 +557,50 @@ def register_admin_routes(app, get_application, administrator_user):
     @app.post("/api/v1/admin/qc/reconcile")
     def reconcile_admin_qc(user=Depends(administrator_user), application=Depends(get_application)):
         return {"created": application.manufacturing.reconcile_qc()}
+
+    class FulfillmentUpdate(BaseModel):
+        method: Optional[str] = Field(default=None, max_length=20)
+        carrier: Optional[str] = Field(default=None, max_length=120)
+        tracking_number: Optional[str] = Field(default=None, max_length=120)
+        destination: Optional[str] = Field(default=None, max_length=500)
+
+    class FulfillmentTransition(BaseModel):
+        to_state: str = Field(min_length=1, max_length=30)
+
+    @app.patch("/api/v1/admin/fulfillments/{fulfillment_id}")
+    def admin_fulfillment_update(fulfillment_id: str, payload: FulfillmentUpdate,
+                                 user=Depends(administrator_user), application=Depends(get_application)):
+        """Phase 4: edit fulfillment method / carrier / tracking / destination."""
+        try:
+            fulfillment = application.fulfillment.update_for_user(
+                user["id"], fulfillment_id,
+                method=payload.method, carrier=payload.carrier,
+                tracking_number=payload.tracking_number, destination=payload.destination)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Fulfillment not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"fulfillment": fulfillment}
+
+    @app.post("/api/v1/admin/fulfillments/{fulfillment_id}/transition")
+    def admin_fulfillment_transition(fulfillment_id: str, payload: FulfillmentTransition,
+                                     user=Depends(administrator_user), application=Depends(get_application)):
+        """Phase 4: move a fulfillment through its state machine.
+
+        Valid edges: packed -> shipped -> delivered; ready_for_pickup ->
+        picked_up; packed -> ready_for_pickup (flips method to pickup).
+        Anything else — including skipping steps — is a 400. The shipped
+        transition fires the customer order_shipped notification.
+        """
+        try:
+            fulfillment = application.fulfillment.transition_for_user(
+                user["id"], fulfillment_id, payload.to_state)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Fulfillment not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"fulfillment": fulfillment}

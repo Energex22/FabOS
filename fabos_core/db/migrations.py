@@ -218,6 +218,14 @@ CREATE INDEX IF NOT EXISTS idx_customer_notifications_dedupe ON customer_notific
 ALTER TABLE customers ADD COLUMN notification_preference TEXT NOT NULL DEFAULT 'email';
 ALTER TABLE quotes ADD COLUMN updated_at TEXT;
 INSERT OR IGNORE INTO shop_settings(key,value) VALUES('notification_from_email','');"""),
+
+(58,"""ALTER TABLE fulfillments ADD COLUMN packed_at TEXT;"""),
+
+# The admin operations dashboards (FastAPI + WSGI) select
+# print_jobs.print_time_left_seconds for the production jobs list, but no
+# migration ever created that column, so the dashboard 500s on any database
+# built purely from migrations. Add it to match the long-standing query.
+(59,"""ALTER TABLE print_jobs ADD COLUMN print_time_left_seconds REAL;"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:

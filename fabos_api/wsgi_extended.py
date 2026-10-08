@@ -655,6 +655,47 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         return api._response(200, core.production_automation.tick())
 
     # ------------------------------------------------------------------
+    # Admin fulfillments (mirror fabos_core/services/admin_api.py)
+    # ------------------------------------------------------------------
+    if len(route) == 5 and route[:4] == ["api", v, "admin", "fulfillments"] and method == "PATCH":
+        # Phase 4: edit method / carrier / tracking_number / destination.
+        context = _admin(api, headers)
+        fulfillment_id = route[4]
+        payload = body or {}
+        try:
+            fulfillment = core.fulfillment.update_for_user(
+                context["id"], fulfillment_id,
+                method=payload.get("method"), carrier=payload.get("carrier"),
+                tracking_number=payload.get("tracking_number"),
+                destination=payload.get("destination"))
+        except PermissionError as exc:
+            return api._response(403, {"error": str(exc)})
+        except KeyError:
+            return api._response(404, {"error": "Fulfillment not found"})
+        except ValueError as exc:
+            return api._response(400, {"error": str(exc)})
+        return api._response(200, {"fulfillment": fulfillment})
+
+    if len(route) == 6 and route[:4] == ["api", v, "admin", "fulfillments"] and route[5] == "transition" and method == "POST":
+        # Phase 4: move a fulfillment through its state machine. The shipped
+        # transition fires the Phase 2 order_shipped notification via the
+        # shared service, exactly like the FastAPI route.
+        context = _admin(api, headers)
+        fulfillment_id = route[4]
+        to_state = (body or {}).get("to_state")
+        if not to_state:
+            return api._response(400, {"error": "to_state is required"})
+        try:
+            fulfillment = core.fulfillment.transition_for_user(context["id"], fulfillment_id, to_state)
+        except PermissionError as exc:
+            return api._response(403, {"error": str(exc)})
+        except KeyError:
+            return api._response(404, {"error": "Fulfillment not found"})
+        except ValueError as exc:
+            return api._response(400, {"error": str(exc)})
+        return api._response(200, {"fulfillment": fulfillment})
+
+    # ------------------------------------------------------------------
     # Admin printers
     # ------------------------------------------------------------------
     if len(route) == 6 and route[:4] == ["api", v, "admin", "printers"] and method == "POST":
