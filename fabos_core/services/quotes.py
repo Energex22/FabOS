@@ -1,6 +1,25 @@
 import json
+import logging
 import uuid
 from datetime import date, timedelta
+
+from fabos_core.services.customer_notifications import CustomerNotificationService
+
+logger = logging.getLogger(__name__)
+
+
+def _emit_quote_sent(database, quote_id):
+    """Fire the quote_sent notification. Never breaks the quote workflow."""
+    try:
+        with database.connect() as conn:
+            row = conn.execute(
+                "SELECT id,quote_number,customer_id,total_cents,expires_at FROM quotes WHERE id=?",
+                (quote_id,)).fetchone()
+        if not row:
+            return
+        CustomerNotificationService(database).notify_quote_sent(dict(row))
+    except Exception:
+        logger.exception("quote_sent notification hook failed for quote %s", quote_id)
 
 
 def ensure_quote_audit_schema(database):
@@ -77,7 +96,10 @@ class QuoteService:
         with self.database.connect() as conn:
             if not quote_id:
                 conn.execute("BEGIN IMMEDIATE")
+            previous_status = None
             if quote_id:
+                previous_status = conn.execute("SELECT status FROM quotes WHERE id=?", (quote_id,)).fetchone()
+                previous_status = str(previous_status[0] or "").lower() if previous_status else None
                 conn.execute("UPDATE quotes SET customer_id=?,status=?,total_cents=?,expires_at=?,notes=? WHERE id=?",(data["customer_id"],data.get("status","draft"),total,data.get("expires_at") or None,data.get("notes",""),quote_id)); conn.execute("DELETE FROM quote_items WHERE quote_id=?",(quote_id,))
             else:
                 quote_id=str(uuid.uuid4()); conn.execute("INSERT INTO quotes(id,quote_number,customer_id,status,total_cents,expires_at,notes) VALUES(?,?,?,?,?,?,?)",(quote_id,self.next_number(conn),data["customer_id"],data.get("status","draft"),total,data.get("expires_at") or None,data.get("notes","")))
@@ -88,6 +110,10 @@ class QuoteService:
             snapshot={"customer_id":data["customer_id"],"status":data.get("status","draft"),"total_cents":total,"expires_at":data.get("expires_at") or None,"notes":data.get("notes",""),"items":[dict(i) for i in items]}
             conn.execute("INSERT INTO quote_versions(id,quote_id,version,status,total_cents,expires_at,notes,snapshot_json) VALUES(?,?,?,?,?,?,?,?)",(str(uuid.uuid4()),quote_id,int(version),data.get("status","draft"),total,data.get("expires_at") or None,data.get("notes",""),json.dumps(snapshot,sort_keys=True,default=str)))
             conn.commit()
+        # A quote becomes "ready" when it transitions into the sent state;
+        # the dedupe key on the notification makes repeat saves idempotent.
+        if str(data.get("status","draft")).lower() == "sent" and previous_status != "sent":
+            _emit_quote_sent(self.database, quote_id)
         return quote_id
     def set_status(self,quote_id,status):
         allowed={"draft","under_review","sent","accepted","declined","expired","approved"}
@@ -96,8 +122,11 @@ class QuoteService:
         with self.database.connect() as conn:
             row=conn.execute("SELECT id,status FROM quotes WHERE id=?",(quote_id,)).fetchone()
             if not row: raise KeyError("Quote not found")
+            previous=str(row["status"] or "").strip().lower()
             conn.execute("UPDATE quotes SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(status,quote_id))
             conn.commit()
+        if status=="sent" and previous!="sent":
+            _emit_quote_sent(self.database,quote_id)
         return status
     def versions(self,quote_id):
         with self.database.connect() as conn:

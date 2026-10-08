@@ -166,7 +166,8 @@ class AuthProjectionTests(unittest.TestCase):
         self.assertEqual(result["data"], {
             "token": "tok", "expires_at": "exp",
             "user": {"name": "Ann", "email": "ann@example.com"},
-            "customer": {"name": "Ann", "email": "ann@example.com", "phone": "555"},
+            "customer": {"name": "Ann", "email": "ann@example.com", "phone": "555",
+                         "notification_preference": "email"},
         })
 
     def test_team_login_projects_fastapi_shape(self):
@@ -199,7 +200,8 @@ class AuthProjectionTests(unittest.TestCase):
         self.assertEqual(result["status"], 200)
         self.assertEqual(result["data"], {
             "user": {"name": "Ann", "email": "ann@example.com"},
-            "customer": {"name": "Ann", "email": "ann@example.com", "phone": "555"},
+            "customer": {"name": "Ann", "email": "ann@example.com", "phone": "555",
+                         "notification_preference": "email"},
         })
         self.assertNotIn("user", result["data"]["user"])
 

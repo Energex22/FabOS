@@ -13,6 +13,11 @@ import urllib.parse
 import urllib.request
 import uuid
 import sqlite3
+import logging
+
+from fabos_core.services.customer_notifications import CustomerNotificationService
+
+logger = logging.getLogger(__name__)
 
 
 class PaymentProviderNotConfigured(RuntimeError):
@@ -327,6 +332,14 @@ class PaymentService:
             self._settle_transaction(payment_id,status,provider_payment_id)
         elif status in ("partially_refunded","refunded"):
             self._settle_refund(payment_id, status, provider_payment_id, refund_amount_cents)
+        elif status=="failed" and current!="failed":
+            # A failed payment is customer-actionable: notify once per
+            # payment transaction. Never breaks payment processing.
+            try:
+                CustomerNotificationService(self.database).notify_payment_failed(
+                    {"id":payment_id,"order_id":row["order_id"],"amount_cents":row["amount_cents"]})
+            except Exception:
+                logger.exception("payment_failed notification hook failed for payment %s",payment_id)
     def _settle_refund(self,payment_id,status,provider_payment_id=None,refund_amount_cents=None):
         with self.database.connect() as conn:
             row=conn.execute("SELECT * FROM payment_transactions WHERE id=?", (payment_id,)).fetchone()

@@ -1,5 +1,10 @@
 import json,uuid
+import logging
 from datetime import datetime
+
+from fabos_core.services.customer_notifications import CustomerNotificationService
+
+logger = logging.getLogger(__name__)
 
 class OperationsHubService:
     def __init__(self,app):
@@ -188,6 +193,7 @@ class OperationsHubService:
     def reconcile_workflows(self):
         """Repair/advance deterministic workflow states without requiring manual clicks."""
         today=datetime.now().date().isoformat()
+        expiring_rows=[]
         with self.db.connect() as c:
             # Expired sent quotes leave Active Quotes automatically and create a
             # one-time notification so the transition is still visible.
@@ -201,6 +207,18 @@ class OperationsHubService:
                   id,dedupe_key,severity,title,body,page,entity_id,is_read) VALUES(?,?,?,?,?,?,?,0)""",
                   (str(uuid.uuid4()),'event:quoteexpired:'+q['id'],'medium','Quote expired',
                    '%s • %s'%(q['quote_number'],q['customer_name']),'Quotes',q['id']))
+
+            # Sent quotes crossing the 3-day-remaining mark notify the
+            # customer once. The dedupe key makes this idempotent across
+            # repeated reconcile runs. Rows are collected here but notified
+            # AFTER the block commits: notify() writes on its own connection,
+            # which would deadlock against this connection's open write
+            # transaction.
+            expiring=c.execute("""SELECT q.id,q.quote_number,q.customer_id,q.total_cents,q.expires_at
+              FROM quotes q
+              WHERE q.status='sent' AND q.customer_id IS NOT NULL AND q.customer_id<>''
+                AND q.expires_at IS NOT NULL AND q.expires_at=date('now','+3 days')""").fetchall()
+            expiring_rows=[dict(q) for q in expiring]
 
             # If every production job on an active order is complete/cancelled, move to QC.
             c.execute("""UPDATE orders SET status='qc' WHERE status IN ('in_production','production')
@@ -268,11 +286,18 @@ class OperationsHubService:
             # closed when one of those two conditions changed.
             c.execute("""UPDATE orders SET status='completed'
               WHERE status IN ('ready','shipped')
-              AND EXISTS(SELECT 1 FROM fulfillments f WHERE f.order_id=orders.id
+                AND EXISTS(SELECT 1 FROM fulfillments f WHERE f.order_id=orders.id
                          AND f.status IN ('delivered','picked_up'))
-              AND EXISTS(SELECT 1 FROM invoices i WHERE i.order_id=orders.id AND i.status<>'void'
+                AND EXISTS(SELECT 1 FROM invoices i WHERE i.order_id=orders.id AND i.status<>'void'
                          AND i.paid_cents>=i.total_cents)""")
             c.commit()
+        # The reconcile connection is closed/committed here, so the
+        # notification writes below never contend with its transaction.
+        for q in expiring_rows:
+            try:
+                CustomerNotificationService(self.db).notify_quote_expiring(q)
+            except Exception:
+                logger.exception("quote_expiring notification hook failed for quote %s", q.get("id"))
 
     def refresh_notifications(self):
         self.reconcile_workflows()

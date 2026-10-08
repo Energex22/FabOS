@@ -39,7 +39,7 @@ class _Orders:
     def get_for_user(self, user_id, order_id):
         return ({"id": order_id, "customer_id": "c1", "status": "pending"}, [])
 
-    def set_status(self, order_id, status, actor_user_id=None):
+    def set_status(self, order_id, status, actor_user_id=None, reason=""):
         return {"id": order_id, "status": status, "actor_user_id": actor_user_id}
 
 

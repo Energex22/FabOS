@@ -1,9 +1,35 @@
+import logging
+
+from fabos_core.services.customer_notifications import CustomerNotificationService
+
+logger = logging.getLogger(__name__)
+
+
 class OrderService:
     """Order access and lifecycle boundary."""
     SORT_COLUMNS={"number":"o.order_number","customer":"customer_name COLLATE NOCASE","status":"o.status","due":"o.due_at","total":"o.total_cents","created":"o.created_at"}
     ORDER_TRANSITIONS={"pending":{"confirmed","cancelled"},"confirmed":{"in_production","cancelled"},"in_production":{"qc","ready","cancelled"},"qc":{"ready","cancelled"},"ready":{"shipped","completed","cancelled"},"shipped":{"completed"},"completed":set(),"cancelled":set()}
     TERMINAL_STATUSES={"completed","cancelled"}
     def __init__(self,database,accounts=None,permissions=None): self.database=database; self.accounts=accounts; self.permissions=permissions; self._ensure_order_item_schema()
+
+    def _refund_totals(self,conn,order_id):
+        """(paid_cents, refunded_cents) for the order's latest live invoice."""
+        inv=conn.execute("SELECT id FROM invoices WHERE order_id=? AND status<>'void' ORDER BY created_at DESC LIMIT 1",(order_id,)).fetchone()
+        if not inv: return 0,0
+        paid=int(conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents>0",(inv["id"],)).fetchone()[0] or 0)
+        refunded=int(conn.execute("SELECT COALESCE(-SUM(amount_cents),0) FROM payments WHERE invoice_id=? AND amount_cents<0",(inv["id"],)).fetchone()[0] or 0)
+        return paid,refunded
+
+    def _emit_cancelled(self,order,reason):
+        try:
+            order=dict(order or {})
+            order_id=order.get("id")
+            with self.database.connect() as conn:
+                paid,refunded=self._refund_totals(conn,order_id)
+            CustomerNotificationService(self.database).notify_order_cancelled(
+                order,reason=reason,refund_cents=paid,refunded_cents=refunded)
+        except Exception:
+            logger.exception("order_cancelled notification hook failed for order %s",(order or {}).get("id"))
     def _ensure_order_item_schema(self):
         with self.database.connect() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS order_items(id TEXT PRIMARY KEY,order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,product_id TEXT REFERENCES products(id) ON DELETE SET NULL,variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL,description TEXT NOT NULL,quantity INTEGER NOT NULL DEFAULT 1,unit_price_cents INTEGER NOT NULL DEFAULT 0,material TEXT,color TEXT,estimated_minutes INTEGER,estimated_filament_g REAL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
@@ -178,7 +204,7 @@ class OrderService:
         ).fetchone()
         return bool(invoice and int(invoice["paid_cents"] or 0) >= int(invoice["total_cents"] or 0) and int(invoice["total_cents"] or 0) >= total)
 
-    def set_status(self,order_id,status,actor_user_id=None):
+    def set_status(self,order_id,status,actor_user_id=None,reason=""):
         self._require(actor_user_id,"order.manage"); requested=(status or "").strip().lower()
         if requested not in self.ORDER_TRANSITIONS:raise ValueError("Unsupported order status")
         with self.database.connect() as conn:
@@ -197,7 +223,10 @@ class OrderService:
             elif requested == "cancelled":
                 self._prepare_cancellation(conn, order_id)
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
-        return self.get(order_id)[0]
+        updated=self.get(order_id)[0]
+        if requested=="cancelled":
+            self._emit_cancelled(updated,reason)
+        return updated
     def set_status_internal(self,order_id,status,reason=""):
         requested=(status or "").strip().lower()
         if requested not in self.ORDER_TRANSITIONS:raise ValueError("Unsupported order status")
@@ -216,7 +245,10 @@ class OrderService:
             elif requested == "cancelled":
                 self._prepare_cancellation(conn, order_id)
             conn.execute("UPDATE orders SET status=? WHERE id=?",(requested,order_id)); conn.commit()
-        return self.get(order_id)[0]
+        updated=self.get(order_id)[0]
+        if requested=="cancelled":
+            self._emit_cancelled(updated,reason)
+        return updated
     def dossier(self, order_id):
         with self.database.connect() as conn:
             order=conn.execute("SELECT o.*,COALESCE(c.name,'No customer') customer_name,COALESCE(c.email,'') customer_email,COALESCE(c.phone,'') customer_phone,COALESCE(q.quote_number,'') quote_number FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN quotes q ON q.id=o.quote_id WHERE o.id=?",(order_id,)).fetchone()

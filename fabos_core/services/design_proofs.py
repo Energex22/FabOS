@@ -10,6 +10,16 @@ import uuid
 from datetime import datetime
 
 from fabos_core.services import notifications
+from fabos_core.services.customer_notifications import CustomerNotificationService
+
+
+def _emit_proof_sent(database, proof):
+    """Fire the proof_sent customer notification. Never breaks the flow."""
+    try:
+        CustomerNotificationService(database).notify_proof_sent(proof)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "proof_sent notification hook failed for proof %s", (proof or {}).get("id"))
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +139,10 @@ class DesignProofService:
                  str(customer_note or "").strip(),sent_at),
             )
             conn.commit()
-        return self._row(proof_id)
+        row = self._row(proof_id)
+        if status == "sent":
+            _emit_proof_sent(self.database, row)
+        return row
 
     def send(self, proof_id, notes=None, customer_note=None):
         row = self._row(proof_id)
@@ -144,7 +157,9 @@ class DesignProofService:
                  proof_id),
             )
             conn.commit()
-        return self._row(proof_id)
+        updated = self._row(proof_id)
+        _emit_proof_sent(self.database, updated)
+        return updated
 
     def list_for_admin(self, quote_id=None, status=None):
         with self.database.connect() as conn:
@@ -226,10 +241,12 @@ class DesignProofService:
             conn.commit()
         updated = self._row(proof_id)
         if status == "changes_requested":
-            # Phase 1 notification hook (Phase 2 consumes it for staff
-            # alerts). Never let the hook break the customer's action.
+            # Phase 2 notification hook: produce a real customer notification
+            # (change-request receipt). Never let the hook break the
+            # customer's action.
             try:
-                notifications.notify_proof_changes_requested(updated)
+                notifications.notify_proof_changes_requested(
+                    updated, service=CustomerNotificationService(self.database))
             except Exception:
                 logger.exception("proof changes_requested hook failed for proof %s", proof_id)
         return updated
