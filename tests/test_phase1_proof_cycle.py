@@ -253,18 +253,21 @@ class Phase1ProofCycleTests(unittest.TestCase):
         self.assertEqual(approved["status"], "approved")
         hook.assert_not_called()
 
-    def test_changes_requested_hook_logs_the_event(self):
+    def test_changes_requested_hook_notifies_the_customer(self):
+        # Phase 2: the changes_requested hook now produces a real customer
+        # notification record (change-request receipt) instead of a log line.
         proof = self.proofs.create("quote-1", status="sent")
-        with self.assertLogs("fabos_core.services.notifications", level="INFO") as logs:
-            self.proofs.request_changes("customer-user", proof["id"], "Make it taller.")
-        self.assertTrue(
-            any("changes_requested" in record.getMessage() for record in logs.records),
-            "expected the hook to log the changes_requested transition",
-        )
-        self.assertTrue(
-            any(proof["id"] in record.getMessage() for record in logs.records),
-            "expected the log line to identify the proof",
-        )
+        self.proofs.request_changes("customer-user", proof["id"], "Make it taller.")
+        with self.db.connect() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT event_type,deep_link,body FROM customer_notifications "
+                "WHERE customer_id='customer-1' ORDER BY created_at").fetchall()]
+        events = [r["event_type"] for r in rows]
+        self.assertIn("proof_sent", events)
+        self.assertIn("proof_changes_requested", events)
+        changes = [r for r in rows if r["event_type"] == "proof_changes_requested"][0]
+        self.assertEqual(changes["deep_link"], "/quote.html?id=quote-1#proof")
+        self.assertIn("Make it taller.", changes["body"])
 
     def test_notify_hook_returns_a_receipt(self):
         receipt = notifications.notify_proof_changes_requested(
