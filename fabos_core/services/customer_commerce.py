@@ -1,6 +1,7 @@
 """Customer-facing commerce operations for the public FabOS API."""
 
 import json
+import logging
 import os
 import sqlite3
 import tempfile
@@ -12,15 +13,21 @@ from datetime import date, timedelta
 
 from fabos_core.services.commerce_pricing import calculated_shipping_cents
 
+logger = logging.getLogger(__name__)
+
 
 class CustomerCommerceService:
-    def __init__(self, database, accounts, products, quotes, shop_settings, auth=None):
+    def __init__(self, database, accounts, products, quotes, shop_settings, auth=None, invoices=None):
         self.database = database
         self.accounts = accounts
         self.products = products
         self.quotes = quotes
         self.shop_settings = shop_settings
         self.auth = auth
+        # Optional InvoiceService, wired by FabOSApplication. When present,
+        # order creation auto-creates the order's invoice (best-effort: a
+        # failed invoice must never break the order itself).
+        self.invoices = invoices
 
     def register_customer(self, name, email, password, phone=""):
         if self.auth is None:
@@ -230,7 +237,17 @@ class CustomerCommerceService:
         quote_id = self.quotes.save({"customer_id": customer["id"], "status": "draft", "notes": notes}, [{"product_id": None, "description": "\n".join(description_parts), "quantity": quantity, "unit_price_cents": 0, "material": material, "color": "", "estimated_minutes": 0, "estimated_filament_g": 0}])
         return self.quotes.get_for_user(user_id, quote_id)
 
-    def create_order(self, user_id, items, shipping_address, notes=""):
+    def _calculate_totals(self, user_id, items, shipping_address, notes=""):
+        """Shared validation + totals math for create_order and preview.
+
+        Runs every order-creation guard (storefront enabled, customer account,
+        shipping address, item resolution, minimum order amount) and computes
+        subtotal/shipping/tax/total WITHOUT persisting anything. create_order
+        and preview_order_totals both funnel through here so the preview can
+        never drift from what checkout will actually charge.
+        Returns (customer, shipping_address, resolved_items, subtotal_cents,
+        shipping_cents, tax_cents, total_cents).
+        """
         self._require_storefront(ordering=True)
         customer = self._customer(user_id)
         shipping_address = self._shipping_address(shipping_address)
@@ -277,7 +294,6 @@ class CustomerCommerceService:
         minimum_order_cents = int(float(self.shop_settings.get("minimum_order_cents", "0") or 0))
         if subtotal_cents < minimum_order_cents:
             raise ValueError("Order subtotal is below the configured minimum order amount")
-        quote_id = self.quotes.save({"customer_id": customer["id"], "status": "approved", "notes": str(notes or "").strip()}, resolved_items)
         shipping_mode = str(self.shop_settings.get("shipping_mode", "calculated") or "calculated").lower()
         if shipping_mode == "free":
             shipping_cents = 0
@@ -298,6 +314,42 @@ class CustomerCommerceService:
         tax_percent = float(self.shop_settings.get("default_tax_percent", "0") or 0)
         tax_cents = int(round(subtotal_cents * max(0.0, tax_percent) / 100.0))
         total_cents = subtotal_cents + max(0, shipping_cents) + tax_cents
+        return customer, shipping_address, resolved_items, subtotal_cents, shipping_cents, tax_cents, total_cents
+
+    def preview_order_totals(self, user_id, items, shipping_address, notes=""):
+        """Dry-run of create_order: validate the inputs and return the item
+        totals + tax + shipping WITHOUT creating a quote, order, or invoice."""
+        _, _, resolved_items, subtotal_cents, shipping_cents, tax_cents, total_cents = self._calculate_totals(
+            user_id, items, shipping_address, notes)
+        return {
+            "items": [
+                {"product_id": item["product_id"], "variant_id": item["variant_id"],
+                 "description": item["description"], "quantity": item["quantity"],
+                 "unit_price_cents": item["unit_price_cents"],
+                 "line_total_cents": int(item["quantity"]) * int(item["unit_price_cents"])}
+                for item in resolved_items
+            ],
+            "subtotal_cents": subtotal_cents,
+            "shipping_cents": max(0, shipping_cents),
+            "tax_cents": tax_cents,
+            "total_cents": total_cents,
+            "currency": str(self.shop_settings.get("currency_code", "USD") or "USD"),
+        }
+
+    def _auto_create_invoice(self, order_id):
+        """Phase 3: every order gets its invoice at birth (best-effort)."""
+        if self.invoices is None:
+            return None
+        try:
+            return self.invoices.auto_create_for_order(order_id)
+        except Exception:
+            logger.warning("invoice auto-creation failed for order %s", order_id, exc_info=True)
+            return None
+
+    def create_order(self, user_id, items, shipping_address, notes=""):
+        customer, shipping_address, resolved_items, subtotal_cents, shipping_cents, tax_cents, total_cents = self._calculate_totals(
+            user_id, items, shipping_address, notes)
+        quote_id = self.quotes.save({"customer_id": customer["id"], "status": "approved", "notes": str(notes or "").strip()}, resolved_items)
         order_id = str(uuid.uuid4())
         prefix = "O-" + date.today().strftime("%Y%m") + "-"
         turnaround_days = int(float(self.shop_settings.get("default_turnaround_days", "7") or 7))
@@ -339,6 +391,9 @@ class CustomerCommerceService:
                 cleanup.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
                 cleanup.commit()
             raise
+        # Phase 3: the order's invoice is created at birth (idempotent,
+        # best-effort — a failed invoice must never break the order).
+        self._auto_create_invoice(order_id)
         row, saved_items = self._order_for_customer(user_id, order_id)
         return row, saved_items, subtotal_cents, shipping_cents, tax_cents, total_cents
 
