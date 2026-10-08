@@ -671,10 +671,16 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
     @app.get("/api/v1/customer/orders")
     def customer_orders(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
         rows = application.orders.list_for_user(user["id"])
+        # Final polish: same lightweight fulfillment summary as the detail
+        # endpoint, batched in one query (no N+1).
+        fulfillment_service = getattr(application, "fulfillment", None)
+        payloads = fulfillment_service.customer_payloads_for_orders(
+            [row["id"] for row in rows]) if fulfillment_service else {}
         orders = []
         for row in rows:
             item = _order_payload(row)
             item["status"] = CUSTOMER_STATUS.get(str(row["status"] or "new").lower(), "Order received")
+            item["fulfillment"] = payloads.get(str(row["id"]), FulfillmentService.customer_payload(None))
             orders.append(item)
         return {"orders": orders}
 
