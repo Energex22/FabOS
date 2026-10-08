@@ -597,6 +597,23 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
             "customer": dict(core.customers.get(customer_id)),
         })
 
+    if len(route) == 5 and route[:4] == ["api", v, "admin", "orders"] and method == "GET":
+        # Phase 3 money handoff: full admin order detail (dossier) for the web
+        # console's order-detail panel. Mirrors FastAPI GET
+        # /api/v1/admin/orders/{order_id}.
+        _admin(api, headers)
+        order_id = route[4]
+        try:
+            dossier = core.orders.dossier(order_id)
+        except KeyError as exc:
+            return api._response(404, {"error": str(exc) or "Order not found"})
+        payload = dict(dossier)
+        invoices = payload.get("invoices") or []
+        first = dict(invoices[0]) if invoices else None
+        payload["invoice"] = first
+        payload["invoice_id"] = first.get("id") if isinstance(first, dict) else None
+        return api._response(200, payload)
+
     if len(route) == 6 and route[:4] == ["api", v, "admin", "orders"] and route[5] == "start-production" and method == "POST":
         _admin(api, headers)
         order_id = route[4]
@@ -607,6 +624,31 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         except ValueError as exc:
             return api._response(409, {"error": str(exc)})
         return api._response(200, {"order_id": order_id, "jobs_created": created, "started": bool(created)})
+
+    if len(route) == 6 and route[:4] == ["api", v, "admin", "orders"] and route[5] == "invoice" and method == "POST":
+        # Phase 3 money handoff: create (or fetch) the order's invoice.
+        # Invoices normally auto-create when the order is created; this is the
+        # manual path for back-office corrections. Idempotent.
+        context = api._context(headers, "payment.manage")
+        order_id = route[4]
+        payload = body or {}
+        due_days = payload.get("due_days")
+        try:
+            due_days = int(due_days) if due_days is not None else None
+        except (TypeError, ValueError):
+            return api._response(400, {"error": "due_days must be an integer"})
+        try:
+            invoice_id, created = core.invoices.create_from_order_for_user(
+                context["id"], order_id, due_days=due_days)
+        except PermissionError as exc:
+            return api._response(403, {"error": str(exc)})
+        except KeyError:
+            return api._response(404, {"error": "Order not found"})
+        except ValueError as exc:
+            return api._response(400, {"error": str(exc)})
+        invoice, items, payments = core.invoices.get_for_user(context["id"], invoice_id)
+        return api._response(200, {"invoice_id": invoice_id, "created": created,
+                                   "invoice": invoice, "items": items, "payments": payments})
 
     if route == ["api", v, "admin", "operations", "automation", "tick"] and method == "POST":
         _operations(api, headers)
@@ -783,9 +825,12 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
     # ------------------------------------------------------------------
     if route == ["api", v, "admin", "settings"] and method == "GET":
         _admin(api, headers)
+        # Secret values are never serialized: masked_snapshot() replaces them
+        # with a {"configured": bool} indicator for every caller.
         return api._response(200, {
-            "settings": core.shop_settings.snapshot(),
+            "settings": core.shop_settings.masked_snapshot(),
             "metadata": core.shop_settings.metadata(),
+            "secret_keys": core.shop_settings.secret_keys(),
         })
 
     if route == ["api", v, "admin", "settings"] and method == "PUT":
@@ -796,6 +841,16 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
         value = str(body["value"]) if "value" in body else ""
         if not key:
             raise ValueError("key is required")
+        # An empty submission for a secret key means "keep the existing value"
+        # — a settings form that leaves the password field blank must not wipe
+        # the stored key.
+        if core.shop_settings.is_secret_key(key) and not value.strip():
+            return api._response(200, {
+                "key": key,
+                "value": core.shop_settings.present_setting(key),
+                "metadata": core.shop_settings.metadata().get(key),
+                "unchanged": True,
+            })
         protected_keys = {"console_lock_enabled", "console_idle_timeout_minutes", "console_local_only"}
         actor = core.accounts.get_user(context["id"])
         if key in protected_keys and str((actor or {}).get("role") or "").lower() != "owner":
@@ -806,7 +861,7 @@ def handle_extended_routes(api, method, route, query, body, headers, raw_body):
             return api._response(400, {"error": str(exc)})
         return api._response(200, {
             "key": key,
-            "value": core.shop_settings.get(key),
+            "value": core.shop_settings.present_setting(key),
             "metadata": core.shop_settings.metadata().get(key),
         })
 
