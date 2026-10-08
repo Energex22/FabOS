@@ -227,6 +227,29 @@ class FulfillmentService:
                 "SELECT * FROM fulfillments WHERE order_id=?", (order_id,)
             ).fetchone()
 
+    def customer_payloads_for_orders(self, order_ids):
+        """Batched customer_payload for many orders: {order_id: payload}.
+
+        One query for the whole list (no N+1). Orders with no fulfillment
+        row get the same all-null payload shape as customer_payload(None),
+        matching the order-detail endpoint.
+        """
+        ids = [str(i) for i in (order_ids or []) if i]
+        if not ids:
+            return {}
+        with self.db.connect() as c:
+            rows = c.execute(
+                "SELECT * FROM fulfillments WHERE order_id IN (%s)"
+                % ",".join("?" * len(ids)),
+                ids,
+            ).fetchall()
+        payloads = {}
+        for row in rows:
+            payloads[str(row["order_id"])] = self.customer_payload(row)
+        for order_id in ids:
+            payloads.setdefault(order_id, self.customer_payload(None))
+        return payloads
+
     def get_for_user(self, user_id, fulfillment_id):
         self._require(user_id, "fulfillment.read")
         if not self._customer_fulfillment_allowed(user_id, fulfillment_id):

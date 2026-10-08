@@ -365,6 +365,16 @@ class OperationsHubService:
             except Exception:
                 logger.exception("quote_expiring notification hook failed for quote %s", q.get("id"))
 
+        # Drain the notification outbox: notify() only enqueues (fast, never
+        # raises); the actual provider send happens here, bounded and
+        # failure-isolated per email. This tick runs on the automation loop
+        # and on every admin notification refresh, so queued mail goes out
+        # within seconds in normal operation.
+        try:
+            CustomerNotificationService(self.db).drain_outbox()
+        except Exception:
+            logger.exception("notification outbox drain failed")
+
     def refresh_notifications(self):
         self.reconcile_workflows()
         items=self.action_items()
