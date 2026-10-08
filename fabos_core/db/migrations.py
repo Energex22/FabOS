@@ -226,6 +226,22 @@ INSERT OR IGNORE INTO shop_settings(key,value) VALUES('notification_from_email',
 # migration ever created that column, so the dashboard 500s on any database
 # built purely from migrations. Add it to match the long-standing query.
 (59,"""ALTER TABLE print_jobs ADD COLUMN print_time_left_seconds REAL;"""),
+
+# Durable notification outbox (final polish): notify() enqueues the email
+# payload here in the same transaction as the notification record; the
+# automation reconcile tick drains it via drain_outbox().
+(60,"""CREATE TABLE IF NOT EXISTS notification_outbox(
+id TEXT PRIMARY KEY,
+notification_id TEXT REFERENCES customer_notifications(id) ON DELETE CASCADE,
+to_email TEXT NOT NULL, subject TEXT NOT NULL, text_body TEXT NOT NULL,
+from_email TEXT NOT NULL DEFAULT '',
+status TEXT NOT NULL DEFAULT 'queued',
+attempts INTEGER NOT NULL DEFAULT 0,
+next_attempt_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+last_error TEXT,
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_notification_outbox_drain ON notification_outbox(status,next_attempt_at);"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:

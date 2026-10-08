@@ -41,13 +41,40 @@ class UnconfiguredPaymentProvider(PaymentProvider):
     def parse_webhook(self, payload, signature=None): raise PaymentProviderNotConfigured("No payment provider is configured")
 
 
+def _settings_first(shop_settings, key, env_name):
+    """Resolve a credential: shop setting first, environment variable fallback.
+
+    ``shop_settings`` may be a ShopSettingsService (``.get``) or a plain
+    mapping. Returns a stripped string, never None. The value is never
+    logged here — callers must keep it out of logs and API responses.
+    """
+    value = ""
+    if shop_settings is not None:
+        try:
+            getter = getattr(shop_settings, "get", None)
+            if callable(getter):
+                value = str(getter(key, "") or "").strip()
+        except Exception:
+            value = ""
+    if not value:
+        value = os.environ.get(env_name, "").strip()
+    return value
+
+
 class StripePaymentProvider(PaymentProvider):
     name = "stripe"
     api_base = "https://api.stripe.com/v1"
-    def __init__(self):
-        self.secret_key = os.environ.get("STRIPE_SECRET_KEY", "").strip()
-        self.webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
-        if not self.secret_key: raise PaymentProviderNotConfigured("STRIPE_SECRET_KEY is not configured")
+    def __init__(self, shop_settings=None):
+        # Credentials are settings-first (admin settings UI), env fallback —
+        # mirroring the Resend provider pattern in customer_notifications.
+        # Resolved per construction, and PaymentService rebuilds the provider
+        # on every payment operation, so settings edits apply immediately.
+        self.secret_key = _settings_first(shop_settings, "stripe_secret_key", "STRIPE_SECRET_KEY")
+        self.publishable_key = _settings_first(shop_settings, "stripe_publishable_key", "STRIPE_PUBLISHABLE_KEY")
+        self.webhook_secret = _settings_first(shop_settings, "stripe_webhook_secret", "STRIPE_WEBHOOK_SECRET")
+        self.success_url = _settings_first(shop_settings, "stripe_success_url", "STRIPE_SUCCESS_URL")
+        self.cancel_url = _settings_first(shop_settings, "stripe_cancel_url", "STRIPE_CANCEL_URL")
+        if not self.secret_key: raise PaymentProviderNotConfigured("stripe_secret_key / STRIPE_SECRET_KEY is not configured")
         self.live_mode = self.secret_key.startswith("sk_live_")
         self.test_mode = self.secret_key.startswith("sk_test_")
     def _request(self, path, fields, idempotency_key=None):
@@ -59,8 +86,8 @@ class StripePaymentProvider(PaymentProvider):
             with urllib.request.urlopen(request, timeout=15) as response: return json.loads(response.read().decode("utf-8"))
         except Exception as exc: raise PaymentProviderError("Stripe request failed") from exc
     def create_checkout(self, *, payment_id, amount_cents, currency, metadata):
-        success_url=os.environ.get("STRIPE_SUCCESS_URL","").strip();cancel_url=os.environ.get("STRIPE_CANCEL_URL","").strip()
-        if not success_url or not cancel_url: raise PaymentProviderNotConfigured("STRIPE_SUCCESS_URL and STRIPE_CANCEL_URL are required")
+        success_url=self.success_url;cancel_url=self.cancel_url
+        if not success_url or not cancel_url: raise PaymentProviderNotConfigured("stripe_success_url / STRIPE_SUCCESS_URL and stripe_cancel_url / STRIPE_CANCEL_URL are required")
         if self.live_mode:
             success_parsed = urllib.parse.urlparse(success_url)
             cancel_parsed = urllib.parse.urlparse(cancel_url)
@@ -70,7 +97,7 @@ class StripePaymentProvider(PaymentProvider):
         session=self._request("/checkout/sessions",fields,idempotency_key=payment_id)
         return {"provider_payment_id":session.get("payment_intent") or session.get("id"),"checkout_url":session.get("url"),"status":"pending","metadata":{**metadata,"stripe_session_id":session.get("id")}}
     def parse_webhook(self,payload,signature=None):
-        if not self.webhook_secret: raise PaymentProviderNotConfigured("STRIPE_WEBHOOK_SECRET is not configured")
+        if not self.webhook_secret: raise PaymentProviderNotConfigured("stripe_webhook_secret / STRIPE_WEBHOOK_SECRET is not configured")
         if not signature: raise PaymentProviderError("Missing Stripe webhook signature")
         _verify_stripe_signature(payload,signature,self.webhook_secret)
         event=json.loads(payload.decode("utf-8") if isinstance(payload,bytes) else payload);event_type=str(event.get("type") or "");obj=((event.get("data") or {}).get("object") or {});metadata=obj.get("metadata") or {};status=None;amount_cents=None
@@ -91,9 +118,9 @@ class StripePaymentProvider(PaymentProvider):
 class SquarePaymentProvider(PaymentProvider):
     name="square"
     api_base="https://connect.squareup.com/v2"
-    def __init__(self):
-        self.access_token=os.environ.get("SQUARE_ACCESS_TOKEN","").strip();self.location_id=os.environ.get("SQUARE_LOCATION_ID","").strip();self.webhook_signature_key=os.environ.get("SQUARE_WEBHOOK_SIGNATURE_KEY","").strip();self.webhook_url=os.environ.get("SQUARE_WEBHOOK_URL","").strip()
-        if not self.access_token or not self.location_id: raise PaymentProviderNotConfigured("SQUARE_ACCESS_TOKEN and SQUARE_LOCATION_ID are required")
+    def __init__(self, shop_settings=None):
+        self.access_token=_settings_first(shop_settings,"square_access_token","SQUARE_ACCESS_TOKEN");self.location_id=_settings_first(shop_settings,"square_location_id","SQUARE_LOCATION_ID");self.webhook_signature_key=_settings_first(shop_settings,"square_webhook_signature_key","SQUARE_WEBHOOK_SIGNATURE_KEY");self.webhook_url=_settings_first(shop_settings,"square_webhook_url","SQUARE_WEBHOOK_URL")
+        if not self.access_token or not self.location_id: raise PaymentProviderNotConfigured("square_access_token / SQUARE_ACCESS_TOKEN and square_location_id / SQUARE_LOCATION_ID are required")
     def create_checkout(self, **kwargs): raise PaymentProviderNotConfigured("Square checkout is reserved for physical sales in FabOS")
     def create_physical_payment(self, *, payment_id, amount_cents, currency, source_id, metadata):
         if not source_id: raise PaymentProviderError("Square source_id is required")
@@ -105,7 +132,7 @@ class SquarePaymentProvider(PaymentProvider):
         payment=result.get("payment") or {}
         return {"provider_payment_id":payment.get("id"),"checkout_url":None,"status":"paid" if payment.get("status")=="COMPLETED" else "pending","metadata":{**metadata,"square_payment_id":payment.get("id")}}
     def parse_webhook(self,payload,signature=None):
-        if not self.webhook_signature_key or not self.webhook_url: raise PaymentProviderNotConfigured("SQUARE_WEBHOOK_SIGNATURE_KEY and SQUARE_WEBHOOK_URL are required")
+        if not self.webhook_signature_key or not self.webhook_url: raise PaymentProviderNotConfigured("square_webhook_signature_key / SQUARE_WEBHOOK_SIGNATURE_KEY and square_webhook_url / SQUARE_WEBHOOK_URL are required")
         expected=base64_hmac_sha256(self.webhook_signature_key,self.webhook_url+(payload.decode("utf-8") if isinstance(payload,bytes) else payload))
         if not signature or not hmac.compare_digest(expected,str(signature)): raise PaymentProviderError("Invalid Square webhook signature")
         event=json.loads(payload.decode("utf-8") if isinstance(payload,bytes) else payload);event_type=str(event.get("type") or "");obj=((event.get("data") or {}).get("object") or {});payment=obj.get("payment") or {};status=None
@@ -149,7 +176,7 @@ class PaymentService:
         "refunded":set(),
         "disputed":set(),
     }
-    def __init__(self,database,accounts,invoices): self.database=database;self.accounts=accounts;self.invoices=invoices;self._ensure_schema();self.provider=self._build_provider()
+    def __init__(self,database,accounts,invoices,shop_settings=None): self.database=database;self.accounts=accounts;self.invoices=invoices;self.shop_settings=shop_settings;self._ensure_schema();self.provider=self._build_provider()
     def _ensure_schema(self):
         with self.database.connect() as conn:
             conn.execute("""CREATE TABLE IF NOT EXISTS payment_transactions(id TEXT PRIMARY KEY,order_id TEXT NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,invoice_id TEXT REFERENCES invoices(id) ON DELETE SET NULL,customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,amount_cents INTEGER NOT NULL,currency TEXT NOT NULL DEFAULT 'USD',provider TEXT NOT NULL,provider_payment_id TEXT,checkout_url TEXT,status TEXT NOT NULL DEFAULT 'created',metadata_json TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
@@ -158,8 +185,8 @@ class PaymentService:
     def _build_provider(self,name=None):
         name=(name or os.environ.get("FABOS_PAYMENT_PROVIDER","none")).strip().lower()
         if name in ("","none","unconfigured"): return UnconfiguredPaymentProvider()
-        if name=="stripe": return StripePaymentProvider()
-        if name=="square": return SquarePaymentProvider()
+        if name=="stripe": return StripePaymentProvider(shop_settings=self.shop_settings)
+        if name=="square": return SquarePaymentProvider(shop_settings=self.shop_settings)
         raise ValueError("Unsupported payment provider: %s"%name)
     def _customer_for_order(self,user_id,order_id):
         user=self.accounts.get_user(user_id)
