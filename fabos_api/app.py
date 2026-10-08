@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 
 from fabos_core.services.rate_limit import RateLimiter
+from fabos_core.services.customer_notifications import (
+    CustomerNotificationService, normalize_notification_preference)
 from fabos_api.wsgi_extended import handle_extended_routes
 from urllib.parse import parse_qs, urlsplit
 
@@ -267,7 +269,23 @@ class FabOSAPI:
         if not customer:
             return None
         crow = dict(customer) if not isinstance(customer, dict) else customer
-        return {key: crow[key] for key in ("name", "email", "phone") if key in crow}
+        payload = {key: crow[key] for key in ("name", "email", "phone") if key in crow}
+        payload["notification_preference"] = normalize_notification_preference(
+            crow.get("notification_preference"))
+        return payload
+
+    @classmethod
+    def _notification_payload(cls, row):
+        """Project a customer_notifications row into the customer-safe shape."""
+        data = _mapping(row) or {}
+        payload = {key: data.get(key) for key in
+                   ("id", "event_type", "entity_type", "entity_id", "title",
+                    "body", "deep_link", "channels_json", "created_at")}
+        try:
+            payload["is_read"] = bool(int(data.get("is_read") or 0))
+        except (TypeError, ValueError):
+            payload["is_read"] = False
+        return payload
 
     @classmethod
     def _customer_safe_profile(cls, summary):
@@ -529,8 +547,13 @@ class FabOSAPI:
                 customer = self.core.accounts.customer_for_user(context["id"])
                 if not customer:
                     raise PermissionError("Customer account is not linked")
-                allowed = {"name", "email", "phone"}
+                allowed = {"name", "email", "phone", "notification_preference"}
                 payload = {key: body.get(key) for key in allowed if key in body and body.get(key) is not None}
+                if "notification_preference" in payload:
+                    preference = str(payload["notification_preference"] or "").strip().lower()
+                    if preference not in {"email", "sms", "both"}:
+                        raise ValueError("notification_preference must be one of: email, sms, both")
+                    payload["notification_preference"] = preference
                 if "email" in payload:
                     # Mirror the FastAPI update_me validation: malformed
                     # emails are a 400, duplicates are a 409, and the login
@@ -549,6 +572,55 @@ class FabOSAPI:
                 if payload:
                     self.core.customers.save(payload, customer["id"])
                 return self._response(200, self._customer_safe_profile(self.core.accounts.account_summary(context["id"])))
+
+            if route == ["api", self.VERSION, "customer", "notifications"] and method == "GET":
+                context = self._context(headers)
+                customer = self.core.accounts.customer_for_user(context["id"])
+                if not customer:
+                    raise PermissionError("Customer account is not linked")
+                service = CustomerNotificationService(self.core.database, self.core.shop_settings)
+                try:
+                    page = max(1, int(query.get("page", ["1"])[0] or 1))
+                except (TypeError, ValueError):
+                    page = 1
+                try:
+                    per_page = min(100, max(1, int(query.get("per_page", ["25"])[0] or 25)))
+                except (TypeError, ValueError):
+                    per_page = 25
+                rows, total = service.list_for_customer(customer["id"], page=page, per_page=per_page)
+                return self._response(200, {
+                    "notifications": [self._notification_payload(row) for row in rows],
+                    "page": page, "per_page": per_page, "total": total,
+                    "unread": service.unread_count(customer["id"]),
+                })
+
+            if route == ["api", self.VERSION, "customer", "notifications", "unread-count"] and method == "GET":
+                context = self._context(headers)
+                customer = self.core.accounts.customer_for_user(context["id"])
+                if not customer:
+                    raise PermissionError("Customer account is not linked")
+                service = CustomerNotificationService(self.core.database, self.core.shop_settings)
+                return self._response(200, {"unread": service.unread_count(customer["id"])})
+
+            if (len(route) == 6 and route[:3] == ["api", self.VERSION, "customer"]
+                    and route[3] == "notifications" and route[5] == "read" and method == "POST"):
+                context = self._context(headers)
+                customer = self.core.accounts.customer_for_user(context["id"])
+                if not customer:
+                    raise PermissionError("Customer account is not linked")
+                service = CustomerNotificationService(self.core.database, self.core.shop_settings)
+                if not service.mark_read(customer["id"], route[4]):
+                    return self._response(404, {"error": "Notification not found"})
+                return self._response(200, {"read": True, "unread": service.unread_count(customer["id"])})
+
+            if route == ["api", self.VERSION, "customer", "notifications", "read-all"] and method == "POST":
+                context = self._context(headers)
+                customer = self.core.accounts.customer_for_user(context["id"])
+                if not customer:
+                    raise PermissionError("Customer account is not linked")
+                service = CustomerNotificationService(self.core.database, self.core.shop_settings)
+                marked = service.mark_all_read(customer["id"])
+                return self._response(200, {"read": True, "marked": marked, "unread": 0})
 
             if route == ["api", self.VERSION, "customer", "quotes"] and method == "POST":
                 context = self._context(headers)
@@ -921,7 +993,8 @@ class FabOSAPI:
                         status = body.get("status")
                         if not status:
                             raise ValueError("status is required")
-                        order = self.core.orders.set_status(route[3], status, actor_user_id=context["id"])
+                        order = self.core.orders.set_status(route[3], status, actor_user_id=context["id"],
+                                                           reason=str(body.get("reason") or ""))
                         return self._response(200, {"order": order})
 
             if route[:3] == ["api", self.VERSION, "invoices"]:

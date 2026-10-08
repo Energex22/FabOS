@@ -2,19 +2,21 @@
 
 Phase 1 only needs the hooks to exist and be observable: they log the event
 so the flow is visible in the error/runtime log. Phase 2 (transactional
-notifications + in-app notification center) will consume these hooks to
-produce staff Action Center items and customer emails.
+notifications + in-app notification center) consumes these hooks to produce
+customer notification records via
+``fabos_core.services.customer_notifications.CustomerNotificationService``.
 
 The decided direction for customer-facing words is AI-drafted +
 staff-approved (see build plan); ``draft_proof_message`` is the stubbed seam
-that future work will implement. Phase 1 never sends anything to customers.
+that future work will implement. Phase 2 customer emails use staff-written
+templates only.
 """
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-def notify_proof_changes_requested(proof):
+def notify_proof_changes_requested(proof, service=None):
     """Hook fired when a design proof transitions to ``changes_requested``.
 
     ``proof`` is the proof row dict returned by
@@ -22,10 +24,30 @@ def notify_proof_changes_requested(proof):
     ``quote_id``, ``quote_number``, ``design_version``, ``status`` and
     ``customer_comment``).
 
-    Phase 1: logs the event and returns a small receipt dict. Phase 2 will
-    turn this into a staff-facing notification (Action Center item / email).
+    Phase 2: when a ``CustomerNotificationService`` is passed (as
+    ``service``), this produces a real customer notification record -- a
+    receipt confirming the change request was recorded -- plus delivery per
+    the customer's channel preference. Without a service it keeps the Phase
+    1 log-only behavior.
     """
     proof = dict(proof or {})
+    if service is not None:
+        try:
+            record_id = service.notify_proof_changes_requested(proof)
+        except Exception:
+            logger.exception(
+                "proof changes_requested notification failed for proof %s",
+                proof.get("id"))
+            record_id = None
+        return {
+            "notified": record_id is not None,
+            "channel": "notification",
+            "notification_id": record_id,
+            "proof_id": proof.get("id"),
+            "quote_id": proof.get("quote_id"),
+            "quote_number": proof.get("quote_number"),
+            "design_version": proof.get("design_version"),
+        }
     receipt = {
         "notified": True,
         "channel": "log",
