@@ -29,6 +29,13 @@ SMS is not wired to a provider yet: when a customer's preference includes
 SMS, the SMS payload is logged and the record is marked
 ``pending_sms_provider`` so a future provider can claim it.
 
+Delivery is durable via a simple outbox: ``notify()`` only writes the
+notification record plus the email payload to ``notification_outbox`` inside
+its own quick transaction (fast, never raises — a network call never blocks
+the triggering flow). The automation reconcile tick drains the outbox
+(``drain_outbox``): send via the provider, mark sent/failed with a retry
+count, exponential backoff, and a bounded number of attempts.
+
 ``notify()`` never raises: a notification must never break the business flow
 that triggered it. Emit sites still wrap the call defensively.
 """
@@ -39,6 +46,7 @@ import urllib.request
 import urllib.error
 import uuid
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta, timezone
 
 from fabos_core.services.shop_settings import ShopSettingsService
 
@@ -107,7 +115,7 @@ class ResendEmailProvider(NotificationProvider):
         if not to:
             raise NotificationSendError("No recipient email address")
         if not from_email:
-            raise NotificationSendError("No from address configured (RESEND_FROM_EMAIL env or resend_from_email shop setting)")
+            raise NotificationSendError("No from address configured (resend_from_email shop setting or RESEND_FROM_EMAIL env)")
         payload = json.dumps({
             "from": from_email,
             "to": [to] if isinstance(to, str) else list(to),
@@ -184,6 +192,32 @@ class CustomerNotificationService:
                 shop_settings = None
         self.shop_settings = shop_settings
         self.provider = provider if provider is not None else default_email_provider(self.shop_settings)
+        self._ensure_outbox_schema()
+
+    OUTBOX_TABLE_SQL = """CREATE TABLE IF NOT EXISTS notification_outbox(
+        id TEXT PRIMARY KEY,
+        notification_id TEXT REFERENCES customer_notifications(id) ON DELETE CASCADE,
+        to_email TEXT NOT NULL, subject TEXT NOT NULL, text_body TEXT NOT NULL,
+        from_email TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'queued',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_error TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"""
+
+    def _ensure_outbox_schema(self):
+        """Idempotent outbox table creation (migration 60 is the durable path
+        for existing databases; this covers ad-hoc/test constructions)."""
+        try:
+            with self.database.connect() as conn:
+                conn.execute(self.OUTBOX_TABLE_SQL)
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_notification_outbox_drain "
+                    "ON notification_outbox(status, next_attempt_at)")
+                conn.commit()
+        except Exception:
+            logger.exception("notification outbox schema ensure failed")
 
     # -- low-level helpers -------------------------------------------------
     def _row(self, sql, args=()):
@@ -216,17 +250,33 @@ class CustomerNotificationService:
             return default
 
     def _from_email(self):
-        override = os.environ.get("RESEND_FROM_EMAIL", "").strip()
-        if override:
-            return override
+        # Documented order (module docstring): resend_from_email setting,
+        # then RESEND_FROM_EMAIL env, then the notification_from_email /
+        # shop_email settings. Settings win, matching the key posture.
         return str(
             self._setting("resend_from_email", "")
+            or os.environ.get("RESEND_FROM_EMAIL", "").strip()
             or self._setting("notification_from_email", "")
             or self._setting("shop_email", "")
         ).strip()
 
     def _shop_name(self):
         return str(self._setting("shop_name", "") or "FABVEX").strip() or "FABVEX"
+
+    def _absolute_link(self, deep_link):
+        """Absolute URL for emails when ``public_base_url`` is configured.
+
+        The in-app record keeps the frontend-relative ``deep_link``; only the
+        emailed copy is absolutized. Empty setting (default) = current
+        behavior: the relative path is used unchanged.
+        """
+        path = str(deep_link or "")
+        if not path.startswith("/"):
+            return path
+        base = str(self._setting("public_base_url", "") or "").strip().rstrip("/")
+        if not base:
+            return path
+        return base + path
 
     # -- the record + dispatch core ----------------------------------------
     def notify(self, event_type, customer_id, *, entity_type, entity_id,
@@ -258,11 +308,12 @@ class CustomerNotificationService:
             text_body = "%s\n\n%s\n\nView: %s\n\n%s" % (
                 "Hi %s," % name if name else "Hello,",
                 body,
-                deep_link or "(no link)",
+                self._absolute_link(deep_link) if deep_link else "(no link)",
                 "You're receiving this because you have a %s account. "
                 "Manage these notifications in your account profile." % shop_name,
             )
             channels = {}
+            outbox = None  # filled below when an email is queued for the outbox
 
             if preference in ("email", "both"):
                 if not email:
@@ -274,18 +325,21 @@ class CustomerNotificationService:
                         channels["email"] = {"status": "skipped", "reason": "no_from_address"}
                         logger.warning(
                             "notification email skipped: no from address configured "
-                            "(RESEND_FROM_EMAIL / notification_from_email)")
+                            "(resend_from_email / RESEND_FROM_EMAIL / notification_from_email)")
                     else:
-                        try:
-                            receipt = self.provider.send_email(
-                                to=email, subject=subject, text_body=text_body,
-                                from_email=from_email or "FABVEX <noreply@example.invalid>")
-                            channels["email"] = {"status": receipt.get("status", "sent"),
-                                                 "provider": receipt.get("provider")}
-                        except NotificationSendError as exc:
-                            channels["email"] = {"status": "failed", "error": str(exc)[:300]}
-                            logger.warning("notification email failed for customer %s: %s",
-                                           customer["id"], exc)
+                        # Durable outbox (final polish): the hook path only
+                        # enqueues — fast, never raises, never blocks the
+                        # triggering flow on a network call. The automation
+                        # reconcile tick drains the outbox via drain_outbox().
+                        outbox_id = str(uuid.uuid4())
+                        outbox = {
+                            "id": outbox_id,
+                            "to_email": email,
+                            "subject": subject,
+                            "text_body": text_body,
+                            "from_email": from_email or "FABVEX <noreply@example.invalid>",
+                        }
+                        channels["email"] = {"status": "queued", "outbox_id": outbox_id}
 
             if preference in ("sms", "both"):
                 sms_payload = {"to": "customer:%s" % customer["id"], "event": event_type,
@@ -304,6 +358,19 @@ class CustomerNotificationService:
                         (record_id, customer["id"], event_type, entity_type, str(entity_id),
                          title, body, deep_link, json.dumps(channels, sort_keys=True), dedupe_key),
                     )
+                    if outbox is not None:
+                        # The email payload rides in the same transaction as
+                        # the notification record: enqueue is atomic with the
+                        # record, still fast, still never raises.
+                        conn.execute(
+                            """INSERT INTO notification_outbox(
+                               id, notification_id, to_email, subject,
+                               text_body, from_email)
+                               VALUES(?,?,?,?,?,?)""",
+                            (outbox["id"], record_id, outbox["to_email"],
+                             outbox["subject"], outbox["text_body"],
+                             outbox["from_email"]),
+                        )
                     conn.commit()
                 except Exception as exc:
                     # Lost a dedupe race (UNIQUE on dedupe_key) or any other
@@ -319,6 +386,226 @@ class CustomerNotificationService:
         except Exception:
             logger.exception("notify(%s) failed for customer %s", event_type, customer_id)
             return None
+
+    # -- outbox drain ------------------------------------------------------
+    OUTBOX_MAX_ATTEMPTS = 5
+    OUTBOX_BATCH_LIMIT = 25
+
+    @staticmethod
+    def _outbox_now():
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    def drain_outbox(self, limit=OUTBOX_BATCH_LIMIT):
+        """Send queued outbox emails via the configured provider.
+
+        Called from the automation reconcile tick (operations_hub), which
+        already fires the quote_expiring notification hooks. Bounded and
+        failure-isolated: one bad email never blocks the rest, per-email
+        failures are recorded with a retry count and exponential backoff,
+        and this method never raises.
+
+        Returns ``(sent, failed)`` counts.
+        """
+        self._recover_stale_sending_claims()
+        sent = failed = 0
+        try:
+            with self.database.connect() as conn:
+                rows = conn.execute(
+                    """SELECT * FROM notification_outbox
+                       WHERE status IN ('queued','failed')
+                         AND next_attempt_at <= ?
+                         AND attempts < ?
+                       ORDER BY created_at ASC LIMIT ?""",
+                    (self._outbox_now(), self.OUTBOX_MAX_ATTEMPTS,
+                     max(1, int(limit or 1))),
+                ).fetchall()
+        except Exception:
+            logger.exception("notification outbox drain query failed")
+            return 0, 0
+        for row in rows:
+            if self._drain_one(dict(row)):
+                sent += 1
+            else:
+                failed += 1
+        return sent, failed
+
+    # How long a 'sending' claim may live before the claiming drain is
+    # assumed dead (crashed/killed between the claim and _outbox_done /
+    # _outbox_retry). Recovery is deliberately conservative: a normal send
+    # finishes in seconds.
+    OUTBOX_STALE_CLAIM_MINUTES = 30
+
+    def _recover_stale_sending_claims(self):
+        """Re-queue outbox rows orphaned in 'sending' by a dead drain.
+
+        _drain_one claims a row ('sending') before calling the provider. If
+        the process dies in that window, no later drain would ever select the
+        row again (only 'queued'/'failed' are selected), so the email would
+        sit unsent forever. Stale claims go back to 'failed' with a short
+        retry delay and one consumed attempt, so a permanently-crashing send
+        still dead-letters via OUTBOX_MAX_ATTEMPTS instead of looping
+        forever. Never raises.
+
+        At-least-once caveat: if the crash happened after the provider
+        accepted the email but before _outbox_done committed, recovery can
+        produce one duplicate send. That window is milliseconds wide; the
+        alternative is silent permanent loss.
+        """
+        try:
+            with self.database.connect() as conn:
+                conn.execute(
+                    "UPDATE notification_outbox SET status='failed',"
+                    " attempts=attempts+1,"
+                    " next_attempt_at=datetime('now','+5 minutes'),"
+                    " last_error=substr(COALESCE(last_error,'') ||"
+                    " ' [recovered from stale sending claim]',1,500),"
+                    " updated_at=CURRENT_TIMESTAMP"
+                    " WHERE status='sending'"
+                    " AND updated_at < datetime('now','-%d minutes')"
+                    " AND attempts < ?"
+                    % self.OUTBOX_STALE_CLAIM_MINUTES,
+                    (self.OUTBOX_MAX_ATTEMPTS,),
+                )
+                conn.execute(
+                    "UPDATE notification_outbox SET status='dead',"
+                    " last_error=substr(COALESCE(last_error,'') ||"
+                    " ' [stale sending claim, attempts exhausted]',1,500),"
+                    " updated_at=CURRENT_TIMESTAMP"
+                    " WHERE status='sending'"
+                    " AND updated_at < datetime('now','-%d minutes')"
+                    " AND attempts >= ?"
+                    % self.OUTBOX_STALE_CLAIM_MINUTES,
+                    (self.OUTBOX_MAX_ATTEMPTS,),
+                )
+                conn.commit()
+        except Exception:
+            logger.exception("notification outbox stale-claim recovery failed")
+
+    def _drain_one(self, row):
+        """Send one outbox row. Never raises; returns True on success."""
+        outbox_id = str(row.get("id") or "")
+        if not outbox_id:
+            return False
+        # Claim the row so two concurrent drains (two processes) can't
+        # double-send the same email.
+        try:
+            with self.database.connect() as conn:
+                cur = conn.execute(
+                    "UPDATE notification_outbox SET status='sending',"
+                    " updated_at=CURRENT_TIMESTAMP"
+                    " WHERE id=? AND status IN ('queued','failed')",
+                    (outbox_id,),
+                )
+                conn.commit()
+                if cur.rowcount != 1:
+                    return False
+        except Exception:
+            logger.exception("notification outbox claim failed for %s", outbox_id)
+            return False
+        try:
+            receipt = self.provider.send_email(
+                to=row.get("to_email"), subject=row.get("subject"),
+                text_body=row.get("text_body"),
+                from_email=row.get("from_email") or "FABVEX <noreply@example.invalid>",
+            )
+        except NotificationSendError as exc:
+            self._outbox_retry(outbox_id, int(row.get("attempts") or 0) + 1,
+                               str(exc)[:500])
+            return False
+        except Exception as exc:  # provider bug: retry later, never lose the row
+            logger.exception("notification outbox provider error for %s", outbox_id)
+            self._outbox_retry(outbox_id, int(row.get("attempts") or 0) + 1,
+                               "unexpected: %s" % exc)
+            return False
+        self._outbox_done(outbox_id, receipt or {})
+        return True
+    def _outbox_retry(self, outbox_id, attempts, error):
+        try:
+            with self.database.connect() as conn:
+                if attempts >= self.OUTBOX_MAX_ATTEMPTS:
+                    conn.execute(
+                        "UPDATE notification_outbox SET status='dead',"
+                        " attempts=?, last_error=?, updated_at=CURRENT_TIMESTAMP"
+                        " WHERE id=?",
+                        (attempts, error, outbox_id),
+                    )
+                    logger.warning("notification outbox %s dead after %d attempts: %s",
+                                   outbox_id, attempts, error)
+                else:
+                    backoff = min(3600, 30 * (2 ** max(0, attempts - 1)))
+                    next_attempt = (datetime.now(timezone.utc)
+                                    + timedelta(seconds=backoff)).strftime("%Y-%m-%d %H:%M:%S")
+                    conn.execute(
+                        "UPDATE notification_outbox SET status='failed',"
+                        " attempts=?, next_attempt_at=?, last_error=?,"
+                        " updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (attempts, next_attempt, error, outbox_id),
+                    )
+                conn.commit()
+        except Exception:
+            logger.exception("notification outbox retry bookkeeping failed for %s", outbox_id)
+            return
+        extra = {"error": error[:300]}
+        if attempts >= self.OUTBOX_MAX_ATTEMPTS:
+            extra["attempts"] = attempts
+        self._update_notification_channel(
+            self._outbox_notification_id(outbox_id), "failed", extra)
+
+    def _outbox_done(self, outbox_id, receipt):
+        try:
+            with self.database.connect() as conn:
+                conn.execute(
+                    "UPDATE notification_outbox SET status='sent',"
+                    " last_error=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (outbox_id,),
+                )
+                conn.commit()
+        except Exception:
+            logger.exception("notification outbox sent bookkeeping failed for %s", outbox_id)
+        self._update_notification_channel(
+            self._outbox_notification_id(outbox_id),
+            # Same status semantics as the old synchronous path: the
+            # provider's reported status ("logged" for the dev fallback).
+            receipt.get("status") or "sent",
+            {"provider": receipt.get("provider")})
+
+    def _outbox_notification_id(self, outbox_id):
+        try:
+            with self.database.connect() as conn:
+                row = conn.execute(
+                    "SELECT notification_id FROM notification_outbox WHERE id=?",
+                    (outbox_id,)).fetchone()
+                return str(row["notification_id"]) if row and row["notification_id"] else None
+        except Exception:
+            return None
+
+    def _update_notification_channel(self, notification_id, channel_status, extra=None):
+        """Reflect the drained email outcome on the notification record."""
+        if not notification_id:
+            return
+        try:
+            with self.database.connect() as conn:
+                row = conn.execute(
+                    "SELECT channels_json FROM customer_notifications WHERE id=?",
+                    (notification_id,)).fetchone()
+                if not row:
+                    return
+                try:
+                    channels = json.loads(row["channels_json"] or "{}")
+                except Exception:
+                    channels = {}
+                email = dict(channels.get("email") or {})
+                email["status"] = channel_status
+                if extra:
+                    email.update(extra)
+                channels["email"] = email
+                conn.execute(
+                    "UPDATE customer_notifications SET channels_json=? WHERE id=?",
+                    (json.dumps(channels, sort_keys=True), notification_id))
+                conn.commit()
+        except Exception:
+            logger.exception("failed to update notification channel status for %s",
+                             notification_id)
 
     # -- event builders ----------------------------------------------------
     def notify_quote_sent(self, quote):
