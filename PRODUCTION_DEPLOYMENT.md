@@ -52,6 +52,13 @@ Required for every deployment:
 - STRIPE_SUCCESS_URL=https://YOUR-DOMAIN/orders.html
 - STRIPE_CANCEL_URL=https://YOUR-DOMAIN/checkout.html
 
+Optional, for customer transactional-notification email (Phase 2):
+
+- RESEND_API_KEY=<secret> — when unset, notification emails are logged instead
+  of sent (dev-safe). Never commit a key; set it in the deployment environment.
+- RESEND_FROM_EMAIL="FABVEX <hello@fabvex.com>" — sender override; falls back
+  to the `notification_from_email` shop setting, then `shop_email`.
+
 The two server entry points read different hardening variables. See the table
 in `README.md` under "Two API entry points".
 
