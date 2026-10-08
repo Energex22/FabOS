@@ -198,6 +198,26 @@ SELECT 'quote_validity_days',COALESCE((SELECT value FROM shop_settings WHERE key
 DELETE FROM shop_settings WHERE key='quote_valid_days';"""),
 
 (56,"""ALTER TABLE design_proofs ADD COLUMN customer_note TEXT NOT NULL DEFAULT '';"""),
+
+(57,"""CREATE TABLE IF NOT EXISTS customer_notifications(
+id TEXT PRIMARY KEY,
+customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+event_type TEXT NOT NULL,
+entity_type TEXT NOT NULL,
+entity_id TEXT NOT NULL,
+title TEXT NOT NULL,
+body TEXT NOT NULL DEFAULT '',
+deep_link TEXT NOT NULL DEFAULT '',
+is_read INTEGER NOT NULL DEFAULT 0,
+channels_json TEXT NOT NULL DEFAULT '{}',
+dedupe_key TEXT UNIQUE,
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_customer_notifications_customer ON customer_notifications(customer_id,is_read,created_at);
+CREATE INDEX IF NOT EXISTS idx_customer_notifications_dedupe ON customer_notifications(dedupe_key);
+ALTER TABLE customers ADD COLUMN notification_preference TEXT NOT NULL DEFAULT 'email';
+ALTER TABLE quotes ADD COLUMN updated_at TEXT;
+INSERT OR IGNORE INTO shop_settings(key,value) VALUES('notification_from_email','');"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:

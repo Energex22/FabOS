@@ -1,5 +1,10 @@
+import logging
 import uuid
 from datetime import datetime
+
+from fabos_core.services.customer_notifications import CustomerNotificationService
+
+logger = logging.getLogger(__name__)
 
 
 class FulfillmentService:
@@ -240,4 +245,18 @@ class FulfillmentService:
                 # A completed fulfillment is still recorded even when another
                 # completion gate (payment/production/QC) remains outstanding.
                 pass
+        if status == "shipped" and current_status != "shipped":
+            # The customer-facing shipped notification carries carrier +
+            # tracking. Dedupe key makes repeat saves idempotent.
+            try:
+                with self.db.connect() as c:
+                    order = c.execute(
+                        "SELECT id,order_number,customer_id FROM orders WHERE id=?",
+                        (order_id,)).fetchone()
+                if order:
+                    CustomerNotificationService(self.db).notify_order_shipped(
+                        dict(order),
+                        {"id": fid, "carrier": carrier, "tracking_number": tracking})
+            except Exception:
+                logger.exception("order_shipped notification hook failed for order %s", order_id)
         return fid
