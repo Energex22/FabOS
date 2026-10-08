@@ -1,6 +1,8 @@
-import uuid,html
+import uuid,html,logging
 from datetime import datetime,timedelta
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 class InvoiceService:
  SORT={
@@ -36,6 +38,24 @@ class InvoiceService:
    if due_days is None:due_days=int(float(self._setting(c,"invoice_due_days","14") or 14))
    due=(datetime.now()+timedelta(days=int(due_days))).date().isoformat()
    c.execute("""INSERT INTO invoices(id,invoice_number,order_id,status,total_cents,paid_cents,due_at,subtotal_cents,tax_cents,shipping_cents,discount_cents) VALUES(?,?,?,'open',?,0,?,?,?,?,0)""",(iid,self._next_number(c),order_id,order_total,due,subtotal,order_tax,order_shipping));c.commit();return iid,True
+ def auto_create_for_order(self,order_id):
+  """Phase 3: create the order's invoice at birth (idempotent, best-effort).
+
+  Called by the order-creation paths (quote accept, catalog checkout) so every
+  order has its money record from the start. Returns the invoice id, or None
+  when no invoice is needed (zero-value order) or creation failed. Never
+  raises: an invoice failure must not break order creation.
+  """
+  try:
+   with self.db.connect() as c:
+    row=c.execute("SELECT total_cents FROM orders WHERE id=?",(order_id,)).fetchone()
+   if not row:return None
+   if int(row["total_cents"] or 0)<=0:return None
+   invoice_id,_=self.create_from_order(order_id)
+   return invoice_id
+  except Exception:
+   logger.warning("auto_create_for_order failed for order %s",order_id,exc_info=True)
+   return None
  def reconcile(self,iid=None):
   with self.db.connect() as c:
    c.execute("BEGIN IMMEDIATE")
