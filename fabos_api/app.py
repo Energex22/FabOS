@@ -736,10 +736,17 @@ class FabOSAPI:
 
             if route == ["api", self.VERSION, "customer", "orders"] and method == "GET":
                 context = self._context(headers)
+                rows = self.core.orders.list_for_user(context["id"])
+                # Final polish: same lightweight fulfillment summary as the
+                # detail endpoint, batched in one query (no N+1).
+                fulfillment_service = getattr(self.core, "fulfillment", None)
+                payloads = fulfillment_service.customer_payloads_for_orders(
+                    [row["id"] for row in rows]) if fulfillment_service else {}
                 orders = []
-                for row in self.core.orders.list_for_user(context["id"]):
+                for row in rows:
                     data = dict(row)
                     data["status"] = _CUSTOMER_STATUS.get(str(data.get("status") or "new").lower(), "Order received")
+                    data["fulfillment"] = payloads.get(str(data.get("id")), FulfillmentService.customer_payload(None))
                     orders.append(data)
                 return self._response(200, {"orders": orders})
 
@@ -1088,7 +1095,15 @@ class FabOSAPI:
                     return self._response(200, {"fulfillments": self.core.fulfillment.list_for_user(context["id"])})
                 if len(route) == 4 and method == "GET":
                     context = self._context(headers, "fulfillment.read")
-                    return self._response(200, {"fulfillment": self.core.fulfillment.get_for_user(context["id"], route[3])})
+                    try:
+                        row = self.core.fulfillment.get_for_user(context["id"], route[3])
+                    except KeyError:
+                        return self._response(404, {"error": "Fulfillment not found"})
+                    except (PermissionError, ValueError) as exc:
+                        # Mirrors FastAPI: the service's scoping PermissionError
+                        # is a 400 here, not a 403.
+                        return self._response(400, {"error": str(exc)})
+                    return self._response(200, {"fulfillment": row})
 
             if len(route) == 5 and route[:4] == ["api", self.VERSION, "webhooks", "payments"] and method == "POST":
                 # Provider webhook receiver. Mirrors the FastAPI route: no
