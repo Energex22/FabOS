@@ -122,7 +122,11 @@ class EmissionTests(NotificationFixture):
         self.assertEqual(record["deep_link"], "/quote.html?id=%s" % quote_id)
         self.assertIn("ready", record["title"].lower())
         self.assertEqual(record["is_read"], 0)
-        # No RESEND_API_KEY -> logged instead of sent.
+        # No RESEND_API_KEY -> the hook path only enqueues; the drain sends
+        # via the log fallback instead of a real provider.
+        self.assertEqual(self._channels(record)["email"]["status"], "queued")
+        CustomerNotificationService(self.db).drain_outbox()
+        record = self._records()[0]
         self.assertEqual(self._channels(record)["email"]["status"], "logged")
 
     def test_quote_sent_does_not_fire_twice(self):
@@ -302,9 +306,14 @@ class PreferenceDispatchTests(NotificationFixture):
         self.assertEqual(normalize_notification_preference("carrier-pigeon"), "email")
 
     def test_no_key_fallback_logs_email_instead_of_sending(self):
-        with self.assertLogs("fabos_core.services.customer_notifications", level="INFO") as captured:
-            record_id = self._notify("email")
+        record_id = self._notify("email")
         self.assertIsNotNone(record_id)
+        record = self._records()[0]
+        # The hook path only enqueues; the reconcile-tick drain delivers.
+        self.assertEqual(json.loads(record["channels_json"])["email"]["status"], "queued")
+        with self.assertLogs("fabos_core.services.customer_notifications", level="INFO") as captured:
+            sent, failed = CustomerNotificationService(self.db).drain_outbox()
+        self.assertEqual((sent, failed), (1, 0))
         record = self._records()[0]
         self.assertEqual(json.loads(record["channels_json"])["email"]["status"], "logged")
         self.assertTrue(any("logged, not sent" in message for message in captured.output))
@@ -320,6 +329,10 @@ class PreferenceDispatchTests(NotificationFixture):
         record_id = self._notify("both")
         record = self._records()[0]
         channels = json.loads(record["channels_json"])
+        self.assertEqual(channels["email"]["status"], "queued")
+        self.assertEqual(channels["sms"]["status"], "pending_sms_provider")
+        CustomerNotificationService(self.db).drain_outbox()
+        channels = json.loads(self._records()[0]["channels_json"])
         self.assertEqual(channels["email"]["status"], "logged")
         self.assertEqual(channels["sms"]["status"], "pending_sms_provider")
 
@@ -381,6 +394,27 @@ class PreferenceDispatchTests(NotificationFixture):
             row = conn.execute(
                 "SELECT notification_preference FROM customers WHERE id=?", ("customer-1",)).fetchone()
         self.assertEqual(row["notification_preference"], "email")
+
+
+class FromEmailPrecedenceTests(NotificationFixture):
+    def test_setting_wins_over_env(self):
+        self.service.shop_settings.set("resend_from_email", "FABVEX <shop@fabvex.example>")
+        os.environ["RESEND_FROM_EMAIL"] = "env@example.com"
+        self.assertEqual(self.service._from_email(), "FABVEX <shop@fabvex.example>")
+
+    def test_env_is_fallback_when_setting_empty(self):
+        os.environ["RESEND_FROM_EMAIL"] = "env@example.com"
+        self.assertEqual(self.service._from_email(), "env@example.com")
+
+    def test_falls_back_through_notification_from_email_then_shop_email(self):
+        self.service.shop_settings.set("notification_from_email", "notify@example.com")
+        self.assertEqual(self.service._from_email(), "notify@example.com")
+        self.service.shop_settings.set("notification_from_email", "")
+        self.service.shop_settings.set("shop_email", "shop@example.com")
+        self.assertEqual(self.service._from_email(), "shop@example.com")
+
+    def test_empty_when_nothing_configured(self):
+        self.assertEqual(self.service._from_email(), "")
 
 
 class NotificationApiTests(NotificationFixture):

@@ -41,6 +41,7 @@ class ShopSettingsService:
         "notification_order_received": "true", "notification_payment_received": "true", "notification_production_started": "true",
         "notification_qc_required": "true", "notification_shipped": "true", "notification_low_inventory": "true",
         "resend_api_key": "", "resend_from_email": "", "notification_from_email": "",
+        "public_base_url": "",
         "console_lock_enabled": "true", "console_idle_timeout_minutes": "15", "console_local_only": "true",
         "ai_provider": "disabled", "ai_model": "", "ai_endpoint": "", "ai_api_key_env": "FABOS_AI_API_KEY", "ai_allow_customer_data": "false", "ai_require_action_approval": "true",
         "marketing_enabled": "true", "marketing_require_approval": "true", "marketing_default_publish_mode": "manual", "marketing_timezone": "America/Chicago",
@@ -96,6 +97,7 @@ class ShopSettingsService:
             "notification_qc_required": "Notify when QC is required", "notification_shipped": "Notify when an order ships", "notification_low_inventory": "Notify on low inventory",
             "resend_api_key": "Resend API key for transactional email", "resend_from_email": "Sender address override for transactional email (e.g. FABVEX <hello@fabvex.com>)",
             "notification_from_email": "Default sender address for customer notifications",
+            "public_base_url": "Public base URL of the shop (e.g. https://shop.fabvex.com) — notification emails use absolute links when set",
         },
         "automation": {
             "production_automation_enabled": "Run the production automation worker continuously",
