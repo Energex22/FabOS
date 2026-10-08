@@ -1,5 +1,7 @@
 import uuid
 
+from fabos_core.services.customer_notifications import normalize_notification_preference
+
 
 class CustomerService:
     SORT_COLUMNS = {
@@ -78,16 +80,22 @@ class CustomerService:
             for key in ("name", "email", "phone", "notes"):
                 if key not in data:
                     data[key] = existing[key]
+            if "notification_preference" not in data:
+                try:
+                    data["notification_preference"] = existing["notification_preference"]
+                except (KeyError, IndexError):
+                    data["notification_preference"] = "email"
         name = (data.get("name") or "").strip()
         if not name:
             raise ValueError("Customer name is required.")
-        values = (name, (data.get("email") or "").strip(), (data.get("phone") or "").strip(), (data.get("notes") or "").strip())
+        preference = normalize_notification_preference(data.get("notification_preference", "email"))
+        values = (name, (data.get("email") or "").strip(), (data.get("phone") or "").strip(), (data.get("notes") or "").strip(), preference)
         with self.database.connect() as conn:
             if customer_id:
-                conn.execute("UPDATE customers SET name=?,email=?,phone=?,notes=? WHERE id=?", values + (customer_id,))
+                conn.execute("UPDATE customers SET name=?,email=?,phone=?,notes=?,notification_preference=? WHERE id=?", values + (customer_id,))
             else:
                 customer_id = str(uuid.uuid4())
-                conn.execute("INSERT INTO customers(id,name,email,phone,notes) VALUES(?,?,?,?,?)", (customer_id,) + values)
+                conn.execute("INSERT INTO customers(id,name,email,phone,notes,notification_preference) VALUES(?,?,?,?,?,?)", (customer_id,) + values)
             conn.commit()
         return customer_id
 
