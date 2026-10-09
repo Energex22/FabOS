@@ -109,7 +109,7 @@ def _order_payload(row: Any) -> Dict[str, Any]:
 
 
 def _order_item_payload(item: Any) -> Dict[str, Any]:
-    return _pick(item, ("id", "product_name", "description", "quantity", "unit_price_cents", "material", "color"))
+    return _pick(item, ("id", "product_name", "description", "quantity", "unit_price_cents", "material", "color", "license_key"))
 
 
 def _customer_design_payload(design: Any) -> Dict[str, Any]:
@@ -162,6 +162,22 @@ def _public_product(row: Any, application: FabOSApplication, storefront: Optiona
             "alt_text": img.get("alt_text"),
         })
     item["variants"] = [_pick(variant, ("id", "name", "material", "color", "price_cents", "active")) for variant in application.products.variants(row["id"])]
+    # Digital products: type/design-type tags for storefront filtering and
+    # display, plus the purchasable license options (personal vs commercial).
+    # getattr fallbacks keep the catalog working against product services
+    # that predate digital support (e.g. test fakes).
+    products_service = application.products
+    product_type_of = getattr(products_service, "product_type_of", None)
+    design_type_of = getattr(products_service, "design_type_of", None)
+    license_options_of = getattr(products_service, "digital_license_options", None)
+    item["product_type"] = product_type_of(row["id"]) if product_type_of else "physical"
+    item["design_type"] = design_type_of(row["id"]) if design_type_of else "3d_print"
+    item["license_options"] = [
+        {"license_key": option["license_key"], "label": option["label"],
+         "price_cents": int(option["price_cents"] or 0),
+         "price": round(int(option["price_cents"] or 0) / 100, 2)}
+        for option in (license_options_of(row["id"]) if license_options_of else [])
+    ]
     item["storefront"] = {
         "origin": storefront.get("origin_type", "catalog_import") if storefront else "catalog_import",
         "model_file_count": storefront.get("model_file_count", 0) if storefront else 0,
@@ -198,6 +214,12 @@ class StorefrontUpdate(BaseModel):
     source_customer_id: Optional[str] = Field(default=None, max_length=100)
     customer_title: Optional[str] = Field(default=None, max_length=200)
     customer_description: Optional[str] = Field(default=None, max_length=4000)
+
+
+class DigitalProductUpdate(BaseModel):
+    product_type: str = Field(default="digital", min_length=1, max_length=20)
+    design_type: str = Field(default="3d_print", min_length=1, max_length=20)
+    licenses: Optional[List[Dict[str, Any]]] = None
 
 
 def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
@@ -262,8 +284,8 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         return {"status": "ok", "service": "customer-api", "version": "1.2"}
 
     @app.get("/api/v1/catalog")
-    def catalog(q: str = "", category: str = "All", sort: str = "name", desc: bool = False, application: FabOSApplication = Depends(get_application)):
-        rows = application.products.customer_catalog(query=q, category=category, order_by=sort, descending=desc)
+    def catalog(q: str = "", category: str = "All", sort: str = "name", desc: bool = False, design_type: str = "", application: FabOSApplication = Depends(get_application)):
+        rows = application.products.customer_catalog(query=q, category=category, order_by=sort, descending=desc, design_type=design_type)
         products = [_public_product(row, application, storefront) for row, storefront in rows]
         return {"products": products}
 
@@ -342,16 +364,108 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         if values["visibility"].lower() == "published":
             state = application.products.storefront_state(product_id)
             reasons = []
-            if not state["has_model"]:
-                reasons.append("A printable 3D model is required")
-            if not state["has_price"]:
-                reasons.append("A customer price greater than zero is required")
+            if application.products.is_digital(product_id):
+                if application.products.digital_file_count(product_id) < 1:
+                    reasons.append("At least one digital download file is required")
+                priced = any(int(option.get("price_cents") or 0) > 0
+                             for option in application.products.digital_license_options(product_id))
+                if not state["has_price"] and not priced:
+                    reasons.append("A license price greater than zero is required")
+            else:
+                if not state["has_model"]:
+                    reasons.append("A printable 3D model is required")
+                if not state["has_price"]:
+                    reasons.append("A customer price greater than zero is required")
             if state["license_status"] in {"blocked", "prohibited", "commercially_prohibited", "review_required"}:
                 reasons.append("The license requires review or does not allow commercial publication")
             if reasons:
                 raise HTTPException(status_code=409, detail={"message": "Product is not ready to publish", "reasons": reasons})
         state = application.products.save_storefront(product_id, values)
         return {"product": _json(row), "storefront": state, "customer_eligible": application.products.is_customer_eligible(product_id)}
+
+    # Digital products: admin configuration, file attachments, and download
+    # token management. Served by the same unguessable-link model as the
+    # customer download endpoint below — no direct file URLs are exposed.
+    @app.get("/api/v1/admin/catalog/{product_id}/digital")
+    def admin_digital_config(product_id: str, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        if not application.products.get(product_id):
+            raise HTTPException(status_code=404, detail="Product not found")
+        return _json(application.digital_delivery.get_config(product_id))
+
+    @app.put("/api/v1/admin/catalog/{product_id}/digital")
+    def admin_digital_configure(product_id: str, payload: DigitalProductUpdate, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        if not application.products.get(product_id):
+            raise HTTPException(status_code=404, detail="Product not found")
+        try:
+            config = application.digital_delivery.configure_product(
+                product_id, payload.product_type, payload.design_type, payload.licenses)
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _json(config)
+
+    @app.post("/api/v1/admin/catalog/{product_id}/digital/files")
+    async def admin_digital_upload(product_id: str, files: List[UploadFile] = File(...), user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        if not application.products.get(product_id):
+            raise HTTPException(status_code=404, detail="Product not found")
+        if not files:
+            raise HTTPException(status_code=400, detail="No files uploaded")
+        max_bytes = application.digital_delivery.max_upload_bytes()
+        stored = []
+        try:
+            for upload in files:
+                chunks = []
+                size = 0
+                try:
+                    while True:
+                        chunk = await upload.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        if size > max_bytes:
+                            raise HTTPException(status_code=413, detail="File exceeds the %d MB upload limit" % (max_bytes // (1024 * 1024)))
+                        chunks.append(chunk)
+                finally:
+                    try:
+                        await upload.close()
+                    except Exception:
+                        pass
+                try:
+                    stored.append(_json(application.digital_delivery.add_file(product_id, upload.filename, b"".join(chunks))))
+                except (KeyError, ValueError) as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Upload failed: %s" % exc) from exc
+        return {"files": stored}
+
+    @app.delete("/api/v1/admin/catalog/{product_id}/digital/files/{file_id}")
+    def admin_digital_delete_file(product_id: str, file_id: str, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            application.digital_delivery.delete_file(product_id, file_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"deleted": True}
+
+    @app.get("/api/v1/admin/orders/{order_id}/downloads")
+    def admin_order_downloads(order_id: str, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        return {"downloads": _json(application.digital_delivery.tokens_for_order(order_id))}
+
+    @app.post("/api/v1/admin/downloads/{token_id}/revoke")
+    def admin_download_revoke(token_id: str, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            application.digital_delivery.revoke(token_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"revoked": True}
+
+    @app.post("/api/v1/admin/downloads/{token_id}/regenerate")
+    def admin_download_regenerate(token_id: str, user: Any = Depends(administrator_user), application: FabOSApplication = Depends(get_application)):
+        try:
+            token = application.digital_delivery.regenerate(token_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"download": _json(token)}
 
     @app.post("/api/v1/auth/login")
     def login(payload: LoginRequest, request: Request, application: FabOSApplication = Depends(get_application)):
@@ -701,11 +815,76 @@ def create_app(application: Optional[FabOSApplication] = None) -> FastAPI:
         fulfillment_service = getattr(application, "fulfillment", None)
         order["fulfillment"] = FulfillmentService.customer_payload(
             fulfillment_service.get_for_order(order_id) if fulfillment_service else None)
+        # Digital purchases: live download links for this order's granted
+        # tokens, plus a per-item digital flag so the storefront can render
+        # downloads instead of shipment tracking.
+        digital = getattr(application, "digital_delivery", None)
+        item_payloads = []
+        for item in items:
+            payload = _order_item_payload(item)
+            payload["is_digital"] = bool(application.products.is_digital(item["product_id"])) if item["product_id"] else False
+            item_payloads.append(payload)
+        order_downloads = []
+        if digital:
+            customer = application.accounts.customer_for_user(user["id"])
+            if customer:
+                order_item_ids = {str(item["id"]) for item in items if item["id"]}
+                for token in digital.tokens_for_customer(customer["id"]):
+                    if str(token.get("order_item_id") or "") in order_item_ids:
+                        order_downloads.append(_download_payload(token))
         return {
             "order": order,
-            "items": [_order_item_payload(item) for item in items],
+            "items": item_payloads,
+            "downloads": order_downloads,
             "designs": [_customer_design_payload(design) for design in dossier.get("designs", [])],
         }
+
+    def _download_payload(token: Dict[str, Any]) -> Dict[str, Any]:
+        """Customer-safe download token projection with a live link."""
+        return {
+            "id": token.get("id"),
+            "order_item_id": token.get("order_item_id"),
+            "product_id": token.get("product_id"),
+            "product_name": token.get("product_name"),
+            "file_name": token.get("file_name"),
+            "size_bytes": token.get("size_bytes"),
+            "order_number": token.get("order_number"),
+            "license_key": token.get("license_key"),
+            "design_type": token.get("design_type"),
+            "design_type_label": token.get("design_type_label"),
+            "download_url": "/api/v1/customer/downloads/%s/file" % token.get("token"),
+            "expires_at": token.get("expires_at"),
+            "downloads_remaining": token.get("downloads_remaining"),
+            "download_count": token.get("download_count"),
+            "is_active": token.get("is_active"),
+            "created_at": token.get("created_at"),
+        }
+
+    @app.get("/api/v1/customer/downloads")
+    def customer_downloads(user: Any = Depends(customer_user), application: FabOSApplication = Depends(get_application)):
+        customer = application.accounts.customer_for_user(user["id"])
+        if not customer:
+            raise HTTPException(status_code=403, detail="Customer account is not linked to a customer record")
+        tokens = application.digital_delivery.tokens_for_customer(customer["id"])
+        return {"downloads": [_download_payload(token) for token in tokens]}
+
+    @app.get("/api/v1/customer/downloads/{token}/file")
+    def customer_download_file(token: str, application: FabOSApplication = Depends(get_application)):
+        # Bearer-token download: the 256-bit unguessable token IS the
+        # credential, so no session is required (links work from email too).
+        try:
+            _, file_row, path = application.digital_delivery.redeem(token)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=410, detail=str(exc)) from exc
+        return FileResponse(
+            path,
+            filename=str(file_row.get("original_name") or "download"),
+            media_type="application/octet-stream",
+        )
 
     def _notification_customer(user: Any, application: FabOSApplication):
         customer = application.accounts.customer_for_user(user["id"])
