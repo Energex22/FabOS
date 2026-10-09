@@ -360,6 +360,21 @@ class FabOSAPI:
             {key: variant[key] for key in ("id", "name", "material", "color", "price_cents", "active") if key in variant}
             for variant in [dict(candidate) for candidate in (self.core.products.variants(product_id) or [])]
         ]
+        # Digital products (mirrors fabos_core.api._public_product): type and
+        # design-type tags plus purchasable license options. getattr
+        # fallbacks keep the catalog working against product services that
+        # predate digital support (e.g. test fakes).
+        product_type_of = getattr(self.core.products, "product_type_of", None)
+        design_type_of = getattr(self.core.products, "design_type_of", None)
+        license_options_of = getattr(self.core.products, "digital_license_options", None)
+        item["product_type"] = product_type_of(product_id) if product_type_of else "physical"
+        item["design_type"] = design_type_of(product_id) if design_type_of else "3d_print"
+        item["license_options"] = [
+            {"license_key": option["license_key"], "label": option["label"],
+             "price_cents": int(option["price_cents"] or 0),
+             "price": round(int(option["price_cents"] or 0) / 100, 2)}
+            for option in (license_options_of(product_id) if license_options_of else [])
+        ]
         item["storefront"] = {
             "origin": storefront.get("origin_type", "catalog_import") if storefront else "catalog_import",
             "model_file_count": storefront.get("model_file_count", 0) if storefront else 0,
@@ -430,6 +445,7 @@ class FabOSAPI:
                     query.get("q", [""])[0], query.get("category", ["All"])[0],
                     query.get("sort", ["name"])[0],
                     query.get("desc", ["0"])[0] not in ("0", "false", "no"),
+                    design_type=query.get("design_type", [""])[0],
                 )
                 return self._response(200, {"products": [self._public_product(row, storefront) for row, storefront in rows]})
 
@@ -766,7 +782,26 @@ class FabOSAPI:
                     {key: design[key] for key in ("id", "name", "current_version", "design_version", "design_version_label") if key in design}
                     for design in [dict(candidate) for candidate in (dossier.get("designs") or [])]
                 ]
-                return self._response(200, {"order": order_data, "items": items, "designs": designs})
+                # Digital purchases: per-item digital flag + this order's live
+                # download links (mirrors fabos_core.api:customer_order).
+                item_dicts = []
+                for candidate in [dict(item) for item in (items or [])]:
+                    if candidate.get("product_id"):
+                        candidate["is_digital"] = bool(self.core.products.is_digital(candidate["product_id"]))
+                    item_dicts.append(candidate)
+                downloads = []
+                try:
+                    customer = self.core.accounts.customer_for_user(context["id"])
+                    if customer:
+                        wanted = {str(item.get("id")) for item in item_dicts if item.get("id")}
+                        for token in self.core.digital_delivery.tokens_for_customer(customer["id"]):
+                            if str(token.get("order_item_id") or "") in wanted:
+                                projected = dict(token)
+                                projected["download_url"] = "/api/%s/customer/downloads/%s/file" % (self.VERSION, token.get("token"))
+                                downloads.append(projected)
+                except Exception:
+                    downloads = []
+                return self._response(200, {"order": order_data, "items": item_dicts, "downloads": downloads, "designs": designs})
 
             if len(route) == 6 and route[:4] == ["api", self.VERSION, "customer", "orders"] and route[5] == "payment-session" and method == "POST":
                 context = self._context(headers)
@@ -806,6 +841,40 @@ class FabOSAPI:
                         "currency": totals["currency"],
                     },
                 })
+
+            # Digital downloads (mirrors fabos_core.api customer download
+            # routes). Bearer-token model: the unguessable token is the
+            # credential, so the file route needs no session.
+            if route == ["api", self.VERSION, "customer", "downloads"] and method == "GET":
+                context = self._context(headers)
+                customer = self.core.accounts.customer_for_user(context["id"])
+                if not customer:
+                    raise PermissionError("Customer account is not linked to a customer record")
+                downloads = []
+                for token in self.core.digital_delivery.tokens_for_customer(customer["id"]):
+                    projected = dict(token)
+                    projected["download_url"] = "/api/%s/customer/downloads/%s/file" % (self.VERSION, token.get("token"))
+                    downloads.append(projected)
+                return self._response(200, {"downloads": downloads})
+
+            if len(route) == 6 and route[:4] == ["api", self.VERSION, "customer", "downloads"] and route[5] == "file" and method == "GET":
+                try:
+                    _, file_row, path = self.core.digital_delivery.redeem(route[4])
+                except KeyError:
+                    return self._response(404, {"error": "Download link not found."})
+                except PermissionError as exc:
+                    return self._response(403, {"error": str(exc)})
+                except FileNotFoundError as exc:
+                    return self._response(410, {"error": str(exc)})
+                filename = str(file_row.get("original_name") or path.name)
+                return {
+                    "status": 200,
+                    "data": {"_wsgi_file": {
+                        "bytes": path.read_bytes(),
+                        "filename": filename,
+                        "content_type": "application/octet-stream",
+                    }},
+                }
 
             # Customer quote/proof workflow (mirrors the FastAPI routes in
             # fabos_core/api.py + fabos_core/services/design_proofs_api.py so
