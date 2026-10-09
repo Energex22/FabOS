@@ -1,3 +1,6 @@
+import re
+
+
 def resolve_quote_validity_days(settings):
     """Number of days a newly-sent quote stays valid (Phase 1: D5).
 
@@ -32,6 +35,10 @@ class ShopSettingsService:
         "customer_update_signature": "", "customer_registration_enabled": "true", "custom_work_enabled": "true",
         "storefront_enabled": "true", "storefront_ordering_enabled": "true", "storefront_default_visibility": "draft",
         "custom_upload_max_mb": "25", "custom_upload_extensions": "stl,3mf,obj,step,stp",
+        "digital_download_days": "7", "digital_download_max": "10", "digital_upload_max_mb": "500",
+        "digital_extensions_3d_print": "stl,3mf,step,zip",
+        "digital_extensions_cnc": "dxf,svg,nc,gcode,tap,crv",
+        "digital_extensions_laser": "svg,lbrn,lbrn2,dxf,pdf",
         "default_turnaround_days": "7", "rush_turnaround_days": "3", "shipping_mode": "calculated", "shipping_flat_cents": "0",
         "shipping_calculated_base_cents": "0", "shipping_calculated_per_kg_cents": "0", "free_shipping_threshold_cents": "0",
         "payment_provider": "stripe", "payment_test_mode": "true", "online_payment_required": "true",
@@ -74,6 +81,14 @@ class ShopSettingsService:
             "storefront_enabled": "Allow Fabvex storefront operation", "storefront_ordering_enabled": "Allow customer ordering", "customer_registration_enabled": "Allow customer account registration",
             "custom_work_enabled": "Allow customer custom-work requests", "storefront_default_visibility": "Default new storefront publication state",
             "custom_upload_max_mb": "Maximum custom upload size", "custom_upload_extensions": "Allowed custom model extensions",
+        },
+        "digital_products": {
+            "digital_download_days": "Download link validity in days after purchase",
+            "digital_download_max": "Maximum downloads per purchased file (0 = unlimited)",
+            "digital_upload_max_mb": "Maximum digital file upload size in MB",
+            "digital_extensions_3d_print": "Allowed file extensions for 3D-print digital products (comma-separated, no dots)",
+            "digital_extensions_cnc": "Allowed file extensions for CNC digital products (comma-separated, no dots)",
+            "digital_extensions_laser": "Allowed file extensions for laser digital products (comma-separated, no dots)",
         },
         "payments": {
             "payment_provider": "Primary online payment provider", "payment_test_mode": "Use payment provider test mode", "online_payment_required": "Require online payment for checkout",
@@ -136,6 +151,7 @@ class ShopSettingsService:
         "minimum_order_cents", "rush_multiplier", "quantity_discount_percent", "payment_fee_percent", "payment_fee_fixed_cents", "filament_low_threshold_g", "filament_reorder_days", "filament_waste_percent", "backup_retention",
         "backup_frequency_hours", "custom_upload_max_mb", "console_idle_timeout_minutes", "default_turnaround_days", "rush_turnaround_days", "shipping_flat_cents",
         "shipping_calculated_base_cents", "shipping_calculated_per_kg_cents", "free_shipping_threshold_cents", "production_automation_interval_seconds",
+        "digital_download_days", "digital_download_max", "digital_upload_max_mb",
     }
 
     # ------------------------------------------------------------------
@@ -238,6 +254,17 @@ class ShopSettingsService:
             allowed = {"stl", "3mf", "obj", "step", "stp"}
             if not extensions or any(item not in allowed for item in extensions):
                 raise ValueError("custom_upload_extensions contains an unsupported extension")
+            value = ",".join(dict.fromkeys(extensions))
+        if key in {"digital_extensions_3d_print", "digital_extensions_cnc", "digital_extensions_laser"}:
+            # Admin-configurable per-design-type allowlist: any sane extension
+            # shape is accepted (no hardcoded list — the point is that Justin
+            # can add e.g. a new CAM format without a code change).
+            extensions = [item.strip().lower().lstrip(".") for item in value.split(",") if item.strip()]
+            if not extensions:
+                raise ValueError("At least one file extension is required")
+            for item in extensions:
+                if not re.fullmatch(r"[a-z0-9]{1,12}", item):
+                    raise ValueError("Unsupported extension %r: use 1-12 letters/digits, no dots" % item)
             value = ",".join(dict.fromkeys(extensions))
         with self.db.connect() as c:
             c.execute("""INSERT INTO shop_settings(key,value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)

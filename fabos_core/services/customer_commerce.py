@@ -16,6 +16,18 @@ from fabos_core.services.commerce_pricing import calculated_shipping_cents
 logger = logging.getLogger(__name__)
 
 
+def _is_digital_product(products, product_id):
+    """Whether a product is digital. Tolerates product services that predate
+    digital support (e.g. test fakes) — those only ever sell physical goods."""
+    checker = getattr(products, "is_digital", None)
+    return bool(checker(product_id)) if callable(checker) else False
+
+
+def _digital_license_options(products, product_id):
+    getter = getattr(products, "digital_license_options", None)
+    return list(getter(product_id) or []) if callable(getter) else []
+
+
 class CustomerCommerceService:
     def __init__(self, database, accounts, products, quotes, shop_settings, auth=None, invoices=None):
         self.database = database
@@ -237,6 +249,66 @@ class CustomerCommerceService:
         quote_id = self.quotes.save({"customer_id": customer["id"], "status": "draft", "notes": notes}, [{"product_id": None, "description": "\n".join(description_parts), "quantity": quantity, "unit_price_cents": 0, "material": material, "color": "", "estimated_minutes": 0, "estimated_filament_g": 0}])
         return self.quotes.get_for_user(user_id, quote_id)
 
+    def _resolve_order_item(self, requested):
+        """Validate one requested cart item and resolve its price.
+
+        Returns (resolved_item_dict, is_digital). Digital products require a
+        valid license_key (personal vs commercial pricing); the license price
+        becomes the unit price and the license_key is recorded on the line
+        item. Raises ValueError on anything invalid.
+        """
+        if not isinstance(requested, dict):
+            raise ValueError("Invalid order item")
+        product_id = str(requested.get("productId") or requested.get("product_id") or "").strip()
+        if not product_id:
+            raise ValueError("Each order item requires a productId")
+        product = self.products.get(product_id)
+        if not product or not self.products.is_customer_eligible(product_id):
+            raise ValueError("Product is not available for customer ordering")
+        is_digital = _is_digital_product(self.products, product_id)
+        quantity = self._positive_quantity(requested.get("quantity", 1))
+        variant_id = str(requested.get("variantId") or requested.get("variant_id") or "").strip()
+        configuration = requested.get("configuration") or {}
+        if not isinstance(configuration, dict):
+            raise ValueError("Item configuration must be an object")
+        material = str(configuration.get("material") or requested.get("material") or "").strip()
+        color = str(configuration.get("color") or requested.get("color") or "").strip()
+        unit_price_cents = int(product["price_cents"] or 0)
+        estimated_minutes = int(product["estimated_minutes"] or 0)
+        estimated_filament_g = float(product["estimated_filament_g"] or 0)
+        description = str(product["name"])
+        license_key = None
+        if is_digital:
+            if variant_id:
+                raise ValueError("Product variants do not apply to digital products")
+            license_key = str(requested.get("license") or requested.get("license_key") or requested.get("licenseKey") or "").strip().lower()
+            option = next((candidate for candidate in _digital_license_options(self.products, product_id)
+                           if str(candidate["license_key"]) == license_key), None)
+            if not option:
+                raise ValueError("A valid license option is required for this digital product")
+            unit_price_cents = int(option["price_cents"] or 0)
+            description += " · " + str(option["label"] or option["license_key"])
+            material, color, estimated_minutes, estimated_filament_g = "", "", 0, 0.0
+        elif variant_id:
+            variant = next((candidate for candidate in self.products.variants(product_id) if str(candidate["id"]) == variant_id), None)
+            if not variant or not int(variant["active"]):
+                raise ValueError("Product variant not found")
+            unit_price_cents = int(variant["price_cents"] or 0)
+            material = material or str(variant["material"] or "")
+            color = color or str(variant["color"] or "")
+            estimated_minutes = int(variant["estimated_minutes"] or estimated_minutes)
+            estimated_filament_g = float(variant["estimated_filament_g"] or estimated_filament_g)
+            description += " · " + str(variant["name"])
+        if unit_price_cents <= 0:
+            raise ValueError("Product price is not available for customer ordering")
+        return ({
+            "product_id": product_id, "variant_id": variant_id or None, "description": description,
+            "quantity": quantity, "unit_price_cents": unit_price_cents, "material": material,
+            "color": color, "estimated_minutes": estimated_minutes,
+            "estimated_filament_g": estimated_filament_g, "license_key": license_key,
+            "is_digital": is_digital,
+        }, is_digital)
+
     def _calculate_totals(self, user_id, items, shipping_address, notes=""):
         """Shared validation + totals math for create_order and preview.
 
@@ -250,67 +322,45 @@ class CustomerCommerceService:
         """
         self._require_storefront(ordering=True)
         customer = self._customer(user_id)
-        shipping_address = self._shipping_address(shipping_address)
         if not isinstance(items, list) or not items:
             raise ValueError("At least one order item is required")
         if len(items) > 100:
             raise ValueError("An order may contain at most 100 line items")
-        resolved_items = []
+        resolved = [self._resolve_order_item(requested) for requested in items]
+        resolved_items = [item for item, _ in resolved]
+        all_digital = all(is_digital for _, is_digital in resolved)
+        if all_digital:
+            # Digital-only orders need no shipping address and are never
+            # charged shipping — the files are delivered as downloads.
+            shipping_address = {"address": "", "city": "", "state": "", "zip": ""}
+        else:
+            shipping_address = self._shipping_address(shipping_address)
         subtotal_cents = 0
-        for requested in items:
-            if not isinstance(requested, dict):
-                raise ValueError("Invalid order item")
-            product_id = str(requested.get("productId") or requested.get("product_id") or "").strip()
-            if not product_id:
-                raise ValueError("Each order item requires a productId")
-            product = self.products.get(product_id)
-            if not product or not self.products.is_customer_eligible(product_id):
-                raise ValueError("Product is not available for customer ordering")
-            quantity = self._positive_quantity(requested.get("quantity", 1))
-            variant_id = str(requested.get("variantId") or requested.get("variant_id") or "").strip()
-            configuration = requested.get("configuration") or {}
-            if not isinstance(configuration, dict):
-                raise ValueError("Item configuration must be an object")
-            material = str(configuration.get("material") or requested.get("material") or "").strip()
-            color = str(configuration.get("color") or requested.get("color") or "").strip()
-            unit_price_cents = int(product["price_cents"] or 0)
-            estimated_minutes = int(product["estimated_minutes"] or 0)
-            estimated_filament_g = float(product["estimated_filament_g"] or 0)
-            description = str(product["name"])
-            if variant_id:
-                variant = next((candidate for candidate in self.products.variants(product_id) if str(candidate["id"]) == variant_id), None)
-                if not variant or not int(variant["active"]):
-                    raise ValueError("Product variant not found")
-                unit_price_cents = int(variant["price_cents"] or 0)
-                material = material or str(variant["material"] or "")
-                color = color or str(variant["color"] or "")
-                estimated_minutes = int(variant["estimated_minutes"] or estimated_minutes)
-                estimated_filament_g = float(variant["estimated_filament_g"] or estimated_filament_g)
-                description += " · " + str(variant["name"])
-            if unit_price_cents <= 0:
-                raise ValueError("Product price is not available for customer ordering")
-            subtotal_cents += unit_price_cents * quantity
-            resolved_items.append({"product_id": product_id, "variant_id": variant_id or None, "description": description, "quantity": quantity, "unit_price_cents": unit_price_cents, "material": material, "color": color, "estimated_minutes": estimated_minutes, "estimated_filament_g": estimated_filament_g})
+        for item in resolved_items:
+            subtotal_cents += int(item["unit_price_cents"]) * int(item["quantity"])
         minimum_order_cents = int(float(self.shop_settings.get("minimum_order_cents", "0") or 0))
         if subtotal_cents < minimum_order_cents:
             raise ValueError("Order subtotal is below the configured minimum order amount")
-        shipping_mode = str(self.shop_settings.get("shipping_mode", "calculated") or "calculated").lower()
-        if shipping_mode == "free":
+        if all_digital:
             shipping_cents = 0
-        elif shipping_mode == "flat":
-            shipping_cents = int(float(self.shop_settings.get("shipping_flat_cents", "0") or 0))
         else:
-            weight_kg = sum(float(item["estimated_filament_g"] or 0) * int(item["quantity"]) for item in resolved_items) / 1000.0
-            # Shared helper with CommercePricingService so the estimate and the
-            # charged shipping always agree to the cent (L5).
-            shipping_cents = calculated_shipping_cents(
-                self.shop_settings.get("shipping_calculated_base_cents", "0"),
-                self.shop_settings.get("shipping_calculated_per_kg_cents", "0"),
-                weight_kg,
-            )
-            free_threshold = int(float(self.shop_settings.get("free_shipping_threshold_cents", "0") or 0))
-            if free_threshold > 0 and subtotal_cents >= free_threshold:
+            shipping_mode = str(self.shop_settings.get("shipping_mode", "calculated") or "calculated").lower()
+            if shipping_mode == "free":
                 shipping_cents = 0
+            elif shipping_mode == "flat":
+                shipping_cents = int(float(self.shop_settings.get("shipping_flat_cents", "0") or 0))
+            else:
+                weight_kg = sum(float(item["estimated_filament_g"] or 0) * int(item["quantity"]) for item in resolved_items) / 1000.0
+                # Shared helper with CommercePricingService so the estimate and the
+                # charged shipping always agree to the cent (L5).
+                shipping_cents = calculated_shipping_cents(
+                    self.shop_settings.get("shipping_calculated_base_cents", "0"),
+                    self.shop_settings.get("shipping_calculated_per_kg_cents", "0"),
+                    weight_kg,
+                )
+                free_threshold = int(float(self.shop_settings.get("free_shipping_threshold_cents", "0") or 0))
+                if free_threshold > 0 and subtotal_cents >= free_threshold:
+                    shipping_cents = 0
         tax_percent = float(self.shop_settings.get("default_tax_percent", "0") or 0)
         tax_cents = int(round(subtotal_cents * max(0.0, tax_percent) / 100.0))
         total_cents = subtotal_cents + max(0, shipping_cents) + tax_cents
@@ -326,7 +376,8 @@ class CustomerCommerceService:
                 {"product_id": item["product_id"], "variant_id": item["variant_id"],
                  "description": item["description"], "quantity": item["quantity"],
                  "unit_price_cents": item["unit_price_cents"],
-                 "line_total_cents": int(item["quantity"]) * int(item["unit_price_cents"])}
+                 "line_total_cents": int(item["quantity"]) * int(item["unit_price_cents"]),
+                 "license_key": item.get("license_key"), "is_digital": bool(item.get("is_digital"))}
                 for item in resolved_items
             ],
             "subtotal_cents": subtotal_cents,
@@ -363,13 +414,24 @@ class CustomerCommerceService:
                 conn.execute("""INSERT INTO orders
                     (id,order_number,customer_id,quote_id,status,due_at,total_cents,tax_cents,shipping_cents,shipping_address_json,checkout_notes,checkout_channel)
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (order_id, order_number, customer["id"], quote_id, "pending", due_at, total_cents, tax_cents, shipping_cents, json.dumps(shipping_address), str(notes or "").strip(), "website"))
+                # The trg_order_price_snapshot trigger (installed at app boot)
+                # already copied the quote's line items — including license_key
+                # — into order_items when the order row was inserted. Only
+                # insert manually where that trigger is absent (e.g. test
+                # databases); otherwise every line item would duplicate.
+                trigger_copied = conn.execute(
+                    "SELECT COUNT(*) FROM order_items WHERE order_id=?", (order_id,)
+                ).fetchone()[0]
                 for item in resolved_items:
+                    if trigger_copied:
+                        break
+                    item_id = str(uuid.uuid4())
                     conn.execute(
                         """INSERT INTO order_items
-                        (id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
-                        VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                        (id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g,license_key)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (
-                            str(uuid.uuid4()),
+                            item_id,
                             order_id,
                             item["product_id"],
                             item["variant_id"],
@@ -380,6 +442,7 @@ class CustomerCommerceService:
                             item["color"],
                             item["estimated_minutes"],
                             item["estimated_filament_g"],
+                            item.get("license_key"),
                         ),
                     )
                 conn.commit()

@@ -128,6 +128,15 @@ class InvoiceService:
     # Payment settlement may occur before production/QC/fulfillment are complete.
     # The order remains in its current lifecycle state until those gates finish.
     pass
+   # Digital products: the buyer gets download access the moment the order is
+   # paid. Idempotent (repeat settlements skip already-granted files) and
+   # best-effort — a grant failure must never break payment recording.
+   try:
+    from fabos_core.services.digital_delivery import DigitalDeliveryService
+    data_dir = str(self.export_dir.parent) if getattr(self, "export_dir", None) else None
+    DigitalDeliveryService(self.db, data_dir).grant_for_order(inv["order_id"])
+   except Exception:
+    logger.exception("digital download grant failed for order %s", inv["order_id"])
  def record_refund(self,iid,amount_cents,reference="",notes=""):
   amount=int(amount_cents)
   if amount<=0:raise ValueError("Refund must be greater than $0.")
