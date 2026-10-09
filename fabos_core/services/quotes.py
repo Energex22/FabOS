@@ -104,7 +104,7 @@ class QuoteService:
             else:
                 quote_id=str(uuid.uuid4()); conn.execute("INSERT INTO quotes(id,quote_number,customer_id,status,total_cents,expires_at,notes) VALUES(?,?,?,?,?,?,?)",(quote_id,self.next_number(conn),data["customer_id"],data.get("status","draft"),total,data.get("expires_at") or None,data.get("notes","")))
             for i in items:
-                item_id=str(uuid.uuid4()); conn.execute("INSERT INTO quote_items(id,quote_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?,?)",(item_id,quote_id,i.get("product_id"),i.get("variant_id"),i.get("description") or "Custom item",int(i.get("quantity",1)),int(i.get("unit_price_cents",0)),i.get("material",""),i.get("color",""),int(i.get("estimated_minutes") or 0),float(i.get("estimated_filament_g") or 0)))
+                item_id=str(uuid.uuid4()); conn.execute("INSERT INTO quote_items(id,quote_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g,license_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(item_id,quote_id,i.get("product_id"),i.get("variant_id"),i.get("description") or "Custom item",int(i.get("quantity",1)),int(i.get("unit_price_cents",0)),i.get("material",""),i.get("color",""),int(i.get("estimated_minutes") or 0),float(i.get("estimated_filament_g") or 0),i.get("license_key")))
                 conn.execute("INSERT INTO quote_price_snapshots(id,quote_id,quote_item_id,unit_price_cents,pricing_mode,calculation_json) VALUES(?,?,?,?,?,?)",(str(uuid.uuid4()),quote_id,item_id,int(i.get("unit_price_cents",0)),str(i.get("pricing_mode") or "manual"),json.dumps(i.get("pricing_breakdown"),sort_keys=True) if i.get("pricing_breakdown") is not None else None))
             version=conn.execute("SELECT COALESCE(MAX(version),0)+1 FROM quote_versions WHERE quote_id=?",(quote_id,)).fetchone()[0]
             snapshot={"customer_id":data["customer_id"],"status":data.get("status","draft"),"total_cents":total,"expires_at":data.get("expires_at") or None,"notes":data.get("notes",""),"items":[dict(i) for i in items]}
@@ -146,10 +146,19 @@ class QuoteService:
             if existing:return existing[0]
             prefix="O-"+date.today().strftime("%Y%m")+"-"; row=conn.execute("SELECT order_number FROM orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1",(prefix+"%",)).fetchone(); seq=int(row[0].split("-")[-1])+1 if row else 1; oid=str(uuid.uuid4())
             conn.execute("INSERT INTO orders(id,order_number,customer_id,quote_id,status,due_at,total_cents) VALUES(?,?,?,?,?,?,?)",(oid,prefix+("%04d"%seq),q["customer_id"],quote_id,"pending",(date.today()+timedelta(days=7)).isoformat(),q["total_cents"]));
-            quote_items=conn.execute("SELECT product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g FROM quote_items WHERE quote_id=? ORDER BY rowid",(quote_id,)).fetchall()
+            quote_cols={str(r[1]) for r in conn.execute("PRAGMA table_info(quote_items)").fetchall()}
+            license_select=",license_key" if "license_key" in quote_cols else ",NULL AS license_key"
+            quote_items=conn.execute("SELECT product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g%s FROM quote_items WHERE quote_id=? ORDER BY rowid" % license_select,(quote_id,)).fetchall()
             if not quote_items: raise ValueError("Quote has no items")
+            # The trg_order_price_snapshot trigger (installed at app boot) already
+            # copied the quote's line items — including license_key — when the
+            # order row was inserted. Only insert manually where that trigger
+            # is absent (e.g. test databases); otherwise items would duplicate.
+            trigger_copied=conn.execute("SELECT COUNT(*) FROM order_items WHERE order_id=?",(oid,)).fetchone()[0]
             for item in quote_items:
-                conn.execute("INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?,?)",(str(uuid.uuid4()),oid,item["product_id"],item["variant_id"],item["description"],item["quantity"],item["unit_price_cents"],item["material"],item["color"],item["estimated_minutes"],item["estimated_filament_g"]))
+                if trigger_copied:break
+                order_item_id=str(uuid.uuid4())
+                conn.execute("INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g,license_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(order_item_id,oid,item["product_id"],item["variant_id"],item["description"],item["quantity"],item["unit_price_cents"],item["material"],item["color"],item["estimated_minutes"],item["estimated_filament_g"],item["license_key"]))
             conn.execute("UPDATE quotes SET status='approved' WHERE id=?",(quote_id,)); conn.commit()
         # Phase 3: the order's invoice is created when the quote is accepted
         # (idempotent, best-effort — auto_create_for_order never raises, so a
