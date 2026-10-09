@@ -201,6 +201,24 @@ class FulfillmentService:
                 (order_id,)).fetchone()
         return self._derive_method_from_order_row(order)
 
+    def _is_digital_only_order(self, conn, order_id):
+        """True when every line item on the order is a digital product."""
+        try:
+            has_type = bool(conn.execute(
+                "SELECT 1 FROM pragma_table_info('products') WHERE name='product_type'").fetchone())
+        except Exception:
+            return False
+        if not has_type:
+            return False
+        rows = conn.execute(
+            """SELECT COALESCE(p.product_type,'physical') AS product_type
+               FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id
+               WHERE oi.order_id=?""",
+            (order_id,)).fetchall()
+        if not rows:
+            return False
+        return all(str(row["product_type"] or "physical").lower() == "digital" for row in rows)
+
     def ensure(self, order_id, method=None):
         if method is None:
             method = self.derive_method(order_id)
@@ -213,6 +231,10 @@ class FulfillmentService:
                 return row["id"]
             if not c.execute("SELECT id FROM orders WHERE id=?", (order_id,)).fetchone():
                 raise KeyError("Order not found.")
+            # Digital-only orders are delivered as downloads, never as
+            # shipments/pickups — fulfillment records must not exist for them.
+            if self._is_digital_only_order(c, order_id):
+                raise ValueError("Digital-only orders do not require fulfillment")
             fid = str(uuid.uuid4())
             c.execute(
                 "INSERT INTO fulfillments(id,order_id,method,status) VALUES(?,?,?,'pending')",

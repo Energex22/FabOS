@@ -200,6 +200,7 @@ class ShippingAddress(BaseModel):
 class OrderItem(BaseModel):
     productId: str = Field(min_length=1, max_length=200)
     variantId: Optional[str] = Field(default=None, max_length=200)
+    license: Optional[str] = Field(default=None, max_length=40)
     quantity: int = Field(default=1, ge=1, le=1000)
     configuration: Optional[Dict[str, Any]] = None
 
