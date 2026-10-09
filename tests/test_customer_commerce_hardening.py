@@ -24,7 +24,8 @@ class _Db:
             CREATE TABLE order_items(
                 id TEXT PRIMARY KEY, order_id TEXT, product_id TEXT, variant_id TEXT,
                 description TEXT, quantity INTEGER, unit_price_cents INTEGER,
-                material TEXT, color TEXT, estimated_minutes INTEGER, estimated_filament_g REAL
+                material TEXT, color TEXT, estimated_minutes INTEGER, estimated_filament_g REAL,
+                license_key TEXT
             );
             CREATE TABLE quotes(
                 id TEXT PRIMARY KEY, quote_number TEXT UNIQUE, customer_id TEXT, status TEXT,
@@ -33,7 +34,8 @@ class _Db:
             CREATE TABLE quote_items(
                 id TEXT PRIMARY KEY, quote_id TEXT, product_id TEXT, variant_id TEXT,
                 description TEXT, quantity INTEGER, unit_price_cents INTEGER,
-                material TEXT, color TEXT, estimated_minutes INTEGER, estimated_filament_g REAL
+                material TEXT, color TEXT, estimated_minutes INTEGER, estimated_filament_g REAL,
+                license_key TEXT
             );
             CREATE TABLE quote_price_snapshots(
                 id TEXT PRIMARY KEY, quote_id TEXT, quote_item_id TEXT,
@@ -105,11 +107,12 @@ class _Quotes:
             )
             for item in items:
                 conn.execute(
-                    "INSERT INTO quote_items VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO quote_items VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     ("qi-1", quote_id, item["product_id"], item.get("variant_id"),
                      item["description"], item["quantity"], item["unit_price_cents"],
                      item.get("material", ""), item.get("color", ""),
-                     item.get("estimated_minutes", 0), item.get("estimated_filament_g", 0)),
+                     item.get("estimated_minutes", 0), item.get("estimated_filament_g", 0),
+                     item.get("license_key")),
                 )
             conn.execute(
                 "INSERT INTO quote_price_snapshots VALUES(?,?,?,?,?,?)",

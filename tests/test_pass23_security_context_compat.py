@@ -30,7 +30,7 @@ class _Products:
     def list(self, *args, **kwargs):
         return list(self._ROWS)
 
-    def customer_catalog(self, query="", category="All", order_by="name", descending=False):
+    def customer_catalog(self, query="", category="All", order_by="name", descending=False, design_type=""):
         # The legacy WSGI surface reads the published/ready projection, not the
         # raw product list, and expects (row, readiness) pairs.
         return [(row, {"ready": True}) for row in self._ROWS]

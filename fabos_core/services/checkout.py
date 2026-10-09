@@ -5,6 +5,16 @@ from datetime import date, timedelta
 
 from fabos_core.services.commerce_pricing import CommercePricingService
 from fabos_core.services.quotes import ensure_quote_audit_schema
+
+
+def _is_digital_product(products, product_id):
+    checker = getattr(products, "is_digital", None)
+    return bool(checker(product_id)) if callable(checker) else False
+
+
+def _digital_license_options(products, product_id):
+    getter = getattr(products, "digital_license_options", None)
+    return list(getter(product_id) or []) if callable(getter) else []
 from fabos_core.services.shop_settings import resolve_quote_validity_days
 
 
@@ -75,6 +85,18 @@ class CheckoutService:
             minutes = int(row.get("estimated_minutes") or 0)
             filament = float(row.get("estimated_filament_g") or 0)
             description = row.get("name") or "Product"
+            license_key = None
+            if _is_digital_product(self.products, product_id):
+                if variant_id:
+                    raise ValueError("Product variants do not apply to digital products")
+                license_key = str(item.get("license") or item.get("license_key") or item.get("licenseKey") or "").strip().lower()
+                option = next((candidate for candidate in _digital_license_options(self.products, product_id)
+                               if str(candidate["license_key"]) == license_key), None)
+                if not option:
+                    raise ValueError("A valid license option is required for this digital product")
+                unit_price = int(option["price_cents"] or 0)
+                description += " · " + str(option["label"] or option["license_key"])
+                material, color, minutes, filament = "", "", 0, 0.0
             if variant_id:
                 variant = next((candidate for candidate in self.products.variants(product_id) if str(candidate["id"]) == variant_id), None)
                 if not variant or not int(variant["active"]):
@@ -97,6 +119,7 @@ class CheckoutService:
                 "color": color,
                 "estimated_minutes": minutes,
                 "estimated_filament_g": filament,
+                "license_key": license_key,
             })
 
         with self.database.connect() as conn:
@@ -130,10 +153,10 @@ class CheckoutService:
             for item in clean_items:
                 quote_item_id = str(uuid.uuid4())
                 conn.execute(
-                    "INSERT INTO quote_items(id,quote_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO quote_items(id,quote_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g,license_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (quote_item_id, quote_id, item["product_id"], item["variant_id"], item["description"], item["quantity"],
                      item["unit_price_cents"], item["material"], item["color"], item["estimated_minutes"],
-                     item["estimated_filament_g"]),
+                     item["estimated_filament_g"], item.get("license_key")),
                 )
                 # Audit trail: mirror QuoteService.save so checkout-created
                 # quotes carry the same price snapshots and version history
@@ -162,12 +185,22 @@ class CheckoutService:
                  estimate["tax_cents"], shipping_cents, json.dumps(shipping_address, sort_keys=True),
                  notes or "", "website"),
             )
+            # The trg_order_price_snapshot trigger (installed at app boot) already
+            # copied the quote's line items — including license_key — when the
+            # order row was inserted. Only insert manually where that trigger
+            # is absent (e.g. test databases); otherwise items would duplicate.
+            trigger_copied = conn.execute(
+                "SELECT COUNT(*) FROM order_items WHERE order_id=?", (order_id,)
+            ).fetchone()[0]
             for item in clean_items:
+                if trigger_copied:
+                    break
+                order_item_id = str(uuid.uuid4())
                 conn.execute(
-                    "INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (str(uuid.uuid4()), order_id, item["product_id"], item["variant_id"], item["description"],
+                    "INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g,license_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (order_item_id, order_id, item["product_id"], item["variant_id"], item["description"],
                      item["quantity"], item["unit_price_cents"], item["material"], item["color"],
-                     item["estimated_minutes"], item["estimated_filament_g"]),
+                     item["estimated_minutes"], item["estimated_filament_g"], item.get("license_key")),
                 )
             conn.commit()
         # Phase 3: the order's invoice is created at birth (idempotent,

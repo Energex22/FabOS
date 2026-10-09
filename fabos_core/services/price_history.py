@@ -10,6 +10,8 @@ class PriceHistoryService:
             quote_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(quote_items)").fetchall()}
             if "variant_id" not in quote_columns:
                 conn.execute("ALTER TABLE quote_items ADD COLUMN variant_id TEXT REFERENCES product_variants(id) ON DELETE SET NULL")
+            if "license_key" not in quote_columns:
+                conn.execute("ALTER TABLE quote_items ADD COLUMN license_key TEXT")
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS product_price_history(
                     id TEXT PRIMARY KEY,
@@ -81,8 +83,8 @@ class PriceHistoryService:
                 AFTER INSERT ON orders
                 WHEN NEW.quote_id IS NOT NULL
                 BEGIN
-                    INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
-                    SELECT lower(hex(randomblob(16))),NEW.id,qi.product_id,qi.variant_id,qi.description,qi.quantity,qi.unit_price_cents,qi.material,qi.color,qi.estimated_minutes,qi.estimated_filament_g
+                    INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g,license_key)
+                    SELECT lower(hex(randomblob(16))),NEW.id,qi.product_id,qi.variant_id,qi.description,qi.quantity,qi.unit_price_cents,qi.material,qi.color,qi.estimated_minutes,qi.estimated_filament_g,qi.license_key
                     FROM quote_items qi WHERE qi.quote_id=NEW.quote_id;
                 END;
                 CREATE TRIGGER trg_order_items_immutable_update
@@ -106,8 +108,14 @@ class PriceHistoryService:
                     SELECT RAISE(ABORT,'Quote price snapshots are immutable');
                 END;
             """)
-            conn.execute("""INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g)
-                SELECT lower(hex(randomblob(16))),o.id,qi.product_id,qi.variant_id,qi.description,qi.quantity,qi.unit_price_cents,qi.material,qi.color,qi.estimated_minutes,qi.estimated_filament_g
+            # The snapshot trigger copies license_key: make sure the column
+            # exists even on databases that never ran migration 61 (the
+            # trigger/backfill below reference it unconditionally).
+            order_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(order_items)").fetchall()}
+            if "license_key" not in order_columns:
+                conn.execute("ALTER TABLE order_items ADD COLUMN license_key TEXT")
+            conn.execute("""INSERT INTO order_items(id,order_id,product_id,variant_id,description,quantity,unit_price_cents,material,color,estimated_minutes,estimated_filament_g,license_key)
+                SELECT lower(hex(randomblob(16))),o.id,qi.product_id,qi.variant_id,qi.description,qi.quantity,qi.unit_price_cents,qi.material,qi.color,qi.estimated_minutes,qi.estimated_filament_g,qi.license_key
                 FROM orders o JOIN quote_items qi ON qi.quote_id=o.quote_id
                 WHERE o.quote_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id=o.id)""")
             conn.commit()

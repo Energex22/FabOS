@@ -242,6 +242,60 @@ last_error TEXT,
 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_notification_outbox_drain ON notification_outbox(status,next_attempt_at);"""),
+
+# Digital products (FABVEX digital downloads): product_type/design_type on
+# products, per-product license options (personal vs commercial pricing),
+# license_key recorded on quote/order line items, dedicated digital file
+# attachments, and unguessable expiring download tokens. Allowed extensions
+# per design type are admin-configurable shop_settings keys (no hardcoded
+# allowlist).
+(61,"""ALTER TABLE products ADD COLUMN product_type TEXT NOT NULL DEFAULT 'physical';
+ALTER TABLE products ADD COLUMN design_type TEXT NOT NULL DEFAULT '3d_print';
+CREATE TABLE IF NOT EXISTS product_digital_licenses(
+id TEXT PRIMARY KEY,
+product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+license_key TEXT NOT NULL,
+label TEXT NOT NULL,
+price_cents INTEGER NOT NULL DEFAULT 0,
+sort_order INTEGER NOT NULL DEFAULT 0,
+active INTEGER NOT NULL DEFAULT 1,
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+UNIQUE(product_id,license_key));
+CREATE INDEX IF NOT EXISTS idx_product_digital_licenses_product ON product_digital_licenses(product_id,active,sort_order);
+CREATE TABLE IF NOT EXISTS digital_product_files(
+id TEXT PRIMARY KEY,
+product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+original_name TEXT NOT NULL,
+stored_path TEXT NOT NULL,
+size_bytes INTEGER NOT NULL DEFAULT 0,
+sha256 TEXT,
+sort_order INTEGER NOT NULL DEFAULT 0,
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_digital_product_files_product ON digital_product_files(product_id,sort_order);
+ALTER TABLE order_items ADD COLUMN license_key TEXT;
+ALTER TABLE quote_items ADD COLUMN license_key TEXT;
+CREATE TABLE IF NOT EXISTS digital_download_tokens(
+id TEXT PRIMARY KEY,
+order_item_id TEXT NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
+customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+file_id TEXT REFERENCES digital_product_files(id) ON DELETE SET NULL,
+token TEXT NOT NULL UNIQUE,
+label TEXT NOT NULL DEFAULT '',
+expires_at TEXT,
+max_downloads INTEGER,
+download_count INTEGER NOT NULL DEFAULT 0,
+revoked INTEGER NOT NULL DEFAULT 0,
+last_downloaded_at TEXT,
+created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS idx_digital_download_tokens_customer ON digital_download_tokens(customer_id,revoked,created_at);
+CREATE INDEX IF NOT EXISTS idx_digital_download_tokens_item ON digital_download_tokens(order_item_id);
+INSERT OR IGNORE INTO shop_settings(key,value) VALUES('digital_download_days','7');
+INSERT OR IGNORE INTO shop_settings(key,value) VALUES('digital_download_max','10');
+INSERT OR IGNORE INTO shop_settings(key,value) VALUES('digital_upload_max_mb','500');
+INSERT OR IGNORE INTO shop_settings(key,value) VALUES('digital_extensions_3d_print','stl,3mf,step,zip');
+INSERT OR IGNORE INTO shop_settings(key,value) VALUES('digital_extensions_cnc','dxf,svg,nc,gcode,tap,crv');
+INSERT OR IGNORE INTO shop_settings(key,value) VALUES('digital_extensions_laser','svg,lbrn,lbrn2,dxf,pdf');"""),
 ]
 def migrate(db,backup=None):
  with db.connect() as c:

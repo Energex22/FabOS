@@ -239,15 +239,62 @@ class ProductService:
             "has_real_image": self.has_real_image(product_id),
         }
 
+    def product_type_of(self, product_id):
+        with self.database.connect() as conn:
+            cols = self._table_columns(conn, "products")
+            if "product_type" not in cols:
+                return "physical"
+            row = conn.execute("SELECT product_type FROM products WHERE id=?", (product_id,)).fetchone()
+        return str(row["product_type"] or "physical").lower() if row else "physical"
+
+    def design_type_of(self, product_id):
+        with self.database.connect() as conn:
+            cols = self._table_columns(conn, "products")
+            if "design_type" not in cols:
+                return "3d_print"
+            row = conn.execute("SELECT design_type FROM products WHERE id=?", (product_id,)).fetchone()
+        design = str(row["design_type"] or "3d_print").lower() if row else "3d_print"
+        return design if design in {"3d_print", "cnc", "laser"} else "3d_print"
+
+    def is_digital(self, product_id):
+        return self.product_type_of(product_id) == "digital"
+
+    def digital_file_count(self, product_id):
+        with self.database.connect() as conn:
+            if not conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='digital_product_files'").fetchone():
+                return 0
+            return int(conn.execute("SELECT COUNT(*) FROM digital_product_files WHERE product_id=?", (product_id,)).fetchone()[0])
+
+    def digital_license_options(self, product_id, active_only=True):
+        with self.database.connect() as conn:
+            if not conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='product_digital_licenses'").fetchone():
+                return []
+            sql = "SELECT * FROM product_digital_licenses WHERE product_id=?"
+            if active_only:
+                sql += " AND active=1"
+            sql += " ORDER BY sort_order, label"
+            return [dict(row) for row in conn.execute(sql, (product_id,)).fetchall()]
+
     def storefront_publication_readiness(self, product_id):
         state = self.storefront_state(product_id)
         if not state:
             return {"ready": False, "reasons": ["Product does not exist."], "state": None}
         reasons = []
-        if not state["has_model"]:
-            reasons.append("A usable STL, 3MF, OBJ, STEP, or STP model is required.")
-        if not state["has_price"]:
-            reasons.append("A positive customer price is required.")
+        if self.is_digital(product_id):
+            # Digital products sell files, not prints: they need at least one
+            # downloadable file and a priced license option instead of a
+            # printable model file.
+            if self.digital_file_count(product_id) < 1:
+                reasons.append("At least one digital download file is required.")
+            priced = any(int(option.get("price_cents") or 0) > 0
+                         for option in self.digital_license_options(product_id))
+            if not state["has_price"] and not priced:
+                reasons.append("A positive license price is required.")
+        else:
+            if not state["has_model"]:
+                reasons.append("A usable STL, 3MF, OBJ, STEP, or STP model is required.")
+            if not state["has_price"]:
+                reasons.append("A positive customer price is required.")
         if state["license_status"] in {"blocked", "prohibited", "commercially_prohibited", "review_required"}:
             reasons.append("The current license status does not permit public storefront publication.")
         return {"ready": not reasons, "reasons": reasons, "state": state}
@@ -260,7 +307,7 @@ class ProductService:
             return False
         return self.storefront_publication_readiness(product_id)["ready"]
 
-    def customer_catalog(self, query="", category="All", order_by="name", descending=False):
+    def customer_catalog(self, query="", category="All", order_by="name", descending=False, design_type=""):
         """Return products currently ready for the customer shop.
 
         This uses the same product readiness rules exposed by the FabOS
@@ -268,6 +315,7 @@ class ProductService:
         second product list.
         """
         rows = self.list(query=query, category=category, order_by=order_by, descending=descending)
+        wanted = str(design_type or "").strip().lower()
         ready = []
         for row in rows:
             # The public shop is a projection of the same publication boundary
@@ -277,6 +325,10 @@ class ProductService:
             state = self.storefront_state(row["id"])
             readiness = self.storefront_publication_readiness(row["id"])
             if state and state["visibility"] == "published" and readiness["ready"]:
+                # Digital design-type filter (3d_print / cnc / laser); empty
+                # means no filtering.
+                if wanted and self.design_type_of(row["id"]) != wanted:
+                    continue
                 ready.append((row, readiness))
         return ready
 
